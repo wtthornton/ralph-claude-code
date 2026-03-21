@@ -712,7 +712,7 @@ CLAUDE_OUTPUT_FORMAT="json"
 # Tool permissions
 # Comma-separated list of allowed tools
 # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)"
+ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *)"
 
 # Session management
 SESSION_CONTINUITY=true

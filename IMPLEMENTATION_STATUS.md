@@ -25,6 +25,43 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 
 ---
 
+## Completed: Loop stability regression fix (March 2026)
+
+**Epic:** [RALPH-LOOP: Loop Stability & Analysis Resilience](docs/specs/epic-loop-stability.md) (Phase 0.5) — **Done**
+
+- [x] **LOOP-1:** Replaced `jq -s 'length'` with streaming `grep -c '"type"'` — eliminates OOM crash on large JSONL streams
+- [x] **LOOP-2:** Aggregated permission denials across ALL result objects (not just `tail -1`)
+- [x] **LOOP-3:** Added 21 utility patterns to ALLOWED_TOOLS (`xargs`, `sort`, `ls`, `sed`, `awk`, etc.) + PROMPT guidance
+- [x] **LOOP-4:** Guarded `update_exit_signals`/`log_analysis_summary` with fail-open error handling; added JSON validation to circuit breaker state writes
+- [x] **LOOP-5:** Added EXIT trap, crash code recording (`.last_crash_code`), stale status detection, persistent loop counter
+
+---
+
+## Completed: Hooks + Agent Definition (March 2026)
+
+**Epic:** [RALPH-HOOKS: Hooks + Agent Definition](docs/specs/epic-hooks-agent-definition.md) (Phase 1) — **Done**
+
+- [x] **HOOKS-1:** Created `.claude/agents/ralph.md` agent definition (opus, maxTurns 50, acceptEdits, disallowedTools)
+- [x] **HOOKS-2:** Full `.claude/settings.json` with 8 hook events (SessionStart, Stop, PreToolUse x2, PostToolUse x2, SubagentStop, StopFailure)
+- [x] **HOOKS-3:** `on-session-start.sh` — injects loop count, task progress, circuit breaker state
+- [x] **HOOKS-4:** `on-stop.sh` — parses RALPH_STATUS, atomic status.json writes, circuit breaker updates
+- [x] **HOOKS-5:** `validate-command.sh` + `protect-ralph-files.sh` — blocks destructive commands and .ralph/ modifications
+- [x] **HOOKS-6:** `build_claude_command()` supports `--agent ralph` with legacy fallback
+
+---
+
+## Completed: Agent Teams + Parallelism (March 2026)
+
+**Epic:** [RALPH-TEAMS: Agent Teams + Parallelism](docs/specs/epic-agent-teams-parallelism.md) (Phase 4) — **Done**
+
+- [x] **TEAMS-1:** Teams config in `.ralphrc` (`RALPH_ENABLE_TEAMS`, `RALPH_MAX_TEAMMATES`, `RALPH_TEAMMATE_MODE`)
+- [x] **TEAMS-2:** Team spawning strategy in `ralph.md` (file ownership scopes, sequential fallback)
+- [x] **TEAMS-3:** `ralph-bg-tester.md` background agent (sonnet, maxTurns 10, report-only)
+- [x] **TEAMS-4:** `TeammateIdle` + `TaskCompleted` hooks with live.log logging
+- [x] **TEAMS-5:** `.gitignore` exclusions for worktrees, settings.local.json, agent-memory
+
+---
+
 ## Current State
 
 ### Test Coverage
@@ -280,5 +317,5 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 
 ---
 
-**Status**: ✅ Solid foundation with comprehensive test coverage
-**Next Steps**: Complete Phase 1 documentation, then Phase 3 core features (log rotation, dry-run, config)
+**Status**: ✅ 26/37 stories complete (70%). Phases 0–1 and 4 delivered. Phases 2–3 remain (11 stories).
+**Next Steps**: Phase 2 (RALPH-SUBAGENTS: explorer, tester, reviewer agents), then Phase 3 (RALPH-SKILLS: bash code reduction, ~1,368 lines removable)

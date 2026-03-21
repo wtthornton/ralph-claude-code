@@ -67,11 +67,11 @@ critical adjustments and **cautions** for the original RFC:
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-TEAMS-1](story-teams-1-config.md) | Enable agent teams configuration | Important | Small | Open |
-| [RALPH-TEAMS-2](story-teams-2-team-strategy.md) | Implement team spawning strategy in ralph.md | Important | Medium | Open |
-| [RALPH-TEAMS-3](story-teams-3-bg-tester.md) | Create ralph-bg-tester.md background agent | Nice-to-have | Small | Open |
-| [RALPH-TEAMS-4](story-teams-4-team-hooks.md) | Add TeammateIdle and TaskCompleted hooks | Important | Small | Open |
-| [RALPH-TEAMS-5](story-teams-5-worktree-support.md) | Add worktree support and .gitignore updates | Important | Trivial | Open |
+| [RALPH-TEAMS-1](story-teams-1-config.md) | Enable agent teams configuration | Important | Small | **Done** |
+| [RALPH-TEAMS-2](story-teams-2-team-strategy.md) | Implement team spawning strategy in ralph.md | Important | Medium | **Done** |
+| [RALPH-TEAMS-3](story-teams-3-bg-tester.md) | Create ralph-bg-tester.md background agent | Nice-to-have | Small | **Done** |
+| [RALPH-TEAMS-4](story-teams-4-team-hooks.md) | Add TeammateIdle and TaskCompleted hooks | Important | Small | **Done** |
+| [RALPH-TEAMS-5](story-teams-5-worktree-support.md) | Add worktree support and .gitignore updates | Important | Trivial | **Done** |
 
 ## Implementation Order
 

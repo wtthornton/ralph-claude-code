@@ -90,6 +90,8 @@ parse_json_response() {
     local output_file=$1
     local result_file="${2:-$RALPH_DIR/.json_parse_result}"
     local normalized_file=""
+    local original_output_file="$output_file"  # Preserve for multi-result denial aggregation
+    local _was_jsonl_normalized=false  # Track if JSONL (not array) normalization occurred
 
     if [[ ! -f "$output_file" ]]; then
         echo "ERROR: Output file not found: $output_file" >&2
@@ -137,10 +139,12 @@ parse_json_response() {
     fi
 
     # Stream-json / JSONL: multiple top-level JSON values (one per line in compact output)
-    # Use jq -s length so a single pretty-printed object (multi-line) still counts as 1 value
+    # Count "type" keys to detect multi-value streams (streaming — no memory load)
+    # Avoids jq -s which loads entire file into memory and crashes on large JSONL streams
     if [[ -z "$normalized_file" ]]; then
         local top_level_count
-        top_level_count=$(jq -s 'length' "$output_file" 2>/dev/null || echo "1")
+        top_level_count=$(grep -c -E '"type"[[:space:]]*:' "$output_file" 2>/dev/null || echo "1")
+        top_level_count=$(echo "$top_level_count" | tr -d '[:space:]')
         top_level_count=$((top_level_count + 0))
         if [[ "$top_level_count" -gt 1 ]]; then
             normalized_file=$(mktemp)
@@ -175,6 +179,7 @@ parse_json_response() {
                 fi
 
                 output_file="$normalized_file"
+                _was_jsonl_normalized=true
                 if declare -F log_status >/dev/null 2>&1; then
                     log_status "INFO" "JSONL/stream detected ($top_level_count JSON values), extracted result object for analysis"
                 fi
@@ -218,7 +223,7 @@ parse_json_response() {
             embedded_block=$(echo "$result_text" | awk '/---RALPH_STATUS---/{found=1; block=""} found{block=block"\n"$0} /---END_RALPH_STATUS---/{found=0; last=block} END{print last}')
             # Extract EXIT_SIGNAL value from RALPH_STATUS block within result text
             local embedded_exit_sig
-            embedded_exit_sig=$(echo "$embedded_block" | grep "EXIT_SIGNAL:" | tail -1 | cut -d: -f2 | xargs)
+            embedded_exit_sig=$(echo "$embedded_block" | grep "EXIT_SIGNAL:" | tail -1 | cut -d: -f2 | tr -d '[:space:]')
             if [[ -n "$embedded_exit_sig" ]]; then
                 # Explicit EXIT_SIGNAL found in RALPH_STATUS block
                 explicit_exit_signal_found="true"
@@ -233,7 +238,7 @@ parse_json_response() {
             # Also check STATUS field as fallback ONLY when EXIT_SIGNAL was not specified
             # This respects explicit EXIT_SIGNAL: false which means "task complete, continue working"
             local embedded_status
-            embedded_status=$(echo "$embedded_block" | grep "STATUS:" | tail -1 | cut -d: -f2 | xargs)
+            embedded_status=$(echo "$embedded_block" | grep "STATUS:" | tail -1 | cut -d: -f2 | tr -d '[:space:]')
             if [[ "$embedded_status" == "COMPLETE" && "$explicit_exit_signal_found" != "true" ]]; then
                 # STATUS: COMPLETE without any EXIT_SIGNAL field implies completion
                 exit_signal="true"
@@ -274,23 +279,34 @@ parse_json_response() {
     # Progress indicators: from Claude CLI metadata (optional)
     local progress_count=$(jq -r '.metadata.progress_indicators | if . then length else 0 end' "$output_file" 2>/dev/null)
 
-    # Permission denials: from Claude Code output (Issue #101)
-    # When Claude Code is denied permission to run commands, it outputs a permission_denials array
-    local permission_denial_count=$(jq -r '.permission_denials | if . then length else 0 end' "$output_file" 2>/dev/null)
-    permission_denial_count=$((permission_denial_count + 0))  # Ensure integer
+    # Permission denials: aggregate from ALL result objects (not just last)
+    # When multi-result JSONL streams exist, the first result may have denials while
+    # background agent results have empty denials. Aggregate catches all. (LOOP-2)
+    local permission_denial_count=0
+    local denied_commands_json="[]"
+
+    if [[ "$_was_jsonl_normalized" == "true" ]]; then
+        # JSONL was normalized — aggregate denials from ALL results in original file
+        local all_denials_json
+        all_denials_json=$(grep -E '"type"[[:space:]]*:[[:space:]]*"result"' "$original_output_file" 2>/dev/null | \
+            jq -s '[.[].permission_denials[]?]' 2>/dev/null || echo "[]")
+        permission_denial_count=$(echo "$all_denials_json" | jq 'length' 2>/dev/null || echo "0")
+        permission_denial_count=$((permission_denial_count + 0))
+        if [[ $permission_denial_count -gt 0 ]]; then
+            denied_commands_json=$(echo "$all_denials_json" | jq '[.[] | if .tool_name == "Bash" then "Bash(\(.tool_input.command // "?" | split("\n")[0] | .[0:60]))" else .tool_name // "unknown" end]' 2>/dev/null || echo "[]")
+        fi
+    else
+        # Single result — read denials directly
+        permission_denial_count=$(jq -r '.permission_denials | if . then length else 0 end' "$output_file" 2>/dev/null)
+        permission_denial_count=$((permission_denial_count + 0))
+        if [[ $permission_denial_count -gt 0 ]]; then
+            denied_commands_json=$(jq -r '[.permission_denials[] | if .tool_name == "Bash" then "Bash(\(.tool_input.command // "?" | split("\n")[0] | .[0:60]))" else .tool_name // "unknown" end]' "$output_file" 2>/dev/null || echo "[]")
+        fi
+    fi
 
     local has_permission_denials="false"
     if [[ $permission_denial_count -gt 0 ]]; then
         has_permission_denials="true"
-    fi
-
-    # Extract denied tool names and commands for logging/display
-    # Shows tool_name for non-Bash tools, and for Bash tools shows the command that was denied
-    # This handles both cases: AskUserQuestion denial shows "AskUserQuestion",
-    # while Bash denial shows "Bash(git commit -m ...)" with truncated command
-    local denied_commands_json="[]"
-    if [[ $permission_denial_count -gt 0 ]]; then
-        denied_commands_json=$(jq -r '[.permission_denials[] | if .tool_name == "Bash" then "Bash(\(.tool_input.command // "?" | split("\n")[0] | .[0:60]))" else .tool_name // "unknown" end]' "$output_file" 2>/dev/null || echo "[]")
     fi
 
     # Normalize values
@@ -573,8 +589,8 @@ analyze_response() {
         local last_status_block
         last_status_block=$(awk '/---RALPH_STATUS---/{found=1; block=""} found{block=block"\n"$0} /---END_RALPH_STATUS---/{found=0; last=block} END{print last}' "$output_file")
 
-        local status=$(echo "$last_status_block" | grep "STATUS:" | tail -1 | cut -d: -f2 | xargs)
-        local exit_sig=$(echo "$last_status_block" | grep "EXIT_SIGNAL:" | tail -1 | cut -d: -f2 | xargs)
+        local status=$(echo "$last_status_block" | grep "STATUS:" | tail -1 | cut -d: -f2 | tr -d '[:space:]')
+        local exit_sig=$(echo "$last_status_block" | grep "EXIT_SIGNAL:" | tail -1 | cut -d: -f2 | tr -d '[:space:]')
 
         # If EXIT_SIGNAL is explicitly provided, respect it
         if [[ -n "$exit_sig" ]]; then
@@ -781,6 +797,12 @@ update_exit_signals() {
 
     if [[ ! -f "$analysis_file" ]]; then
         echo "ERROR: Analysis file not found: $analysis_file"
+        return 1
+    fi
+
+    # Validate analysis file is valid JSON before proceeding (LOOP-4)
+    if ! jq empty "$analysis_file" 2>/dev/null; then
+        echo "ERROR: Analysis file is not valid JSON: $analysis_file"
         return 1
     fi
 

@@ -54,12 +54,12 @@ adjustments to the original RFC:
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-HOOKS-1](story-hooks-1-agent-definition.md) | Create ralph.md custom agent definition | Critical | Small | Open |
-| [RALPH-HOOKS-2](story-hooks-2-settings-json.md) | Create hooks configuration in settings.json | Critical | Medium | Open |
-| [RALPH-HOOKS-3](story-hooks-3-session-start-hook.md) | Implement on-session-start.sh hook | Important | Small | Open |
-| [RALPH-HOOKS-4](story-hooks-4-stop-hook.md) | Implement on-stop.sh hook (replace response_analyzer) | Critical | Medium | Open |
-| [RALPH-HOOKS-5](story-hooks-5-file-protection-hooks.md) | Implement file protection PreToolUse hooks | Important | Small | Open |
-| [RALPH-HOOKS-6](story-hooks-6-cli-integration.md) | Add --agent ralph to build_claude_command() | Important | Small | Open |
+| [RALPH-HOOKS-1](story-hooks-1-agent-definition.md) | Create ralph.md custom agent definition | Critical | Small | **Done** |
+| [RALPH-HOOKS-2](story-hooks-2-settings-json.md) | Create hooks configuration in settings.json | Critical | Medium | **Done** |
+| [RALPH-HOOKS-3](story-hooks-3-session-start-hook.md) | Implement on-session-start.sh hook | Important | Small | **Done** |
+| [RALPH-HOOKS-4](story-hooks-4-stop-hook.md) | Implement on-stop.sh hook (replace response_analyzer) | Critical | Medium | **Done** |
+| [RALPH-HOOKS-5](story-hooks-5-file-protection-hooks.md) | Implement file protection PreToolUse hooks | Important | Small | **Done** |
+| [RALPH-HOOKS-6](story-hooks-6-cli-integration.md) | Add --agent ralph to build_claude_command() | Important | Small | **Done** |
 
 ## Implementation Order
 

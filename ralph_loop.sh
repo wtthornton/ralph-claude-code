@@ -54,7 +54,7 @@ CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-15}"
 # Modern Claude CLI configuration (Phase 1.1)
 CLAUDE_OUTPUT_FORMAT="${CLAUDE_OUTPUT_FORMAT:-json}"
 # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
-CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)}"
+CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *)}"
 CLAUDE_USE_CONTINUE="${CLAUDE_USE_CONTINUE:-true}"
 CLAUDE_SESSION_FILE="$RALPH_DIR/.claude_session_id" # Session ID persistence file
 CLAUDE_MIN_VERSION="2.0.76"              # Minimum required Claude CLI version
@@ -419,21 +419,36 @@ log_status() {
 ralph_log_permission_denials_from_raw_output() {
     local output_file=$1
     [[ -f "$output_file" ]] || return 0
-    local _raw_result
-    _raw_result=$(grep -E '"type"[[:space:]]*:[[:space:]]*"result"' "$output_file" 2>/dev/null | tail -1)
-    [[ -n "$_raw_result" ]] || return 0
-    local _denial_count
-    _denial_count=$(echo "$_raw_result" | jq '.permission_denials | if . then length else 0 end' 2>/dev/null || echo "0")
-    _denial_count=$((_denial_count + 0))
+
+    # Aggregate permission_denials from ALL result objects (not just last)
+    local _denial_count=0
+    local _denied_cmds=""
+
+    while IFS= read -r _result_line; do
+        local _line_denials
+        _line_denials=$(echo "$_result_line" | jq '.permission_denials | if . then length else 0 end' 2>/dev/null || echo "0")
+        _line_denials=$((_line_denials + 0))
+        _denial_count=$((_denial_count + _line_denials))
+
+        if [[ $_line_denials -gt 0 ]]; then
+            local _line_cmds
+            _line_cmds=$(echo "$_result_line" | jq -r \
+                '[.permission_denials[] |
+                  if .tool_name == "Bash"
+                  then "Bash(\(.tool_input.command // "?" | split("\n")[0] | .[0:60]))"
+                  else .tool_name // "unknown"
+                  end
+                ] | join(", ")' 2>/dev/null || echo "unknown")
+            if [[ -n "$_denied_cmds" ]]; then
+                _denied_cmds="$_denied_cmds, $_line_cmds"
+            else
+                _denied_cmds="$_line_cmds"
+            fi
+        fi
+    done < <(grep -E '"type"[[:space:]]*:[[:space:]]*"result"' "$output_file" 2>/dev/null)
+
     [[ $_denial_count -gt 0 ]] || return 0
-    local _denied_cmds
-    _denied_cmds=$(echo "$_raw_result" | jq -r \
-        '[.permission_denials[] |
-          if .tool_name == "Bash"
-          then "Bash(\(.tool_input.command // "?" | split("\n")[0] | .[0:60]))"
-          else .tool_name // "unknown"
-          end
-        ] | join(", ")' 2>/dev/null || echo "unknown")
+
     log_status "WARN" "Permission denied for $_denial_count command(s): $_denied_cmds"
     log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required tools"
 }
@@ -443,7 +458,10 @@ ralph_emergency_jsonl_normalize() {
     local output_file=$1
     [[ -f "$output_file" ]] || return 0
     local _tl_count
-    _tl_count=$(jq -s 'length' "$output_file" 2>/dev/null || echo "1")
+    # Count top-level JSON objects by counting "type" keys (streaming — no memory load)
+    # Avoids jq -s which loads entire file into memory and crashes on large JSONL streams
+    _tl_count=$(grep -c -E '"type"[[:space:]]*:' "$output_file" 2>/dev/null || echo "1")
+    _tl_count=$(echo "$_tl_count" | tr -d '[:space:]')
     _tl_count=$((_tl_count + 0))
     [[ "$_tl_count" -gt 1 ]] || return 0
 
@@ -758,6 +776,47 @@ check_claude_updates() {
     log_status "WARN" "Update manually: npm update -g @anthropic-ai/claude-code"
     log_status "WARN" "In Docker: rebuild your image to include the latest version"
     return 1
+}
+
+# Check if the installed Claude CLI supports agent teams (requires v2.1.32+)
+check_teams_support() {
+    local version
+    version=$($CLAUDE_CODE_CMD --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+    if [[ -z "$version" ]]; then
+        return 1
+    fi
+
+    # Teams require v2.1.32+
+    compare_semver "$version" "2.1.32"
+}
+
+# Setup agent teams if enabled via RALPH_ENABLE_TEAMS
+setup_teams() {
+    if [[ "${RALPH_ENABLE_TEAMS:-false}" != "true" ]]; then
+        return 0
+    fi
+
+    # Check CLI version supports teams
+    if ! check_teams_support; then
+        log_status "WARN" "Agent teams require Claude Code v2.1.32+. Falling back to sequential."
+        RALPH_ENABLE_TEAMS=false
+        return 0
+    fi
+
+    # Create local settings with teams env var
+    local settings_local=".claude/settings.local.json"
+    mkdir -p .claude
+    cat > "$settings_local" <<EOF
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "teammateMode": "${RALPH_TEAMMATE_MODE:-tmux}"
+}
+EOF
+
+    log_status "INFO" "Agent teams enabled (max ${RALPH_MAX_TEAMMATES:-3} teammates, mode=${RALPH_TEAMMATE_MODE:-tmux})"
 }
 
 # Validate allowed tools against whitelist
@@ -1177,17 +1236,56 @@ declare -a CLAUDE_CMD_ARGS=()
 
 # Build Claude CLI command with modern flags using array (shell-injection safe)
 # Populates global CLAUDE_CMD_ARGS array for direct execution
+# Check if Claude Code CLI supports --agent flag (requires v2.1+)
+check_agent_support() {
+    local version
+    version=$($CLAUDE_CODE_CMD --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
+
+    if [[ -z "$version" ]]; then
+        return 1
+    fi
+
+    local major minor
+    major=$(echo "$version" | cut -d. -f1)
+    minor=$(echo "$version" | cut -d. -f2)
+
+    if [[ "$major" -gt 2 ]] || [[ "$major" -eq 2 && "$minor" -ge 1 ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Uses -p flag with prompt content (Claude CLI does not have --prompt-file)
+# When RALPH_USE_AGENT=true and CLI supports it, uses --agent ralph instead
 build_claude_command() {
     local prompt_file=$1
     local loop_context=$2
     local session_id=$3
 
     # Reset global array
-    # Note: We do NOT use --dangerously-skip-permissions here. Tool permissions
-    # are controlled via --allowedTools from CLAUDE_ALLOWED_TOOLS in .ralphrc.
-    # This preserves the permission denial circuit breaker (Issue #101).
     CLAUDE_CMD_ARGS=("$CLAUDE_CODE_CMD")
+
+    # Agent mode (HOOKS-6): use --agent ralph when supported
+    if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support; then
+        CLAUDE_CMD_ARGS+=("--agent" "${RALPH_AGENT_NAME:-ralph}")
+
+        # Add output format flag
+        if [[ "$CLAUDE_OUTPUT_FORMAT" == "json" ]]; then
+            CLAUDE_CMD_ARGS+=("--output-format" "json")
+        fi
+
+        # In agent mode: no --allowedTools (agent definition handles it),
+        # no --resume (agent memory replaces session continuity),
+        # no -p (agent definition IS the prompt)
+        log_status "INFO" "Using agent mode: --agent ${RALPH_AGENT_NAME:-ralph}"
+        return 0
+    fi
+
+    # Legacy mode (v0.11.x compatible) — fallback when agent mode unavailable
+    if [[ "${RALPH_USE_AGENT:-false}" == "true" ]]; then
+        log_status "WARN" "Agent mode requested but CLI does not support --agent. Falling back to legacy mode."
+    fi
 
     # Check if prompt file exists
     if [[ ! -f "$prompt_file" ]]; then
@@ -1223,8 +1321,6 @@ build_claude_command() {
     if [[ "$CLAUDE_USE_CONTINUE" == "true" && -n "$session_id" ]]; then
         CLAUDE_CMD_ARGS+=("--resume" "$session_id")
     fi
-    # If no session_id, start fresh - Claude will generate a new session ID
-    # which we'll capture via save_claude_session() for future loops
 
     # Add loop context as system prompt (no escaping needed - array handles it)
     if [[ -n "$loop_context" ]]; then
@@ -1232,8 +1328,6 @@ build_claude_command() {
     fi
 
     # Read prompt file content and use -p flag
-    # Note: Claude CLI uses -p for prompts, not --prompt-file (which doesn't exist)
-    # Array-based approach maintains shell injection safety
     local prompt_content
     prompt_content=$(cat "$prompt_file")
     CLAUDE_CMD_ARGS+=("-p" "$prompt_content")
@@ -1626,11 +1720,15 @@ EOF
         local analysis_exit_code=$?
 
         if [[ $analysis_exit_code -eq 0 ]]; then
-            # Update exit signals based on analysis
-            update_exit_signals
+            # Update exit signals based on analysis (fail-open: continue on error)
+            if ! update_exit_signals; then
+                log_status "WARN" "Exit signal update failed; continuing with stale signals"
+            fi
 
-            # Log analysis summary
-            log_analysis_summary
+            # Log analysis summary (non-critical)
+            if ! log_analysis_summary; then
+                log_status "WARN" "Analysis summary logging failed; non-critical, continuing"
+            fi
         else
             log_status "WARN" "Response analysis failed (exit $analysis_exit_code); skipping signal updates"
             rm -f "$RESPONSE_ANALYSIS_FILE"
@@ -1763,8 +1861,12 @@ EOF
                 local timeout_analysis_exit=$?
 
                 if [[ $timeout_analysis_exit -eq 0 ]]; then
-                    update_exit_signals
-                    log_analysis_summary
+                    if ! update_exit_signals; then
+                        log_status "WARN" "Exit signal update failed; continuing with stale signals"
+                    fi
+                    if ! log_analysis_summary; then
+                        log_status "WARN" "Analysis summary logging failed; non-critical, continuing"
+                    fi
                 else
                     # Clear stale response analysis to prevent next loop from reusing
                     # old EXIT_SIGNAL, permission-denial, or question-detection state
@@ -1822,7 +1924,7 @@ EOF
     fi
 }
 
-# Cleanup function
+# Cleanup function — fires on SIGINT, SIGTERM, and EXIT
 cleanup() {
     local trap_exit_code=$?
 
@@ -1830,18 +1932,26 @@ cleanup() {
     if [[ "$_CLEANUP_DONE" == "true" ]]; then return; fi
     _CLEANUP_DONE=true
 
-    # Only record "interrupted" status for abnormal exits (non-zero exit code)
-    # Normal exit (code 0) preserves the status already written by the main loop
-    if [[ $loop_count -gt 0 && $trap_exit_code -ne 0 ]]; then
-        log_status "INFO" "Ralph loop interrupted. Cleaning up..."
-        reset_session "manual_interrupt"
-        update_status "$loop_count" "$(cat "$CALL_COUNT_FILE" 2>/dev/null || echo "0")" "interrupted" "stopped"
+    if [[ $loop_count -gt 0 ]]; then
+        if [[ $trap_exit_code -ne 0 ]]; then
+            log_status "ERROR" "Ralph loop crashed (exit code: $trap_exit_code)"
+            update_status "$loop_count" "$(cat "$CALL_COUNT_FILE" 2>/dev/null || echo "0")" "crashed" "error" "exit_code_$trap_exit_code"
+            # Record crash for startup detection
+            echo "$trap_exit_code" > "$RALPH_DIR/.last_crash_code"
+        else
+            # Normal exit (code 0) — check if status was properly updated
+            local current_status
+            current_status=$(jq -r '.status' "$STATUS_FILE" 2>/dev/null || echo "unknown")
+            if [[ "$current_status" == "running" ]]; then
+                log_status "WARN" "Ralph exited normally but status still 'running' — possible silent crash"
+                update_status "$loop_count" "$(cat "$CALL_COUNT_FILE" 2>/dev/null || echo "0")" "unexpected_exit" "stopped"
+            fi
+        fi
     fi
-    # No exit here — EXIT trap handles natural termination
 }
 
-# Set up signal handlers
-trap cleanup SIGINT SIGTERM
+# Set up signal handlers (EXIT fires on ANY exit — normal, crash, or signal)
+trap cleanup SIGINT SIGTERM EXIT
 
 # Global variable for loop count (needed by cleanup function)
 loop_count=0
@@ -1864,6 +1974,9 @@ main() {
     # Check CLI version compatibility and auto-update (Issue #190)
     check_claude_version
     check_claude_updates
+
+    # Setup agent teams if enabled (Phase 4 — Experimental)
+    setup_teams
 
     log_status "SUCCESS" "🚀 Ralph loop starting with Claude Code"
     log_status "INFO" "Max calls per hour: $MAX_CALLS_PER_HOUR"
@@ -1920,6 +2033,23 @@ main() {
     # Initialize session tracking before entering the loop
     init_session_tracking
 
+    # Detect previous crash (LOOP-5)
+    if [[ -f "$RALPH_DIR/.last_crash_code" ]]; then
+        local last_crash_code
+        last_crash_code=$(cat "$RALPH_DIR/.last_crash_code" 2>/dev/null || echo "unknown")
+        log_status "WARN" "Previous Ralph invocation crashed (exit code: $last_crash_code)"
+        rm -f "$RALPH_DIR/.last_crash_code"
+    fi
+
+    # Detect stale "running" status from a crashed run
+    if [[ -f "$STATUS_FILE" ]]; then
+        local stale_status
+        stale_status=$(jq -r '.status' "$STATUS_FILE" 2>/dev/null || echo "unknown")
+        if [[ "$stale_status" == "running" ]]; then
+            log_status "WARN" "Previous run left status as 'running' — likely crashed during execution"
+        fi
+    fi
+
     # Reset exit signals to prevent stale state from prior run causing premature exit (Issue #194)
     # This is unconditional: regardless of how the previous run ended (crash, SIGKILL, API limit exit),
     # every new ralph invocation starts with a clean exit-signal slate.
@@ -1957,18 +2087,28 @@ main() {
         fi
     fi
 
+    # Persistent loop counter — tracks total loops across restarts (LOOP-5)
+    local persistent_loop_file="$RALPH_DIR/.total_loop_count"
+    local persistent_loops=0
+    if [[ -f "$persistent_loop_file" ]]; then
+        persistent_loops=$(cat "$persistent_loop_file" 2>/dev/null || echo "0")
+        persistent_loops=$((persistent_loops + 0))
+    fi
+
     log_status "INFO" "Starting main loop..."
 
     while true; do
         loop_count=$((loop_count + 1))
+        persistent_loops=$((persistent_loops + 1))
+        echo "$persistent_loops" > "$persistent_loop_file"
 
         # Update session last_used timestamp
         update_session_last_used
 
-        log_status "INFO" "Loop #$loop_count - calling init_call_tracking..."
+        log_status "INFO" "Loop #$loop_count (total: #$persistent_loops) - calling init_call_tracking..."
         init_call_tracking
-        
-        log_status "LOOP" "=== Starting Loop #$loop_count ==="
+
+        log_status "LOOP" "=== Starting Loop #$loop_count (total: #$persistent_loops) ==="
         
         # Verify Ralph's critical files still exist (Issue #149)
         if ! validate_ralph_integrity; then

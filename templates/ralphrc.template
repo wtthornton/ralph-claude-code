@@ -41,7 +41,7 @@ CLAUDE_OUTPUT_FORMAT="json"
 # Dangerous commands excluded by default: git clean, git rm, git reset (can delete .ralph/)
 # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
 # Granular git patterns (not Bash(git *)) limit destructive commands; Bash(git -C *) covers repo-root flags.
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)"
+ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *)"
 
 # =============================================================================
 # SESSION MANAGEMENT
@@ -103,6 +103,12 @@ CLAUDE_MIN_VERSION="2.0.76"
 # Enable verbose logging
 RALPH_VERBOSE=false
 
+# Agent mode (v1.0+): use --agent ralph instead of -p with --allowedTools
+# When true, uses .claude/agents/ralph.md agent definition (requires CLI v2.1+)
+# Falls back to legacy -p mode if CLI does not support --agent
+RALPH_USE_AGENT=true
+RALPH_AGENT_NAME="ralph"
+
 # Custom prompt file (relative to .ralph/)
 # PROMPT_FILE="PROMPT.md"
 
@@ -111,3 +117,23 @@ RALPH_VERBOSE=false
 
 # Custom agent file (relative to .ralph/)
 # AGENT_FILE="@AGENT.md"
+
+# =============================================================================
+# PARALLELISM (v1.1.0 Phase 4 — Experimental)
+# =============================================================================
+
+# Enable agent teams for parallel execution
+# WARNING: Experimental feature. Requires Claude Code v2.1.32+
+# Known limitations:
+#   - No session resumption with in-process teammates
+#   - Split panes not supported in VS Code terminal or Windows Terminal
+#   - Requires tmux or iTerm2 for split pane display
+RALPH_ENABLE_TEAMS=false
+RALPH_MAX_TEAMMATES=3
+
+# Background testing (independent of teams)
+RALPH_BG_TESTING=false
+
+# Teammate display mode: "in-process" | "tmux" | "auto"
+# "tmux" recommended for Ralph (already uses tmux for monitoring)
+RALPH_TEAMMATE_MODE="tmux"

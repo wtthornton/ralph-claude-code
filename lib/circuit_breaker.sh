@@ -307,7 +307,8 @@ record_loop_result() {
         opened_at=$(echo "$state_data" | jq -r '.opened_at // .last_change // ""' 2>/dev/null)
     fi
 
-    cat > "$CB_STATE_FILE" << EOF
+    local _new_state_json
+    _new_state_json=$(cat << EOF
 {
     "state": "$new_state",
     "last_change": "$(get_iso_timestamp)",
@@ -321,6 +322,15 @@ record_loop_result() {
     \"opened_at\": \"$opened_at\""; fi)
 }
 EOF
+)
+
+    # Validate JSON before writing to prevent state corruption (LOOP-4)
+    if echo "$_new_state_json" | jq empty 2>/dev/null; then
+        echo "$_new_state_json" > "$CB_STATE_FILE"
+    else
+        log_status "ERROR" "Circuit breaker state construction failed; preserving existing state"
+        return 0
+    fi
 
     # Log state transition
     if [[ "$new_state" != "$current_state" ]]; then
