@@ -519,7 +519,7 @@ teardown() {
     bash "$SETUP_SCRIPT" test-project
 
     # The expected ALLOWED_TOOLS value that ralph-enable uses (Issue #149: safe git subcommands)
-    local expected_tools='ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(npm *),Bash(pytest)"'
+    local expected_tools='ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)"'
 
     # Check that .ralphrc contains the expected ALLOWED_TOOLS line
     # Use grep -F for literal string matching (avoids regex interpretation of *)

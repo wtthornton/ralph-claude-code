@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'echo \"Ralph session started at $(date -u +%Y-%m-%dT%H:%M:%SZ)\" >&2'"
+          }
+        ]
+      }
+    ]
+  }
+}

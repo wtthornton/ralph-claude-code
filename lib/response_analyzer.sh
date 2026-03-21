@@ -136,6 +136,60 @@ parse_json_response() {
         output_file="$normalized_file"
     fi
 
+    # Stream-json / JSONL: multiple top-level JSON values (one per line in compact output)
+    # Use jq -s length so a single pretty-printed object (multi-line) still counts as 1 value
+    if [[ -z "$normalized_file" ]]; then
+        local top_level_count
+        top_level_count=$(jq -s 'length' "$output_file" 2>/dev/null || echo "1")
+        top_level_count=$((top_level_count + 0))
+        if [[ "$top_level_count" -gt 1 ]]; then
+            normalized_file=$(mktemp)
+            local result_count
+            result_count=$(jq -c 'select(.type == "result")' "$output_file" 2>/dev/null | wc -l | tr -d '[:space:]')
+            result_count=$((result_count + 0))
+            if [[ "$result_count" -gt 1 ]] && declare -F log_status >/dev/null 2>&1; then
+                log_status "WARN" "Multiple result objects found ($result_count). Claude may have completed multiple tasks in one loop. Using last result."
+            elif [[ "$result_count" -gt 1 ]]; then
+                echo "[WARN] Multiple result objects found ($result_count). Using last result." >&2
+            fi
+
+            local result_obj
+            result_obj=$(jq -c 'select(.type == "result")' "$output_file" 2>/dev/null | tail -1)
+
+            if [[ -n "$result_obj" ]]; then
+                echo "$result_obj" > "$normalized_file"
+
+                local init_session_id
+                init_session_id=$(jq -r 'select(.type == "system" and .subtype == "init") | .session_id // .sessionId // empty' "$output_file" 2>/dev/null | head -1)
+
+                local effective_session_id
+                effective_session_id=$(echo "$result_obj" | jq -r '.sessionId // .session_id // empty' 2>/dev/null)
+                if [[ -z "$effective_session_id" || "$effective_session_id" == "null" ]]; then
+                    effective_session_id="$init_session_id"
+                fi
+
+                if [[ -n "$effective_session_id" && "$effective_session_id" != "null" ]]; then
+                    echo "$result_obj" | jq --arg sid "$effective_session_id" '. + {sessionId: $sid} | del(.session_id)' > "$normalized_file"
+                else
+                    echo "$result_obj" | jq 'del(.session_id)' > "$normalized_file" 2>/dev/null || echo "$result_obj" > "$normalized_file"
+                fi
+
+                output_file="$normalized_file"
+                if declare -F log_status >/dev/null 2>&1; then
+                    log_status "INFO" "JSONL/stream detected ($top_level_count JSON values), extracted result object for analysis"
+                fi
+            else
+                echo '{"type":"unknown","status":"UNKNOWN"}' > "$normalized_file"
+                output_file="$normalized_file"
+                if declare -F log_status >/dev/null 2>&1; then
+                    log_status "WARN" "JSONL/stream detected ($top_level_count JSON values) but no result object found"
+                else
+                    echo "[WARN] JSONL/stream detected but no result object found" >&2
+                fi
+            fi
+        fi
+    fi
+
     # Detect JSON format by checking for Claude CLI fields
     local has_result_field=$(jq -r 'has("result")' "$output_file" 2>/dev/null)
 
@@ -159,9 +213,12 @@ parse_json_response() {
     if [[ "$exit_signal" == "false" && "$has_result_field" == "true" ]]; then
         local result_text=$(jq -r '.result // ""' "$output_file" 2>/dev/null)
         if [[ -n "$result_text" ]] && echo "$result_text" | grep -q -- "---RALPH_STATUS---"; then
+            # Use only the LAST RALPH_STATUS block when multiple are embedded (multi-task violation)
+            local embedded_block
+            embedded_block=$(echo "$result_text" | awk '/---RALPH_STATUS---/{found=1; block=""} found{block=block"\n"$0} /---END_RALPH_STATUS---/{found=0; last=block} END{print last}')
             # Extract EXIT_SIGNAL value from RALPH_STATUS block within result text
             local embedded_exit_sig
-            embedded_exit_sig=$(echo "$result_text" | grep "EXIT_SIGNAL:" | cut -d: -f2 | xargs)
+            embedded_exit_sig=$(echo "$embedded_block" | grep "EXIT_SIGNAL:" | tail -1 | cut -d: -f2 | xargs)
             if [[ -n "$embedded_exit_sig" ]]; then
                 # Explicit EXIT_SIGNAL found in RALPH_STATUS block
                 explicit_exit_signal_found="true"
@@ -176,7 +233,7 @@ parse_json_response() {
             # Also check STATUS field as fallback ONLY when EXIT_SIGNAL was not specified
             # This respects explicit EXIT_SIGNAL: false which means "task complete, continue working"
             local embedded_status
-            embedded_status=$(echo "$result_text" | grep "STATUS:" | cut -d: -f2 | xargs)
+            embedded_status=$(echo "$embedded_block" | grep "STATUS:" | tail -1 | cut -d: -f2 | xargs)
             if [[ "$embedded_status" == "COMPLETE" && "$explicit_exit_signal_found" != "true" ]]; then
                 # STATUS: COMPLETE without any EXIT_SIGNAL field implies completion
                 exit_signal="true"
@@ -319,8 +376,21 @@ parse_json_response() {
             }
         }' > "$result_file"
 
-    # Cleanup temporary normalized file if created (for array format handling)
-    if [[ -n "$normalized_file" && -f "$normalized_file" ]]; then
+    # Verify the result file was written and is valid JSON
+    if [[ ! -s "$result_file" ]] || ! jq empty "$result_file" 2>/dev/null; then
+        if declare -F log_status >/dev/null 2>&1; then
+            log_status "WARN" "parse_json_response: result file invalid or empty"
+        else
+            echo "[WARN] parse_json_response: result file invalid or empty" >&2
+        fi
+        if [[ -n "${normalized_file:-}" && -f "${normalized_file:-}" ]]; then
+            rm -f "$normalized_file"
+        fi
+        return 1
+    fi
+
+    # Cleanup temporary normalized file if created (array or JSONL handling)
+    if [[ -n "${normalized_file:-}" && -f "${normalized_file:-}" ]]; then
         rm -f "$normalized_file"
     fi
 
@@ -487,9 +557,24 @@ analyze_response() {
 
     # 1. Check for explicit structured output (if Claude follows schema)
     if grep -q -- "---RALPH_STATUS---" "$output_file"; then
-        # Parse structured output
-        local status=$(grep "STATUS:" "$output_file" | cut -d: -f2 | xargs)
-        local exit_sig=$(grep "EXIT_SIGNAL:" "$output_file" | cut -d: -f2 | xargs)
+        local _status_block_count
+        _status_block_count=$(grep -c -- "---RALPH_STATUS---" "$output_file" 2>/dev/null || echo "0")
+        _status_block_count=$(echo "$_status_block_count" | tr -d '[:space:]')
+        _status_block_count=$((_status_block_count + 0))
+        if [[ "$_status_block_count" -gt 1 ]]; then
+            if declare -F log_status >/dev/null 2>&1; then
+                log_status "WARN" "Multiple RALPH_STATUS blocks found ($_status_block_count). Using last block only."
+            else
+                echo "[WARN] Multiple RALPH_STATUS blocks found ($_status_block_count). Using last block only." >&2
+            fi
+        fi
+
+        # Parse structured output — last block only (avoids concatenated EXIT_SIGNAL values)
+        local last_status_block
+        last_status_block=$(awk '/---RALPH_STATUS---/{found=1; block=""} found{block=block"\n"$0} /---END_RALPH_STATUS---/{found=0; last=block} END{print last}' "$output_file")
+
+        local status=$(echo "$last_status_block" | grep "STATUS:" | tail -1 | cut -d: -f2 | xargs)
+        local exit_sig=$(echo "$last_status_block" | grep "EXIT_SIGNAL:" | tail -1 | cut -d: -f2 | xargs)
 
         # If EXIT_SIGNAL is explicitly provided, respect it
         if [[ -n "$exit_sig" ]]; then

@@ -54,7 +54,7 @@ CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-15}"
 # Modern Claude CLI configuration (Phase 1.1)
 CLAUDE_OUTPUT_FORMAT="${CLAUDE_OUTPUT_FORMAT:-json}"
 # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
-CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(npm *),Bash(pytest)}"
+CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)}"
 CLAUDE_USE_CONTINUE="${CLAUDE_USE_CONTINUE:-true}"
 CLAUDE_SESSION_FILE="$RALPH_DIR/.claude_session_id" # Session ID persistence file
 CLAUDE_MIN_VERSION="2.0.76"              # Minimum required Claude CLI version
@@ -319,7 +319,7 @@ setup_tmux_session() {
     fi
     # Forward --allowed-tools if non-default
     # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
-    if [[ "$CLAUDE_ALLOWED_TOOLS" != "Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(npm *),Bash(pytest)" ]]; then
+    if [[ "$CLAUDE_ALLOWED_TOOLS" != "Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)" ]]; then
         ralph_cmd="$ralph_cmd --allowed-tools '$CLAUDE_ALLOWED_TOOLS'"
     fi
     # Forward --no-continue if session continuity disabled
@@ -413,6 +413,84 @@ log_status() {
     # 2>/dev/null suppresses "Input/output error" when tmux pty is broken (Issue #188)
     echo -e "${color}[$timestamp] [$level] $message${NC}" >&2 2>/dev/null
     echo "[$timestamp] [$level] $message" >> "$LOG_DIR/ralph.log" 2>/dev/null
+}
+
+# Pre-analysis: log permission denials from raw output (survives analyze_response crashes)
+ralph_log_permission_denials_from_raw_output() {
+    local output_file=$1
+    [[ -f "$output_file" ]] || return 0
+    local _raw_result
+    _raw_result=$(grep -E '"type"[[:space:]]*:[[:space:]]*"result"' "$output_file" 2>/dev/null | tail -1)
+    [[ -n "$_raw_result" ]] || return 0
+    local _denial_count
+    _denial_count=$(echo "$_raw_result" | jq '.permission_denials | if . then length else 0 end' 2>/dev/null || echo "0")
+    _denial_count=$((_denial_count + 0))
+    [[ $_denial_count -gt 0 ]] || return 0
+    local _denied_cmds
+    _denied_cmds=$(echo "$_raw_result" | jq -r \
+        '[.permission_denials[] |
+          if .tool_name == "Bash"
+          then "Bash(\(.tool_input.command // "?" | split("\n")[0] | .[0:60]))"
+          else .tool_name // "unknown"
+          end
+        ] | join(", ")' 2>/dev/null || echo "unknown")
+    log_status "WARN" "Permission denied for $_denial_count command(s): $_denied_cmds"
+    log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required tools"
+}
+
+# Pre-analysis: if stream is still multi-value JSONL, collapse to last result object
+ralph_emergency_jsonl_normalize() {
+    local output_file=$1
+    [[ -f "$output_file" ]] || return 0
+    local _tl_count
+    _tl_count=$(jq -s 'length' "$output_file" 2>/dev/null || echo "1")
+    _tl_count=$((_tl_count + 0))
+    [[ "$_tl_count" -gt 1 ]] || return 0
+
+    local _result_count
+    _result_count=$(grep -c -E '"type"[[:space:]]*:[[:space:]]*"result"' "$output_file" 2>/dev/null || echo "0")
+    _result_count=$(echo "$_result_count" | tr -d '[:space:]')
+    _result_count=$((_result_count + 0))
+    if [[ "$_result_count" -gt 1 ]]; then
+        log_status "WARN" "Stream contains $_result_count result objects (expected 1). Multi-task loop violation detected."
+    fi
+
+    local _emergency_result
+    _emergency_result=$(jq -c 'select(.type == "result")' "$output_file" 2>/dev/null | tail -1)
+
+    if [[ -n "$_emergency_result" ]] && echo "$_emergency_result" | jq -e . >/dev/null 2>&1; then
+        local _backup="${output_file%.log}_stream.log"
+        if [[ ! -f "$_backup" ]]; then
+            cp "$output_file" "$_backup"
+            log_status "INFO" "Created stream backup: $_backup"
+        fi
+        echo "$_emergency_result" > "$output_file"
+        log_status "WARN" "Emergency JSONL extraction: converted multi-value stream to single result object"
+    else
+        log_status "ERROR" "Emergency JSONL extraction failed: no valid result object in stream"
+    fi
+}
+
+# Post-run: log MCP servers that failed to connect (from system init line in stream-json)
+ralph_log_failed_mcp_servers_from_output() {
+    local output_file=$1
+    [[ -f "$output_file" ]] || return 0
+    local sys_line
+    sys_line=$(grep -E '"type"[[:space:]]*:[[:space:]]*"system"' "$output_file" 2>/dev/null | head -1)
+    [[ -n "$sys_line" ]] || return 0
+    local failed_mcps
+    failed_mcps=$(echo "$sys_line" | jq -r '[.mcp_servers[]? | select(.status == "failed") | .name] | join(", ")' 2>/dev/null)
+    [[ -n "$failed_mcps" && "$failed_mcps" != "null" ]] || return 0
+    log_status "WARN" "MCP servers failed to connect: $failed_mcps"
+}
+
+# Run all lightweight pre-analyze steps on Claude output
+ralph_prepare_claude_output_for_analysis() {
+    local output_file=$1
+    # Log from full stream before emergency collapse removes system / multi-line context
+    ralph_log_permission_denials_from_raw_output "$output_file"
+    ralph_log_failed_mcp_servers_from_output "$output_file"
+    ralph_emergency_jsonl_normalize "$output_file"
 }
 
 # Update status JSON for external monitoring
@@ -1339,7 +1417,22 @@ execute_claude_code() {
         # Extract session ID from stream-json output for session continuity
         # Stream-json format has session_id in the final "result" type message
         # Keep full stream output in _stream.log, extract session data separately
-        if [[ "$CLAUDE_USE_CONTINUE" == "true" && -f "$output_file" ]]; then
+        # WSL2/NTFS 9P: metadata for -f can lag; retry with backoff before skipping extraction
+        local _stream_file_visible=false
+        if [[ "$CLAUDE_USE_CONTINUE" == "true" ]]; then
+            for _wait in 0 0.1 0.2 0.5 1.0; do
+                [[ "$_wait" != "0" ]] && sleep "$_wait"
+                if [[ -f "$output_file" ]]; then
+                    _stream_file_visible=true
+                    break
+                fi
+            done
+            if [[ "$_stream_file_visible" != "true" ]]; then
+                log_status "WARN" "Output file not visible after 1.8s wait (WSL2/9P race?): $output_file"
+            fi
+        fi
+
+        if [[ "$CLAUDE_USE_CONTINUE" == "true" && "$_stream_file_visible" == "true" ]]; then
             # Preserve full stream output for analysis (don't overwrite output_file)
             local stream_output_file="${output_file%.log}_stream.log"
             cp "$output_file" "$stream_output_file"
@@ -1520,6 +1613,8 @@ EOF
 
         log_status "SUCCESS" "✅ Claude Code execution completed successfully"
 
+        ralph_prepare_claude_output_for_analysis "$output_file"
+
         # Save session ID from JSON output (Phase 1.1)
         if [[ "$CLAUDE_USE_CONTINUE" == "true" ]]; then
             save_claude_session "$output_file"
@@ -1654,6 +1749,8 @@ EOF
                 # Productive timeout — work was done despite the timeout
                 log_status "INFO" "⏱️ Timeout but $timeout_files_changed file(s) changed — treating iteration as productive"
                 echo '{"status": "timed_out_productive", "files_changed": '$timeout_files_changed', "timestamp": "'$(date '+%Y-%m-%d %H:%M:%S')'"}' > "$PROGRESS_FILE"
+
+                ralph_prepare_claude_output_for_analysis "$output_file"
 
                 # Save session ID (fallback already populated by Step 1 if stream was truncated)
                 if [[ "$CLAUDE_USE_CONTINUE" == "true" ]]; then
@@ -1829,6 +1926,36 @@ main() {
     echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}' > "$EXIT_SIGNALS_FILE"
     rm -f "$RESPONSE_ANALYSIS_FILE" 2>/dev/null
     log_status "INFO" "Reset exit signals for fresh start"
+
+    # Reset per-session circuit breaker counters (preserve OPEN/CLOSED state and thresholds)
+    if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
+        if jq '.consecutive_no_progress = 0 |
+            .consecutive_same_error = 0 |
+            .consecutive_permission_denials = 0 |
+            .current_loop = 0 |
+            .last_progress_loop = 0' \
+            "$RALPH_DIR/.circuit_breaker_state" > "${RALPH_DIR}/.circuit_breaker_state.tmp" 2>/dev/null && \
+            mv "${RALPH_DIR}/.circuit_breaker_state.tmp" "$RALPH_DIR/.circuit_breaker_state"
+        then
+            log_status "INFO" "Reset circuit breaker counters for new session"
+        fi
+    fi
+
+    # Optional: warn if Docker MCP containers (label ralph.mcp=true) are not running
+    if command -v docker >/dev/null 2>&1; then
+        local mcp_containers_down=()
+        while IFS= read -r container; do
+            [[ -z "$container" ]] && continue
+            if ! docker inspect --format='{{.State.Running}}' "$container" 2>/dev/null | grep -q "true"; then
+                mcp_containers_down+=("$container")
+            fi
+        done < <(docker ps -a --filter "label=ralph.mcp=true" --format '{{.Names}}' 2>/dev/null)
+
+        if [[ ${#mcp_containers_down[@]} -gt 0 ]]; then
+            log_status "WARN" "MCP containers not running: ${mcp_containers_down[*]}"
+            log_status "INFO" "Start with: docker compose up -d (or check docker-compose.yml)"
+        fi
+    fi
 
     log_status "INFO" "Starting main loop..."
 

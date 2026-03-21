@@ -46,6 +46,16 @@ When performing cleanup, refactoring, or restructuring tasks:
 - Document the WHY behind tests and implementations
 - No placeholder implementations - build it properly
 
+## Execution Contract (Per Loop)
+1. Read .ralph/fix_plan.md and select the **first** unchecked `- [ ]` task (ONE task only).
+2. Search the codebase before implementing.
+3. Implement the smallest complete change for that task.
+4. Run essential tests for the touched scope only.
+5. Update fix_plan.md (`- [ ]` → `- [x]`) for that task.
+6. Commit implementation and fix_plan update together when appropriate.
+7. Output your `RALPH_STATUS` block (below).
+8. **STOP. End your response immediately after the status block.** Do NOT start another task. Do NOT say "moving to the next task." The Ralph harness will re-invoke you for the next item. Your response MUST end within 2 lines of the closing `---END_RALPH_STATUS---`.
+
 ## 🎯 Status Reporting (CRITICAL - Ralph needs this!)
 
 **IMPORTANT**: At the end of your response, ALWAYS include this status block:
@@ -77,7 +87,7 @@ Set EXIT_SIGNAL to **true** when ALL of these conditions are met:
 ```
 ---RALPH_STATUS---
 STATUS: IN_PROGRESS
-TASKS_COMPLETED_THIS_LOOP: 2
+TASKS_COMPLETED_THIS_LOOP: 1
 FILES_MODIFIED: 5
 TESTS_STATUS: PASSING
 WORK_TYPE: IMPLEMENTATION
@@ -146,7 +156,7 @@ RECOMMENDATION: All requirements met, project ready for review
 ---END_RALPH_STATUS---
 ```
 
-**Ralph's Action**: Detects EXIT_SIGNAL=true, gracefully exits loop with success message
+**Your action**: STOP immediately after the status block. *(The harness detects EXIT_SIGNAL=true and exits the loop.)*
 
 ---
 
@@ -172,7 +182,7 @@ RECOMMENDATION: All tests passing, no implementation needed
 ---END_RALPH_STATUS---
 ```
 
-**Ralph's Action**: Increments test_only_loops counter, exits after 3 consecutive test-only loops
+**Your action**: STOP immediately after the status block. *(The harness increments test_only_loops and may exit after repeated test-only loops.)*
 
 ---
 
@@ -197,7 +207,7 @@ RECOMMENDATION: Stuck on [error description] - human intervention needed
 ---END_RALPH_STATUS---
 ```
 
-**Ralph's Action**: Circuit breaker detects repeated errors, opens circuit after 5 loops
+**Your action**: STOP immediately after the status block. *(The harness circuit breaker may open after repeated errors.)*
 
 ---
 
@@ -223,11 +233,11 @@ RECOMMENDATION: No remaining work, all .ralph/specs implemented
 ---END_RALPH_STATUS---
 ```
 
-**Ralph's Action**: Detects completion signal, exits loop immediately
+**Your action**: STOP immediately after the status block. *(The harness detects completion and exits the loop.)*
 
 ---
 
-### Scenario 5: Making Progress
+### Scenario 5: Making Progress (MOST COMMON)
 **Given**:
 - Tasks remain in .ralph/fix_plan.md
 - Implementation is underway
@@ -240,7 +250,7 @@ RECOMMENDATION: No remaining work, all .ralph/specs implemented
 ```
 ---RALPH_STATUS---
 STATUS: IN_PROGRESS
-TASKS_COMPLETED_THIS_LOOP: 3
+TASKS_COMPLETED_THIS_LOOP: 1
 FILES_MODIFIED: 7
 TESTS_STATUS: PASSING
 WORK_TYPE: IMPLEMENTATION
@@ -249,7 +259,7 @@ RECOMMENDATION: Continue with next task from .ralph/fix_plan.md
 ---END_RALPH_STATUS---
 ```
 
-**Ralph's Action**: Continues loop, circuit breaker stays CLOSED (normal operation)
+**Your action**: STOP immediately. Do not continue to the next task in the same response. *(The harness will re-invoke you for the next item automatically.)*
 
 ---
 
@@ -274,7 +284,7 @@ RECOMMENDATION: Blocked on [specific dependency] - need [what's needed]
 ---END_RALPH_STATUS---
 ```
 
-**Ralph's Action**: Logs blocker, may exit after multiple blocked loops
+**Your action**: STOP immediately after the status block. *(The harness logs the blocker and may exit after repeated blocked loops.)*
 
 ---
 
