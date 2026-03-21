@@ -1,8 +1,8 @@
 # Implementation Status Summary
 
 **Last Updated**: 2026-03-21
-**Version**: v1.0.0-rc (user-facing); see README for feature list
-**Overall Status**: All 37 epic stories complete. Sub-agents, skills, and bash reduction delivered.
+**Version**: v1.1.0
+**Overall Status**: All 37 epic stories complete. v1.1.0 adds log rotation, dry-run mode, WSL/Windows version divergence detection, and on-stop.sh hook fallback.
 
 > **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count.
 
@@ -126,7 +126,7 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 
 ## Phase Status
 
-### Phase 1: CLI Modernization (80% Complete)
+### Phase 1: CLI Modernization (100% Complete)
 
 **Completed**:
 - [x] #28 - Update CLI commands with modern options
@@ -144,8 +144,11 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 - [x] #26 - Update README with testing instructions (P3)
 - [x] #27 - Add badges to README (P3)
 
-**Remaining**:
-- [ ] #51 - Session expiration for .claude_session_id (P2)
+**Remaining**: None — Phase 1 complete.
+
+Note: #51 (session expiration) was implemented as part of the session management work.
+Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (default 24h),
+`get_session_file_age_hours()`, and `init_claude_session()` in ralph_loop.sh.
 
 ### Phase 2: Agent SDK Integration (0% Complete)
 
@@ -154,13 +157,13 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 - [ ] #34 - Implement hybrid CLI/SDK architecture (P2)
 - [ ] #35 - Document SDK migration strategy (P2)
 
-### Phase 3: Configuration & Infrastructure (0% Complete)
+### Phase 3: Configuration & Infrastructure (33% Complete)
 
 - [ ] #36 - Add JSON configuration file support (P2)
 - [ ] #37 - Update installation for SDK support (P2)
-- [ ] #18 - Implement log rotation feature (P2)
-- [ ] #19 - Implement dry-run mode feature (P2)
-- [ ] #20 - Implement config file support (.ralphrc) (P2)
+- [x] #18 - Implement log rotation feature (P2) — rotate_ralph_log(), cleanup_old_output_logs(), --log-max-size/--log-max-files flags
+- [x] #19 - Implement dry-run mode feature (P2) — --dry-run flag, DRY_RUN .ralphrc config, dry_run_simulate()
+- [x] #20 - Implement config file support (.ralphrc) (P2) — .ralphrc sourced at startup, env overrides, load_ralphrc()
 - [ ] #38 - Create CLI and SDK documentation (P3)
 - [ ] #21 - Implement metrics and analytics (P3)
 - [ ] #22 - Implement notification system (P3)
@@ -278,16 +281,16 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 ### P2 (Medium - Important)
 | Issue | Phase | Title |
 |-------|-------|-------|
-| #51 | 1.5 | Session expiration for .claude_session_id |
+| ~~#51~~ | ~~1.5~~ | ~~Session expiration for .claude_session_id~~ (Done) |
 | #32 | 2.1 | Create Agent SDK proof of concept |
 | #33 | 2.2 | Define custom tools for Agent SDK |
 | #34 | 2.3 | Implement hybrid CLI/SDK architecture |
 | #35 | 2.4 | Document SDK migration strategy |
 | #36 | 3.1 | Add JSON configuration file support |
 | #37 | 3.2 | Update installation for SDK support |
-| #18 | 3.4 | Implement log rotation feature |
-| #19 | 3.5 | Implement dry-run mode feature |
-| #20 | 3.6 | Implement config file support (.ralphrc) |
+| ~~#18~~ | ~~3.4~~ | ~~Implement log rotation feature~~ (Done) |
+| ~~#19~~ | ~~3.5~~ | ~~Implement dry-run mode feature~~ (Done) |
+| ~~#20~~ | ~~3.6~~ | ~~Implement config file support (.ralphrc)~~ (Done) |
 | #14 | 4.4 | Implement tmux integration tests |
 | #15 | 4.5 | Implement monitor dashboard tests |
 | #16 | 4.6 | Implement status update tests |
@@ -295,10 +298,10 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 ### P3 (Low - Nice to have)
 | Issue | Phase | Title |
 |-------|-------|-------|
-| #24 | 1.9 | Create TESTING.md documentation |
-| #25 | 1.10 | Create CONTRIBUTING.md guide |
-| #26 | 1.11 | Update README with testing instructions |
-| #27 | 1.12 | Add badges to README |
+| ~~#24~~ | ~~1.9~~ | ~~Create TESTING.md documentation~~ (Done) |
+| ~~#25~~ | ~~1.10~~ | ~~Create CONTRIBUTING.md guide~~ (Done) |
+| ~~#26~~ | ~~1.11~~ | ~~Update README with testing instructions~~ (Done) |
+| ~~#27~~ | ~~1.12~~ | ~~Add badges to README~~ (Done) |
 | #38 | 3.3 | Create CLI and SDK documentation |
 | #21 | 3.7 | Implement metrics and analytics |
 | #22 | 3.8 | Implement notification system |
@@ -331,16 +334,17 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 
 | Category | Count |
 |----------|-------|
-| Total Open Issues | 36 |
-| P2 Issues | 13 |
-| P3 Issues | 12 |
+| Total Open Issues | 28 |
+| P2 Issues | 8 |
+| P3 Issues | 8 |
 | P4 Issues | 13 |
-| Closed Issues | 20 |
-| Total Tests | 276 |
+| Closed Issues | 28 |
+| Total Tests | 566+ |
 | Test Pass Rate | 100% |
 
 ---
 
-**Status**: ✅ 37/37 stories complete (100%). All phases delivered. v1.0.0-rc ready.
+**Status**: ✅ 37/37 stories complete (100%). All phases delivered. v1.1.0 released.
 **Removed**: `lib/response_analyzer.sh` (-1042 lines), `lib/file_protection.sh` (-58 lines), simplified `lib/circuit_breaker.sh` (-285 lines). Total: ~1,385 lines of bash removed.
 **Added**: 3 sub-agent definitions, 2 skills, enhanced SubagentStop hook, session functions inlined into ralph_loop.sh.
+**v1.1.0**: Log rotation (#18), dry-run mode (#19), WSL/Windows version divergence fix, on-stop.sh hook text fallback, 35 new tests.

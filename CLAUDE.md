@@ -66,7 +66,13 @@ bats tests/unit/test_cli_parsing.bats
 
 **File protection**: Two layers — (1) granular `ALLOWED_TOOLS` restrictions prevent destructive git commands, (2) PreToolUse hooks (`protect-ralph-files.sh`, `validate-command.sh`) block modifications to `.ralph/` in real-time.
 
-**Hook-based response analysis**: The `on-stop.sh` hook runs after every Claude response, extracts RALPH_STATUS fields, writes `status.json`, and updates circuit breaker state. The loop reads from `status.json` instead of parsing raw CLI output.
+**Hook-based response analysis**: The `on-stop.sh` hook runs after every Claude response, extracts RALPH_STATUS fields, writes `status.json`, and updates circuit breaker state. The loop reads from `status.json` instead of parsing raw CLI output. The hook includes a text fallback when no JSON path matches the response payload.
+
+**Log rotation**: `rotate_ralph_log()` rotates `ralph.log` when it exceeds `LOG_MAX_SIZE_MB` (default 10). `cleanup_old_output_logs()` prunes old `claude_output_*.log` files beyond `LOG_MAX_OUTPUT_FILES` (default 20). Both run at startup and every loop iteration.
+
+**Dry-run mode**: `--dry-run` or `DRY_RUN=true` simulates a loop iteration without calling the Claude API. Writes a `status.json` with `status: "DRY_RUN"` and exits after one iteration. Useful for validating configuration and tool permissions.
+
+**WSL/Windows version divergence detection**: `check_version_divergence()` runs at startup in WSL environments. Compares `RALPH_VERSION` between `~/.ralph/ralph_loop.sh` (WSL) and `/mnt/c/Users/*/.ralph/ralph_loop.sh` (Windows). Warns if versions differ and detects stale `response_analyzer.sh` files.
 
 **Sub-agents**: Three specialized agents (ralph-explorer, ralph-tester, ralph-reviewer) keep search, testing, and review output out of the main context. The main Ralph agent spawns them via `Agent(ralph-explorer, ralph-tester, ralph-reviewer)` allowlist.
 
@@ -94,6 +100,10 @@ Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 - `CLAUDE_USE_CONTINUE` — Session continuity toggle
 - `CLAUDE_AUTO_UPDATE` — Auto-update CLI at startup (disable for Docker/air-gapped)
 - `CB_COOLDOWN_MINUTES`, `CB_AUTO_RESET` — Circuit breaker recovery config
+- `LOG_MAX_SIZE_MB` — Max ralph.log size before rotation (default: 10)
+- `LOG_MAX_FILES` — Number of rotated log files to keep (default: 5)
+- `LOG_MAX_OUTPUT_FILES` — Max claude_output_*.log files to keep (default: 20)
+- `DRY_RUN` — Preview loop execution without API calls (also `--dry-run` flag)
 
 Environment variables override `.ralphrc` settings.
 

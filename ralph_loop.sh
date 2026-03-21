@@ -17,7 +17,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 # file_protection.sh removed — file protection handled by PreToolUse hooks (protect-ralph-files.sh, validate-command.sh)
 
 # Version
-RALPH_VERSION="1.0.0"
+RALPH_VERSION="1.1.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -48,6 +48,10 @@ _env_CB_COOLDOWN_MINUTES="${CB_COOLDOWN_MINUTES:-}"
 _env_CB_AUTO_RESET="${CB_AUTO_RESET:-}"
 _env_CLAUDE_CODE_CMD="${CLAUDE_CODE_CMD:-}"
 _env_CLAUDE_AUTO_UPDATE="${CLAUDE_AUTO_UPDATE:-}"
+_env_DRY_RUN="${DRY_RUN:-}"
+_env_LOG_MAX_SIZE_MB="${LOG_MAX_SIZE_MB:-}"
+_env_LOG_MAX_FILES="${LOG_MAX_FILES:-}"
+_env_LOG_MAX_OUTPUT_FILES="${LOG_MAX_OUTPUT_FILES:-}"
 
 # Now set defaults (only if not already set by environment)
 MAX_CALLS_PER_HOUR="${MAX_CALLS_PER_HOUR:-100}"
@@ -161,6 +165,10 @@ load_ralphrc() {
     [[ -n "$_env_CB_AUTO_RESET" ]] && CB_AUTO_RESET="$_env_CB_AUTO_RESET"
     [[ -n "$_env_CLAUDE_CODE_CMD" ]] && CLAUDE_CODE_CMD="$_env_CLAUDE_CODE_CMD"
     [[ -n "$_env_CLAUDE_AUTO_UPDATE" ]] && CLAUDE_AUTO_UPDATE="$_env_CLAUDE_AUTO_UPDATE"
+    [[ -n "$_env_DRY_RUN" ]] && DRY_RUN="$_env_DRY_RUN"
+    [[ -n "$_env_LOG_MAX_SIZE_MB" ]] && LOG_MAX_SIZE_MB="$_env_LOG_MAX_SIZE_MB"
+    [[ -n "$_env_LOG_MAX_FILES" ]] && LOG_MAX_FILES="$_env_LOG_MAX_FILES"
+    [[ -n "$_env_LOG_MAX_OUTPUT_FILES" ]] && LOG_MAX_OUTPUT_FILES="$_env_LOG_MAX_OUTPUT_FILES"
 
     RALPHRC_LOADED=true
     return 0
@@ -971,6 +979,157 @@ setup_teams() {
 EOF
 
     log_status "INFO" "Agent teams enabled (max ${RALPH_MAX_TEAMMATES:-3} teammates, mode=${RALPH_TEAMMATE_MODE:-tmux})"
+}
+
+# Check for WSL/Windows version divergence
+# Detects when Ralph is installed in both WSL and Windows and versions differ.
+# This prevents silent loop crashes caused by one copy using removed APIs (e.g. response_analyzer.sh).
+check_version_divergence() {
+    # Only relevant in WSL environments
+    if [[ ! -d "/mnt/c" ]] || [[ "$(uname -r)" != *icrosoft* && "$(uname -r)" != *WSL* ]]; then
+        return 0
+    fi
+
+    # Find Windows user home directory
+    local win_home=""
+    for user_dir in /mnt/c/Users/*/; do
+        if [[ -f "${user_dir}.ralph/ralph_loop.sh" ]]; then
+            win_home="$user_dir"
+            break
+        fi
+    done
+
+    [[ -z "$win_home" ]] && return 0
+
+    local win_script="${win_home}.ralph/ralph_loop.sh"
+    local win_version
+    win_version=$(grep -m1 'RALPH_VERSION=' "$win_script" 2>/dev/null | sed 's/.*RALPH_VERSION="\{0,1\}\([^"]*\)"\{0,1\}/\1/')
+
+    if [[ -z "$win_version" ]]; then
+        return 0
+    fi
+
+    if [[ "$win_version" != "$RALPH_VERSION" ]]; then
+        log_status "WARN" "VERSION DIVERGENCE: WSL=$RALPH_VERSION, Windows=$win_version"
+        log_status "WARN" "This can cause silent loop crashes. Sync with:"
+        log_status "WARN" "  cp '${win_script}' ~/.ralph/ralph_loop.sh && sed -i 's/\\r\$//' ~/.ralph/ralph_loop.sh"
+    fi
+
+    # Also check for stale response_analyzer.sh (removed in v1.0.0)
+    if [[ -f "$SCRIPT_DIR/lib/response_analyzer.sh" ]]; then
+        log_status "WARN" "STALE FILE: lib/response_analyzer.sh exists but was removed in v1.0.0"
+        log_status "WARN" "This Ralph install may be outdated. Response analysis is now handled by on-stop.sh hook."
+    fi
+}
+
+# =============================================================================
+# LOG ROTATION (Issue #18)
+# =============================================================================
+
+# Configuration for log rotation
+LOG_MAX_SIZE_MB="${LOG_MAX_SIZE_MB:-10}"         # Rotate when ralph.log exceeds this size (MB)
+LOG_MAX_FILES="${LOG_MAX_FILES:-5}"               # Keep this many rotated log files
+LOG_MAX_OUTPUT_FILES="${LOG_MAX_OUTPUT_FILES:-20}" # Keep this many claude_output_*.log files
+
+# Rotate ralph.log when it exceeds LOG_MAX_SIZE_MB
+rotate_ralph_log() {
+    local log_file="$LOG_DIR/ralph.log"
+    [[ -f "$log_file" ]] || return 0
+
+    local file_size_bytes
+    # Cross-platform file size detection
+    if file_size_bytes=$(stat -c %s "$log_file" 2>/dev/null); then
+        : # GNU stat
+    elif file_size_bytes=$(stat -f %z "$log_file" 2>/dev/null); then
+        : # BSD stat
+    else
+        return 0  # Can't determine size, skip rotation
+    fi
+
+    local max_bytes=$((LOG_MAX_SIZE_MB * 1024 * 1024))
+    if [[ $file_size_bytes -lt $max_bytes ]]; then
+        return 0
+    fi
+
+    log_status "INFO" "Rotating ralph.log (${file_size_bytes} bytes > ${max_bytes} byte limit)"
+
+    # Shift existing rotated logs: .4 -> .5, .3 -> .4, etc.
+    local i=$LOG_MAX_FILES
+    while [[ $i -gt 1 ]]; do
+        local prev=$((i - 1))
+        [[ -f "${log_file}.${prev}" ]] && mv "${log_file}.${prev}" "${log_file}.${i}"
+        i=$((i - 1))
+    done
+
+    # Move current to .1
+    mv "$log_file" "${log_file}.1"
+
+    # Start a fresh log
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] Log rotated (previous log: ralph.log.1)" > "$log_file"
+}
+
+# Clean up old claude_output_*.log files, keeping only the most recent LOG_MAX_OUTPUT_FILES
+cleanup_old_output_logs() {
+    local count
+    count=$(find "$LOG_DIR" -maxdepth 1 -name 'claude_output_*.log' 2>/dev/null | wc -l)
+    count=$((count + 0))
+
+    if [[ $count -le $LOG_MAX_OUTPUT_FILES ]]; then
+        return 0
+    fi
+
+    local to_remove=$((count - LOG_MAX_OUTPUT_FILES))
+    log_status "INFO" "Cleaning up $to_remove old output log(s) (keeping newest $LOG_MAX_OUTPUT_FILES)"
+
+    # Remove oldest files (sorted by name which includes timestamp)
+    find "$LOG_DIR" -maxdepth 1 -name 'claude_output_*.log' -print0 2>/dev/null \
+        | sort -z \
+        | head -z -n "$to_remove" \
+        | xargs -0 rm -f 2>/dev/null
+}
+
+# =============================================================================
+# DRY-RUN MODE (Issue #19)
+# =============================================================================
+
+DRY_RUN="${DRY_RUN:-false}"
+
+# Simulate a Claude Code execution for dry-run mode
+dry_run_simulate() {
+    local prompt_content="$1"
+    local loop_num="$2"
+
+    log_status "INFO" "[DRY-RUN] Would execute Claude Code with:"
+    log_status "INFO" "[DRY-RUN]   Command: $CLAUDE_CODE_CMD"
+    log_status "INFO" "[DRY-RUN]   Output format: $CLAUDE_OUTPUT_FORMAT"
+    log_status "INFO" "[DRY-RUN]   Timeout: ${CLAUDE_TIMEOUT_MINUTES}m"
+    log_status "INFO" "[DRY-RUN]   Session continuity: $CLAUDE_USE_CONTINUE"
+    log_status "INFO" "[DRY-RUN]   Allowed tools: $(echo "$CLAUDE_ALLOWED_TOOLS" | tr ',' '\n' | wc -l | tr -d ' ') tools"
+
+    if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
+        local task_count
+        task_count=$(grep -c '^\- \[ \]' "$RALPH_DIR/fix_plan.md" 2>/dev/null || echo "0")
+        local done_count
+        done_count=$(grep -c '^\- \[x\]' "$RALPH_DIR/fix_plan.md" 2>/dev/null || echo "0")
+        log_status "INFO" "[DRY-RUN]   Tasks: $task_count open, $done_count done"
+    fi
+
+    # Write a simulated status.json
+    cat > "$STATUS_FILE" <<EOF
+{
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "loop_count": $loop_num,
+  "status": "DRY_RUN",
+  "exit_signal": "false",
+  "tasks_completed": 0,
+  "files_modified": 0,
+  "work_type": "dry_run",
+  "recommendation": "Dry-run mode — no changes made"
+}
+EOF
+
+    log_status "SUCCESS" "[DRY-RUN] Simulation complete (no API call made)"
+    return 0
 }
 
 # Validate allowed tools against whitelist
@@ -2243,6 +2402,9 @@ main() {
     check_claude_version
     check_claude_updates
 
+    # Check for WSL/Windows version divergence
+    check_version_divergence
+
     # Setup agent teams if enabled (Phase 4 — Experimental)
     setup_teams
 
@@ -2356,6 +2518,14 @@ main() {
         persistent_loops=$((persistent_loops + 0))
     fi
 
+    # Perform initial log rotation at startup
+    rotate_ralph_log
+    cleanup_old_output_logs
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_status "INFO" "DRY-RUN MODE: No API calls will be made"
+    fi
+
     log_status "INFO" "Starting main loop..."
 
     while true; do
@@ -2441,10 +2611,20 @@ main() {
             break
         fi
         
+        # Rotate logs periodically (every loop iteration)
+        rotate_ralph_log
+
         # Update status
         local calls_made=$(cat "$CALL_COUNT_FILE" 2>/dev/null || echo "0")
         update_status "$loop_count" "$calls_made" "executing" "running"
-        
+
+        # Dry-run mode: simulate execution without calling Claude Code
+        if [[ "$DRY_RUN" == "true" ]]; then
+            dry_run_simulate "" "$loop_count"
+            log_status "INFO" "[DRY-RUN] Loop #$loop_count complete. Exiting after single dry-run iteration."
+            break
+        fi
+
         # Execute Claude Code
         execute_claude_code "$loop_count"
         local exec_result=$?
@@ -2541,6 +2721,9 @@ Modern CLI Options (Phase 1.1):
     --allowed-tools TOOLS   Comma-separated list of allowed tools (default: $CLAUDE_ALLOWED_TOOLS)
     --no-continue           Disable session continuity across loops
     --session-expiry HOURS  Set session expiration time in hours (default: $CLAUDE_SESSION_EXPIRY_HOURS)
+    --dry-run               Preview loop execution without calling Claude Code API
+    --log-max-size MB       Set max ralph.log size before rotation (default: $LOG_MAX_SIZE_MB)
+    --log-max-files NUM     Set max rotated log files to keep (default: $LOG_MAX_FILES)
 
 Files created:
     - $LOG_DIR/: All execution logs
@@ -2574,6 +2757,8 @@ Examples:
     $0 --output-format text     # Use legacy text output format
     $0 --no-continue            # Disable session continuity
     $0 --session-expiry 48      # 48-hour session expiration
+    $0 --dry-run                # Preview execution without API calls
+    $0 --log-max-size 20        # Rotate ralph.log at 20 MB
 
 HELPEOF
 }
@@ -2682,6 +2867,26 @@ while [[ $# -gt 0 ]]; do
         --auto-reset-circuit)
             CB_AUTO_RESET=true
             shift
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --log-max-size)
+            if [[ -z "$2" || ! "$2" =~ ^[1-9][0-9]*$ ]]; then
+                echo "Error: --log-max-size requires a positive integer (MB)"
+                exit 1
+            fi
+            LOG_MAX_SIZE_MB="$2"
+            shift 2
+            ;;
+        --log-max-files)
+            if [[ -z "$2" || ! "$2" =~ ^[1-9][0-9]*$ ]]; then
+                echo "Error: --log-max-files requires a positive integer"
+                exit 1
+            fi
+            LOG_MAX_FILES="$2"
+            shift 2
             ;;
         *)
             echo "Unknown option: $1"

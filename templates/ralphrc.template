@@ -88,6 +88,27 @@ CB_COOLDOWN_MINUTES=30
 CB_AUTO_RESET=false
 
 # =============================================================================
+# LOG ROTATION
+# =============================================================================
+
+# Maximum ralph.log file size before rotation (in MB)
+LOG_MAX_SIZE_MB=10
+
+# Number of rotated log files to keep (ralph.log.1, ralph.log.2, ...)
+LOG_MAX_FILES=5
+
+# Maximum claude_output_*.log files to keep (oldest deleted first)
+LOG_MAX_OUTPUT_FILES=20
+
+# =============================================================================
+# DRY-RUN MODE
+# =============================================================================
+
+# Preview loop execution without making API calls
+# Also activatable via: ralph --dry-run
+DRY_RUN=false
+
+# =============================================================================
 # ADVANCED SETTINGS
 # =============================================================================
 

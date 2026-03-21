@@ -20,10 +20,16 @@ INPUT=$(cat)
 
 # Extract response text — try multiple JSON paths for compatibility
 response_text=""
-for path in '.result' '.content' '.result.text' '.message.content'; do
+for path in '.result' '.content' '.result.text' '.message.content' '.response[0].text' '.response'; do
   response_text=$(echo "$INPUT" | jq -r "$path // empty" 2>/dev/null || true)
   [[ -n "$response_text" ]] && break
 done
+
+# Fallback: if no JSON path matched, use raw input as text
+# This handles agent mode and unexpected payload formats (WSL-WINDOWS-VERSION-DIVERGENCE bug)
+if [[ -z "$response_text" ]]; then
+  response_text="$INPUT"
+fi
 
 # Parse RALPH_STATUS block fields (use grep -oP on platforms that support it, fallback to sed)
 extract_field() {
