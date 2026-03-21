@@ -1,8 +1,27 @@
 # Implementation Status Summary
 
-**Last Updated**: 2026-01-10
-**Version**: v0.9.8
-**Overall Status**: Phase 1 in progress (core complete, documentation remaining)
+**Last Updated**: 2026-03-21  
+**Version**: v0.11.6 (user-facing); see README for feature list  
+**Overall Status**: Core loop and CLI modernization delivered; see sections below for historical phases
+
+> **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count.
+
+---
+
+## Completed: Stream & loop resilience (March 2026)
+
+Delivered in `lib/response_analyzer.sh`, `ralph_loop.sh`, templates, and `docs/specs/`:
+
+- [x] JSONL / `stream-json` normalization and validated `parse_json_response` exit status
+- [x] Live mode: WSL2/NTFS output file visibility retry; emergency multi-value JSON collapse before analysis
+- [x] Pre-analysis permission denial logging; MCP failure logging from `system` init line
+- [x] Circuit breaker per-session counter reset on new Ralph startup
+- [x] Default `ALLOWED_TOOLS`: `Bash(git -C *)`, `Bash(grep *)`, `Bash(find *)`
+- [x] PROMPT template: explicit STOP after status block; scenario wording for one-task-per-loop
+- [x] Optional `.claude/settings.json` (bash `SessionStart`); optional Docker preflight for `label=ralph.mcp=true`
+- [x] Epics/stories: `docs/specs/epic-jsonl-stream-resilience.md`, `epic-multi-task-cascading-failures.md`, related stories
+
+Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in epic acceptance).
 
 ---
 

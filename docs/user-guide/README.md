@@ -13,6 +13,10 @@ Learn which files Ralph creates, which ones you should customize, and how they w
 ### [Writing Effective Requirements](03-writing-requirements.md)
 Best practices for writing PROMPT.md, when to use specs/, and how fix_plan.md evolves during development. Includes good and bad examples.
 
+### Design specs (Ralph repository)
+
+Loop reliability, tool permissions, and roadmap notes for **Ralph itself** live in the repo’s **[`docs/specs/`](../specs/)** directory (epics, user stories, RFC). That is separate from **`.ralph/specs/`** inside your project (your product requirements).
+
 ## Example Projects
 
 Check out the [examples/](../../examples/) directory for complete, realistic project configurations:

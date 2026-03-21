@@ -169,6 +169,7 @@ Ralph followed this cycle:
 - Read [Understanding Ralph Files](02-understanding-ralph-files.md) to learn what each file does
 - Check [Writing Effective Requirements](03-writing-requirements.md) for best practices
 - Explore the [examples/](../../examples/) directory for more complex projects
+- Contributors: [Design specs index](../specs/README.md) (loop reliability and roadmap, not app requirements)
 
 ## Common Questions
 
@@ -178,6 +179,8 @@ Check `.ralph/logs/` for the latest log. Common reasons:
 - Rate limit reached (waits for reset)
 - Circuit breaker opened (detected stuck loop)
 - All tasks marked complete
+- Permission denied for a tool (v0.11.6+ logs denied commands before analysis—update `ALLOWED_TOOLS` in `.ralphrc`)
+- With **`ralph --live`**, upgrade to **v0.11.6+** if you hit silent exits on stream-json output; see [epic-jsonl-stream-resilience.md](../specs/epic-jsonl-stream-resilience.md)
 
 ### Ralph keeps running tests without implementing anything
 

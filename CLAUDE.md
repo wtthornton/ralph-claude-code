@@ -33,7 +33,7 @@ bats tests/unit/test_cli_parsing.bats
 
 ### Main Scripts (root)
 
-- **ralph_loop.sh** (~2200 lines) — Core autonomous loop. Reads instructions, executes Claude Code CLI, tracks progress, evaluates completion, repeats. Manages rate limiting, session continuity, and circuit breaker state.
+- **ralph_loop.sh** (~2300 lines) — Core autonomous loop. Reads instructions, executes Claude Code CLI, tracks progress, evaluates completion, repeats. Manages rate limiting, session continuity, circuit breaker state, live-stream extraction, and pre-analysis output normalization (`ralph_prepare_claude_output_for_analysis`).
 - **ralph_monitor.sh** — Live tmux dashboard showing loop count, API usage, and recent logs.
 - **setup.sh** — Creates new Ralph-managed projects with `.ralph/` directory structure.
 - **ralph_import.sh** — Converts PRD/specification documents into Ralph task format using Claude Code CLI with JSON output.
@@ -45,7 +45,7 @@ bats tests/unit/test_cli_parsing.bats
 
 | Module | Purpose |
 |--------|---------|
-| `response_analyzer.sh` | Parses Claude CLI output (JSON/text), extracts exit signals, manages sessions, detects questions |
+| `response_analyzer.sh` | Parses Claude CLI output (JSON/text), including **stream-json / JSONL** (multi-value normalization), exit signals, sessions, permission denials, multi–RALPH_STATUS handling |
 | `circuit_breaker.sh` | Three-state pattern (CLOSED/HALF_OPEN/OPEN) to halt runaway loops on stagnation |
 | `enable_core.sh` | Shared logic for ralph_enable and ralph_enable_ci (idempotency, detection, template generation) |
 | `task_sources.sh` | Task import from beads, GitHub Issues, or PRD documents |
@@ -66,6 +66,10 @@ bats tests/unit/test_cli_parsing.bats
 
 **File protection**: Three layers — (1) granular `ALLOWED_TOOLS` restrictions prevent destructive git commands, (2) PROMPT.md warns Claude not to modify `.ralph/`, (3) `validate_ralph_integrity()` runs before every loop iteration.
 
+**Live / JSONL pipeline**: `--live` captures NDJSON; the loop copies the full stream, retries `-f` on the output file (WSL2/9P), extracts the last `type: "result"` line when `CLAUDE_USE_CONTINUE` is true, then `ralph_prepare_claude_output_for_analysis` logs permission denials and failed MCP init, collapses any remaining multi-value JSON to a single result object, and passes the file to `analyze_response` / `parse_json_response`.
+
+**Design documentation**: Reliability epics and stories live in **`docs/specs/`** (e.g. `epic-jsonl-stream-resilience.md`, `epic-multi-task-cascading-failures.md`). Long-term platform integration is drafted in `docs/specs/claude-code-2026-enhancements.md`.
+
 ### State Files (in `.ralph/` within managed projects)
 
 - `.call_count` / `.last_reset` — Rate limit tracking (hourly reset)
@@ -83,7 +87,7 @@ bats tests/unit/test_cli_parsing.bats
 Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 - `CLAUDE_CODE_CMD` — CLI command (default: `"claude"`, fallback: `"npx @anthropic-ai/claude-code"`)
 - `CLAUDE_OUTPUT_FORMAT` — `json` (default) or `text`
-- `CLAUDE_ALLOWED_TOOLS` — Tool permission whitelist
+- `ALLOWED_TOOLS` / `CLAUDE_ALLOWED_TOOLS` — Tool permission whitelist (defaults include `Bash(git -C *)`, `Bash(grep *)`, `Bash(find *)`; see `templates/ralphrc.template`)
 - `CLAUDE_USE_CONTINUE` — Session continuity toggle
 - `CLAUDE_AUTO_UPDATE` — Auto-update CLI at startup (disable for Docker/air-gapped)
 - `CB_COOLDOWN_MINUTES`, `CB_AUTO_RESET` — Circuit breaker recovery config

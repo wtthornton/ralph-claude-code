@@ -293,7 +293,8 @@ main() {
     echo ""
     echo "Global commands available:"
     echo "  ralph --monitor          # Start Ralph with integrated monitoring"
-    echo "  ralph --help            # Show Ralph options"
+    echo "  ralph --live             # Stream Claude Code output (JSON/stream-json resilient)"
+    echo "  ralph --help            # Show Ralph options (includes v0.11.6+ behavior notes)"
     echo "  ralph-setup my-project  # Create new Ralph project"
     echo "  ralph-enable            # Enable Ralph in existing project (interactive)"
     echo "  ralph-enable-ci         # Enable Ralph in existing project (non-interactive)"
@@ -306,6 +307,8 @@ main() {
     echo "  2. cd my-awesome-project"
     echo "  3. # Edit .ralph/PROMPT.md with your requirements"
     echo "  4. ralph --monitor"
+    echo ""
+    echo "Docs: README.md, docs/user-guide/, docs/specs/ (design). TESTING.md for npm test."
     echo ""
     
     if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then

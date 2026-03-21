@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml/badge.svg)](https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.11.5-blue)
-![Tests](https://img.shields.io/badge/tests-556%20passing-green)
+![Version](https://img.shields.io/badge/version-0.11.6-blue)
+![Tests](https://img.shields.io/badge/tests-566%20passing-green)
 [![GitHub Issues](https://img.shields.io/github/issues/frankbria/ralph-claude-code)](https://github.com/frankbria/ralph-claude-code/issues)
 [![Mentioned in Awesome Claude Code](https://awesome.re/mentioned-badge.svg)](https://github.com/hesreallyhim/awesome-claude-code)
 [![Follow on X](https://img.shields.io/twitter/follow/FrankBria18044?style=social)](https://x.com/FrankBria18044)
@@ -16,9 +16,9 @@ Ralph is an implementation of the Geoffrey Huntley's technique for Claude Code t
 
 ## Project Status
 
-**Version**: v0.11.5 - Active Development
+**Version**: v0.11.6 - Active Development
 **Core Features**: Working and tested
-**Test Coverage**: 566 tests, 100% pass rate
+**Test Coverage**: 566 tests, 100% pass rate (run `npm test` for the current count)
 
 ### What's Working Now
 - Autonomous development loops with intelligent exit detection
@@ -33,6 +33,11 @@ Ralph is an implementation of the Geoffrey Huntley's technique for Claude Code t
 - **Interactive project enablement with `ralph-enable` wizard**
 - **`.ralphrc` configuration file for project settings**
 - **Live streaming output with `--live` flag for real-time Claude Code visibility**
+- **Stream-json / JSONL resilience** — `parse_json_response` normalizes multi-line CLI output; emergency extraction and WSL2/NTFS file-visibility retries reduce silent loop exits
+- **Pre-analysis diagnostics** — permission denials and failed MCP servers are logged from raw output even if JSON parsing fails later
+- **Fresh circuit breaker counters** each new `ralph` process (stale loop counters cleared; OPEN/HALF_OPEN state preserved)
+- **Default `ALLOWED_TOOLS`** include `Bash(git -C *)`, `Bash(grep *)`, and `Bash(find *)` (alongside granular safe git patterns)
+- Optional **`.claude/settings.json`** in this repo: bash `SessionStart` hook (WSL-friendly; merge into your project if you use Claude Code hooks)
 - Multi-line error matching for accurate stuck loop detection
 - 5-hour API limit handling with user prompts
 - tmux integration for live monitoring
@@ -42,7 +47,17 @@ Ralph is an implementation of the Geoffrey Huntley's technique for Claude Code t
 
 ### Recent Improvements
 
-**v0.11.5 - Community Bug Fixes** (latest)
+**v0.11.6 - Stream resilience, diagnostics, and prompts**
+- JSONL / `stream-json` handling in `lib/response_analyzer.sh` (`jq -s`-based multi-value detection, last `result` object, session id merge)
+- Validated `parse_json_response` output file; return non-zero on empty/invalid parse result
+- Live mode: backoff retry before reading `claude_output_*.log` on WSL2/9P mounts; emergency collapse of multi-value streams before analysis
+- `ralph_prepare_claude_output_for_analysis`: permission-denial scan, MCP failure line from `system` init, emergency JSONL normalize (order preserves MCP logging)
+- Circuit breaker per-session counter reset at Ralph startup; optional Docker preflight for containers labeled `ralph.mcp=true`
+- PROMPT template: explicit **STOP** after `RALPH_STATUS`; scenario text avoids “Ralph’s Action” misreads; `TASKS_COMPLETED_THIS_LOOP: 1` in progress example
+- Specs: epics and stories under [`docs/specs/`](docs/specs/) (RALPH-JSONL, RALPH-MULTI); RFC draft [`docs/specs/claude-code-2026-enhancements.md`](docs/specs/claude-code-2026-enhancements.md)
+- Tests and defaults aligned for expanded `ALLOWED_TOOLS`
+
+**v0.11.5 - Community Bug Fixes**
 - Fixed API limit false positive: Timeout (exit code 124) no longer misidentified as API 5-hour limit (#183)
 - Three-layer API limit detection: timeout guard → structural JSON (`rate_limit_event`) → filtered text fallback
 - Unattended mode: API limit prompt now auto-waits on timeout instead of exiting
@@ -153,6 +168,7 @@ Ralph is an implementation of the Geoffrey Huntley's technique for Claude Code t
 - **CI/CD Integration** - GitHub Actions workflow with automated testing
 - **Clean Uninstall** - Dedicated uninstall script for complete removal
 - **Live Streaming Output** - Real-time visibility into Claude Code execution with `--live` flag
+- **Operational specs** - Reliability epics and stories in [`docs/specs/`](docs/specs/) for contributors and advanced debugging
 
 ## Quick Start
 
@@ -267,6 +283,9 @@ After running `ralph-enable` or `ralph-import`, you'll have a `.ralph/` director
 | `.ralph/specs/` | Empty directory | Add files when PROMPT.md isn't detailed enough |
 | `.ralph/specs/stdlib/` | Empty directory | Add reusable patterns and conventions |
 | `.ralphrc` | Yes (project-aware) | Rarely edit (sensible defaults) |
+| `.claude/settings.json` | Optional | Merge from Ralph repo if you use Claude Code **hooks** (e.g. cross-platform `SessionStart`) |
+
+Design specs for loop reliability live in **[`docs/specs/`](docs/specs/)** (epics, stories, RFC). Project requirements still belong in **`.ralph/specs/`** inside each app.
 
 ### Key File Relationships
 
@@ -409,8 +428,9 @@ MAX_CALLS_PER_HOUR=100
 CLAUDE_TIMEOUT_MINUTES=15
 CLAUDE_OUTPUT_FORMAT="json"
 
-# Tool permissions
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git *),Bash(npm *),Bash(pytest)"
+# Tool permissions: granular git subcommands + git -C / grep / find (see templates/ralphrc.template for comments)
+# Broad Bash(git *) is optional but allows destructive git commands.
+ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)"
 
 # Session management
 SESSION_CONTINUITY=true
@@ -512,6 +532,8 @@ tail -f .ralph/live.log  # Watch in another terminal
 ```
 
 Live streaming mode shows Claude Code's output in real-time as it works, providing visibility into what's happening during each loop iteration.
+
+**Implementation details (v0.11.6+):** `--live` uses JSON/stream-friendly output. Ralph copies the full stream to `claude_output_*_stream.log`, extracts the last `type: "result"` line when possible, retries file visibility on slow mounts (e.g. WSL2 + NTFS), then normalizes any remaining multi-value JSON before `analyze_response`. See [`docs/specs/epic-jsonl-stream-resilience.md`](docs/specs/epic-jsonl-stream-resilience.md).
 
 ### Session Continuity
 
@@ -732,7 +754,7 @@ tail -f .ralph/logs/ralph.log
 
 ### Common Issues
 
-- **Ralph exits silently on first loop** - Claude Code CLI may not be installed or not in PATH. Ralph validates the command at startup and shows installation instructions. If using npx, add `CLAUDE_CODE_CMD="npx @anthropic-ai/claude-code"` to `.ralphrc`
+- **Ralph exits silently on first loop** - Usually Claude Code CLI missing or not on `PATH` (Ralph validates at startup). If using npx, set `CLAUDE_CODE_CMD="npx @anthropic-ai/claude-code"` in `.ralphrc`. With **`--live`**, older builds could also exit silently on raw JSONL without normalization — **v0.11.6+** fixes this; upgrade and check `.ralph/logs/ralph.log`
 - **Rate Limits** - Ralph automatically waits and displays countdown
 - **5-Hour API Limit** - Ralph detects and prompts for user action (wait or exit)
 - **Stuck Loops** - Check `fix_plan.md` for unclear or conflicting tasks
@@ -743,11 +765,12 @@ tail -f .ralph/logs/ralph.log
 - **tmux Session Lost** - Use `tmux list-sessions` and `tmux attach` to reconnect
 - **Session Expired** - Sessions expire after 24 hours by default; use `--reset-session` to start fresh
 - **timeout: command not found (macOS)** - Install GNU coreutils: `brew install coreutils`
-- **Permission Denied** - Ralph halts when Claude Code is denied permission for commands:
+- **Permission Denied** - Ralph halts when Claude Code is denied permission for commands. **v0.11.6+** logs denied tools to `ralph.log` *before* response analysis, so you still see hints if parsing fails.
   1. Edit `.ralphrc` and update `ALLOWED_TOOLS` to include required tools
-  2. Common patterns: `Bash(npm *)`, `Bash(git *)`, `Bash(pytest)`
+  2. Common patterns: `Bash(npm *)`, `Bash(pytest)`, `Bash(git -C *)`, `Bash(grep *)`, `Bash(find *)`, or (broader risk) `Bash(git *)`
   3. Run `ralph --reset-session` after updating `.ralphrc`
   4. Restart with `ralph --monitor`
+- **MCP servers failed** - Check `ralph.log` for `MCP servers failed to connect`. Optional: label MCP containers with `ralph.mcp=true` and Ralph will warn at startup if Docker shows them stopped
 
 ## Contributing
 
@@ -822,7 +845,7 @@ ralph [OPTIONS]
   -l, --live              Enable live streaming output (real-time Claude Code visibility)
   -t, --timeout MIN       Set Claude Code execution timeout in minutes (1-120, default: 15)
   --output-format FORMAT  Set output format: json (default) or text
-  --allowed-tools TOOLS   Set allowed Claude tools (default: Write,Read,Edit,Bash(git *),Bash(npm *),Bash(pytest))
+  --allowed-tools TOOLS   Set allowed Claude tools (default: granular git + Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest); see templates/ralphrc.template)
   --no-continue           Disable session continuity (start fresh each loop)
   --reset-circuit         Reset the circuit breaker
   --circuit-status        Show circuit breaker status
@@ -859,14 +882,14 @@ tmux attach -t <name>     # Reattach to detached session
 
 Ralph is under active development with a clear path to v1.0.0. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the complete roadmap.
 
-### Current Status: v0.11.5
+### Current Status: v0.11.6
 
 **What's Delivered:**
 - Core loop functionality with intelligent exit detection
 - **Dual-condition exit gate** (completion indicators + EXIT_SIGNAL)
 - Rate limiting (100 calls/hour) and circuit breaker pattern
 - Response analyzer with semantic understanding
-- **556 comprehensive tests** (100% pass rate)
+- **566 comprehensive tests** (100% pass rate; run `npm test` for live count)
 - **Live streaming output mode** for real-time Claude Code visibility
 - tmux integration and live monitoring
 - PRD import functionality with modern CLI JSON parsing

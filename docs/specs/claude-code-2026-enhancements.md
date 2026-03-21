@@ -3,7 +3,7 @@
 **Status:** Draft
 **Author:** TheStudio / tappt
 **Date:** 2026-03-21
-**Ralph Version:** v0.11.5 (baseline)
+**Ralph Version:** v0.11.6 (baseline for this RFC; line counts and file layout may drift)
 **Target Version:** v1.0.0
 **Claude Code Baseline:** CLI v2.x (2026 feature set)
 

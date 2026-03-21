@@ -138,7 +138,7 @@ Run Ralph in isolated sandbox environments for security and reproducibility.
 
 ## Test Coverage
 
-**Current**: 276 tests across 11 test files (100% pass rate)
+**Current**: Run `npm test` for the live count (566+ as of v0.11.6); historically 11+ test files under `tests/unit/` and `tests/integration/` (100% pass rate expected in CI)
 
 | Category | Tests | Files |
 |----------|-------|-------|

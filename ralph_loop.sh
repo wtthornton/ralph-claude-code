@@ -2160,6 +2160,14 @@ Files created:
     - .ralph/.call_count: API call counter for rate limiting
     - .ralph/.last_reset: Timestamp of last rate limit reset
 
+Behavior notes (v0.11.6+):
+    - --live uses stream-json-friendly output: full stream preserved (*_stream.log), result line
+      extracted when possible; WSL2/NTFS mounts retry file visibility before extraction.
+    - Before each analyze_response: emergency JSONL normalize if needed; permission denials and
+      failed MCP servers logged from raw output (see docs/specs/epic-*.md in Ralph repo).
+    - New ralph invocation resets circuit breaker *counters* (not OPEN/CLOSED state).
+    - Optional: Docker containers labeled ralph.mcp=true are checked at startup (non-fatal).
+
 Example workflow:
     ralph-setup my-project     # Create project
     cd my-project             # Enter project directory

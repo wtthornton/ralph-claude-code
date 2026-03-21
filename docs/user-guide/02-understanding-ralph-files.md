@@ -12,6 +12,7 @@ After running `ralph-enable`, `ralph-import`, or `ralph-setup`, you'll have a `.
 | `.ralph/specs/` | Empty directory created | **You** add files when needed | Ralph reads for context | Add when PROMPT.md isn't detailed enough |
 | `.ralph/specs/stdlib/` | Empty directory created | **You** add reusable patterns | Ralph reads for conventions | Add shared patterns and conventions |
 | `.ralphrc` | Yes (project-aware) | Usually leave as-is | Ralph reads at startup | Rarely edit (sensible defaults) |
+| `.claude/settings.json` | Optional | You (merge from Ralph repo or write your own) | Claude Code (hooks) | Add only if you use Claude Code hooks; Ralph ships a bash `SessionStart` example |
 | `.ralph/logs/` | Created automatically | Ralph writes logs | You review for debugging | Don't edit (read-only) |
 | `.ralph/status.json` | Created at runtime | Ralph updates | Monitoring tools | Don't edit (read-only) |
 
@@ -148,7 +149,8 @@ Use HTTPException with these codes:
 PROJECT_NAME="my-project"
 PROJECT_TYPE="typescript"
 MAX_CALLS_PER_HOUR=100
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git *),Bash(npm *),Bash(pytest)"
+# Match templates/ralphrc.template for the full default string
+ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)"
 ```
 
 **When to edit**:
@@ -243,3 +245,5 @@ All service methods must log:
 4. **Don't over-specify** - If Claude can figure it out from context, you don't need to specify it.
 
 5. **Review logs** - When something goes wrong, `.ralph/logs/` tells you what Ralph was thinking.
+
+6. **Ralph repo `docs/specs/`** - These are **design documents for the Ralph harness** (JSONL resilience, multi-task behavior, future Claude Code integration), not your application requirements. Your app specs stay under **`.ralph/specs/`** in each project.

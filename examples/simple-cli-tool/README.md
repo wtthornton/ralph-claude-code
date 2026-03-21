@@ -4,7 +4,7 @@ This example shows a minimal Ralph configuration for a command-line todo applica
 
 ## What This Example Demonstrates
 
-- **Minimal PROMPT.md** - Just enough context for a focused project
+- **Minimal PROMPT.md** - Just enough context for a focused project (for the latest execution contract and STOP-after-status guidance, compare with `templates/PROMPT.md` in the Ralph repo)
 - **Specific fix_plan.md** - Concrete, actionable tasks
 - **No specs/ needed** - Simple enough that PROMPT.md covers everything
 

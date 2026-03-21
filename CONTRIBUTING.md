@@ -57,7 +57,7 @@ npm install
 npm test
 
 # You should see output like:
-# ✓ 276 tests passed (100% pass rate)
+# ✓ N tests passed (100% pass rate) — run `npm test` for current N
 ```
 
 ### Project Structure
@@ -73,7 +73,8 @@ ralph-claude-code/
 │   ├── circuit_breaker.sh
 │   ├── response_analyzer.sh
 │   └── date_utils.sh
-├── templates/           # Project templates
+├── templates/           # Project templates (keep in sync with setup.sh / enable_core.sh defaults)
+├── docs/specs/          # Design epics, stories, RFCs (loop reliability, future Claude Code integration)
 ├── tests/               # Test suite
 │   ├── unit/            # Unit tests
 │   ├── integration/     # Integration tests

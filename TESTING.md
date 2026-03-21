@@ -2,7 +2,7 @@
 
 This guide provides comprehensive documentation for the Ralph test suite, helping contributors understand how to run, write, and maintain tests.
 
-**Current Status**: 276 tests | 100% pass rate | CI/CD via GitHub Actions
+**Current Status**: Run `npm test` for the live count (566+ as of v0.11.6 README) | 100% pass rate expected | CI/CD via GitHub Actions
 
 ---
 
@@ -54,11 +54,11 @@ This installs:
 npm test
 
 # Expected output:
-# 1..276
+# 1..N   (N increases as tests are added)
 # ok 1 - ...
 # ok 2 - ...
 # ...
-# 276 tests, 0 failures
+# N tests, 0 failures (see npm test output for N)
 ```
 
 ### Run Tests by Category
