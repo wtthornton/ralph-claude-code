@@ -46,12 +46,6 @@ init_circuit_breaker() { :; }
 record_loop_result() { :; }
 EOF
 
-    cat > lib/response_analyzer.sh << 'EOF'
-RALPH_DIR="${RALPH_DIR:-.ralph}"
-analyze_response() { :; }
-detect_output_format() { echo "text"; }
-EOF
-
     cat > lib/date_utils.sh << 'EOF'
 get_iso_timestamp() { date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S'; }
 get_epoch_timestamp() { date +%s; }

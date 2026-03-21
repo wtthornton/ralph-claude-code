@@ -40,6 +40,7 @@ teardown() {
 }
 
 @test "LOOP-1: no jq -s length calls in response_analyzer.sh" {
+    [[ -f "$RESPONSE_ANALYZER" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     run grep "jq -s 'length'" "$RESPONSE_ANALYZER"
     assert_failure  # grep returns 1 when no matches
 }
@@ -106,10 +107,12 @@ EOF
 }
 
 @test "LOOP-2: response_analyzer preserves original_output_file for aggregation" {
+    [[ -f "$RESPONSE_ANALYZER" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     grep -q 'original_output_file' "$RESPONSE_ANALYZER"
 }
 
 @test "LOOP-2: response_analyzer aggregates denials from all results" {
+    [[ -f "$RESPONSE_ANALYZER" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     # Verify the aggregation path exists — grep result lines piped to jq -s
     grep -q 'all_denials_json' "$RESPONSE_ANALYZER"
     grep -q 'permission_denials' "$RESPONSE_ANALYZER"
@@ -155,6 +158,7 @@ EOF
 # =============================================================================
 
 @test "LOOP-4: update_exit_signals validates JSON before processing" {
+    [[ -f "$RESPONSE_ANALYZER" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     source "$RESPONSE_ANALYZER"
 
     # Create invalid analysis file
@@ -169,6 +173,7 @@ EOF
 }
 
 @test "LOOP-4: update_exit_signals handles missing analysis file" {
+    [[ -f "$RESPONSE_ANALYZER" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     source "$RESPONSE_ANALYZER"
 
     run update_exit_signals "/nonexistent/file" "$EXIT_SIGNALS_FILE"
@@ -180,6 +185,7 @@ EOF
 }
 
 @test "LOOP-4: update_exit_signals succeeds on valid analysis" {
+    [[ -f "$RESPONSE_ANALYZER" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     source "$RESPONSE_ANALYZER"
 
     cat > "$RALPH_DIR/.response_analysis" <<'EOF'

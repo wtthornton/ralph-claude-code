@@ -2,7 +2,7 @@
 
 **Epic:** [Sub-agents](epic-subagents.md)
 **Priority:** Important
-**Status:** Open
+**Status:** Done
 **Effort:** Small
 **Component:** `.claude/agents/ralph-explorer.md`
 

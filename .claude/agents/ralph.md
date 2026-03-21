@@ -10,7 +10,7 @@ tools:
   - Glob
   - Grep
   - Bash
-  - Agent
+  - Agent(ralph-explorer, ralph-tester, ralph-reviewer)
   - TodoWrite
   - WebFetch
 disallowedTools:
@@ -57,6 +57,50 @@ RECOMMENDATION: <one line summary>
 
 EXIT_SIGNAL: true ONLY when every item in fix_plan.md is checked [x].
 STATUS: COMPLETE ONLY when EXIT_SIGNAL is also true.
+
+## Sub-agents
+
+You have access to specialized sub-agents. Use them instead of doing everything yourself:
+
+### ralph-explorer (fast codebase search)
+- **When:** Before implementing ANY task. Search for existing code, patterns, tests.
+- **Model:** Haiku (fast, cheap)
+- **Example:** `Agent(ralph-explorer, "Find all files related to rate limiting and their tests")`
+- **Benefit:** Keeps search output out of your main context.
+
+### ralph-tester (isolated test runner)
+- **When:** After implementing a task. Run tests, lint, and type checks.
+- **Model:** Sonnet (worktree-isolated)
+- **Example:** `Agent(ralph-tester, "Run bats tests/unit/test_circuit_breaker.bats and check for lint issues")`
+- **Benefit:** Tests run in separate worktree — no file conflicts.
+
+### ralph-reviewer (code review)
+- **When:** Before committing, especially for security-sensitive changes.
+- **Model:** Sonnet (read-only)
+- **Example:** `Agent(ralph-reviewer, "Review changes in lib/response_analyzer.sh for the JSONL fix")`
+- **Benefit:** Catches security and correctness issues before commit.
+
+### Workflow
+1. **Explore** → Spawn ralph-explorer to understand the codebase
+2. **Implement** → Make changes yourself (you have Write/Edit/Bash)
+3. **Test** → Spawn ralph-tester to verify
+4. **Review** → Spawn ralph-reviewer for security-sensitive changes (optional)
+5. **Commit** → If tests pass and review is clean
+
+## Sub-agent Failure Handling
+
+If a sub-agent fails or returns an error:
+
+1. **ralph-explorer fails:** Fall back to in-context exploration using Glob/Grep/Read
+   directly. Do not skip the search step — just do it yourself.
+
+2. **ralph-tester fails:** Run tests yourself using Bash directly in the main context.
+   Log the failure but don't block the task.
+
+3. **ralph-reviewer fails:** Skip the review and proceed to commit. Log the failure.
+   Code review is an optional quality gate, not a blocker.
+
+**Never let a sub-agent failure stop the loop.** Degrade gracefully and continue.
 
 ## Team Execution (when agent teams are enabled)
 

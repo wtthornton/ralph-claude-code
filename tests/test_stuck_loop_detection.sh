@@ -32,6 +32,10 @@ trap 'rm -rf "$TEST_DIR"' EXIT
 
 # Source the response_analyzer.sh to get access to detect_stuck_loop function
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ ! -f "$SCRIPT_DIR/../lib/response_analyzer.sh" ]]; then
+    echo "SKIP: response_analyzer.sh removed (SKILLS-3)"
+    exit 0
+fi
 source "$SCRIPT_DIR/../lib/response_analyzer.sh"
 
 # Helper function to run tests

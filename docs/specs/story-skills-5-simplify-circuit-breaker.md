@@ -2,7 +2,7 @@
 
 **Epic:** [Skills + Bash Reduction](epic-skills-bash-reduction.md)
 **Priority:** Important
-**Status:** Open
+**Status:** Done
 **Effort:** Medium
 **Component:** `lib/circuit_breaker.sh`, `ralph_loop.sh`
 **Depends on:** RALPH-HOOKS-4 (on-stop.sh manages circuit breaker state)

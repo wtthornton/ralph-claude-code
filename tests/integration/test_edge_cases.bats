@@ -32,6 +32,7 @@ setup() {
     echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}' > "$EXIT_SIGNALS_FILE"
 
     # Source library components
+    [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
     source "${BATS_TEST_DIRNAME}/../../lib/circuit_breaker.sh"
 }

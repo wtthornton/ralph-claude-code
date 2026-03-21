@@ -52,11 +52,11 @@ adjustments to the original RFC:
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SUBAGENTS-1](story-subagents-1-explorer.md) | Create ralph-explorer.md agent definition | Important | Small | Open |
-| [RALPH-SUBAGENTS-2](story-subagents-2-tester.md) | Create ralph-tester.md agent with worktree isolation | Important | Small | Open |
-| [RALPH-SUBAGENTS-3](story-subagents-3-reviewer.md) | Create ralph-reviewer.md agent definition | Nice-to-have | Small | Open |
-| [RALPH-SUBAGENTS-4](story-subagents-4-ralph-integration.md) | Update ralph.md to reference and spawn sub-agents | Important | Small | Open |
-| [RALPH-SUBAGENTS-5](story-subagents-5-failure-handling.md) | Add sub-agent failure handling and SubagentStop hook | Important | Medium | Open |
+| [RALPH-SUBAGENTS-1](story-subagents-1-explorer.md) | Create ralph-explorer.md agent definition | Important | Small | Done |
+| [RALPH-SUBAGENTS-2](story-subagents-2-tester.md) | Create ralph-tester.md agent with worktree isolation | Important | Small | Done |
+| [RALPH-SUBAGENTS-3](story-subagents-3-reviewer.md) | Create ralph-reviewer.md agent definition | Nice-to-have | Small | Done |
+| [RALPH-SUBAGENTS-4](story-subagents-4-ralph-integration.md) | Update ralph.md to reference and spawn sub-agents | Important | Small | Done |
+| [RALPH-SUBAGENTS-5](story-subagents-5-failure-handling.md) | Add sub-agent failure handling and SubagentStop hook | Important | Medium | Done |
 
 ## Implementation Order
 

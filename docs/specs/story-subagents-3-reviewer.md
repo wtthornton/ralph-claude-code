@@ -2,7 +2,7 @@
 
 **Epic:** [Sub-agents](epic-subagents.md)
 **Priority:** Nice-to-have
-**Status:** Open
+**Status:** Done
 **Effort:** Small
 **Component:** `.claude/agents/ralph-reviewer.md`
 

@@ -1,19 +1,19 @@
 # Ralph Claude Code — Epic & Story Index
 
-> **Generated:** 2026-03-21 | **Total Epics:** 7 | **Total Stories:** 37 (26 Done, 11 Open)
+> **Generated:** 2026-03-21 | **Total Epics:** 7 | **Total Stories:** 37 (37 Done, 0 Open)
 
 ---
 
 ## Execution Plan Overview
 
 ```
-Phase 0 (DONE)     Phase 0.5 (NEXT)    Phase 1              Phase 2              Phase 3              Phase 4
+Phase 0 (DONE)     Phase 0.5 (DONE)    Phase 1 (DONE)       Phase 2 (DONE)       Phase 3 (DONE)       Phase 4 (DONE)
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
 │ RALPH-JSONL  │──▶│ RALPH-LOOP   │──▶│ RALPH-HOOKS  │───▶│RALPH-SUBAGENTS│──▶│ RALPH-SKILLS │──▶│ RALPH-TEAMS  │
-│ 4/4 Done     │   │ 5/5 Done     │   │ 6/6 Done     │    │ 0/5 Open      │   │ 0/5 Open     │   │ 5/5 Done     │
+│ 4/4 Done     │   │ 5/5 Done     │   │ 6/6 Done     │    │ 5/5 Done      │   │ 5/5 Done     │   │ 5/5 Done     │
 │              │   │              │   │              │    │               │   │              │   │              │
 │ RALPH-MULTI  │   │ Critical     │   │ Critical     │    │ Important     │   │ Important    │   │ Nice-to-have │
-│ 6/6 Done     │   │ P0 Regrssion │   │ Foundation   │    │ Depends: P1   │   │ Depends: P1+2│   │ Experimental │
+│ 6/6 Done     │   │ P0 Regrssion │   │ Foundation   │    │ Sub-agents    │   │ -1,368 lines │   │ Experimental │
 └──────────────┘   └──────────────┘   └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
 ```
 
@@ -45,7 +45,7 @@ Phase 0 (DONE)     Phase 0.5 (NEXT)    Phase 1              Phase 2             
 
 ---
 
-## Phase 0.5 — Next Up (P0 Regression Fixes)
+## Phase 0.5 — Complete (P0 Regression Fixes)
 
 ### RALPH-LOOP: Loop Stability & Analysis Resilience
 **Priority:** Critical | **Status:** Done | **Target:** v0.12.0 | **Dependencies:** None
@@ -60,7 +60,7 @@ Phase 0 (DONE)     Phase 0.5 (NEXT)    Phase 1              Phase 2             
 
 ---
 
-## Phase 1 — Hooks Foundation
+## Phase 1 — Complete (Hooks Foundation)
 
 ### RALPH-HOOKS: Hooks + Agent Definition
 **Priority:** Critical | **Status:** Done | **Target:** v1.0.0 | **Dependencies:** RALPH-LOOP (Phase 0.5)
@@ -76,49 +76,38 @@ Phase 0 (DONE)     Phase 0.5 (NEXT)    Phase 1              Phase 2             
 
 ---
 
-## Phase 2 — Sub-agents
+## Phase 2 — Complete (Sub-agents)
 
 ### RALPH-SUBAGENTS: Sub-agents
-**Priority:** Important | **Status:** Open | **Target:** v1.0.0 | **Dependencies:** RALPH-HOOKS (Phase 1)
+**Priority:** Important | **Status:** Done | **Target:** v1.0.0 | **Dependencies:** RALPH-HOOKS (Phase 1)
 
-| # | ID | Story | Priority | Effort | Blocked By |
-|---|-----|-------|----------|--------|------------|
-| 1 | SUBAGENTS-1 | Create ralph-explorer.md Agent Definition | Important | Small | HOOKS-1 |
-| 2 | SUBAGENTS-2 | Create ralph-tester.md Agent with Worktree Isolation | Important | Small | HOOKS-1 |
-| 3 | SUBAGENTS-3 | Create ralph-reviewer.md Agent Definition | Nice-to-have | Small | HOOKS-1 |
-| 4 | SUBAGENTS-4 | Update ralph.md to Reference and Spawn Sub-agents | Important | Small | SUBAGENTS-1,2,3 |
-| 5 | SUBAGENTS-5 | Add Sub-agent Failure Handling and SubagentStop Hook | Important | Medium | SUBAGENTS-4, HOOKS-2 |
-
-**Recommended execution order:**
-1. SUBAGENTS-1 + SUBAGENTS-2 + SUBAGENTS-3 (parallel — independent agent definitions)
-2. SUBAGENTS-4 (integrates all sub-agents into ralph.md)
-3. SUBAGENTS-5 (failure handling and hooks, do last)
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | SUBAGENTS-1 | Create ralph-explorer.md Agent Definition | Important | Small | **Done** |
+| 2 | SUBAGENTS-2 | Create ralph-tester.md Agent with Worktree Isolation | Important | Small | **Done** |
+| 3 | SUBAGENTS-3 | Create ralph-reviewer.md Agent Definition | Nice-to-have | Small | **Done** |
+| 4 | SUBAGENTS-4 | Update ralph.md to Reference and Spawn Sub-agents | Important | Small | **Done** |
+| 5 | SUBAGENTS-5 | Add Sub-agent Failure Handling and SubagentStop Hook | Important | Medium | **Done** |
 
 ---
 
-## Phase 3 — Skills & Bash Reduction
+## Phase 3 — Complete (Skills & Bash Reduction)
 
 ### RALPH-SKILLS: Skills + Bash Reduction
-**Priority:** Important | **Status:** Open | **Target:** v1.0.0 | **Dependencies:** RALPH-HOOKS (Phase 1), RALPH-SUBAGENTS (Phase 2)
-**Impact:** Removes ~1,368 lines of bash code.
+**Priority:** Important | **Status:** Done | **Target:** v1.0.0 | **Dependencies:** RALPH-HOOKS (Phase 1), RALPH-SUBAGENTS (Phase 2)
+**Impact:** Removed ~1,368 lines of bash code.
 
-| # | ID | Story | Priority | Effort | Blocked By | Lines Removed |
-|---|-----|-------|----------|--------|------------|---------------|
-| 1 | SKILLS-1 | Create ralph-loop Skill | Important | Small | HOOKS-4 | — |
-| 2 | SKILLS-2 | Create ralph-research Skill | Nice-to-have | Small | SUBAGENTS-1 | — |
-| 3 | SKILLS-4 | Remove file_protection.sh | Important | Trivial | HOOKS-5 | -58 |
-| 4 | SKILLS-5 | Simplify circuit_breaker.sh | Important | Medium | HOOKS-4 | -375 |
-| 5 | SKILLS-3 | Remove response_analyzer.sh | Important | Medium | HOOKS-4 (production validated) | -935 |
-
-**Recommended execution order:**
-1. SKILLS-1 (core loop skill — validates hook-based approach works end-to-end)
-2. SKILLS-2 + SKILLS-4 (parallel — research skill + file protection removal)
-3. SKILLS-5 (circuit breaker simplification)
-4. SKILLS-3 (largest removal — do last after hooks proven in production)
+| # | ID | Story | Priority | Effort | Status | Lines Removed |
+|---|-----|-------|----------|--------|--------|---------------|
+| 1 | SKILLS-1 | Create ralph-loop Skill | Important | Small | **Done** | — |
+| 2 | SKILLS-2 | Create ralph-research Skill | Nice-to-have | Small | **Done** | — |
+| 3 | SKILLS-4 | Remove file_protection.sh | Important | Trivial | **Done** | -58 |
+| 4 | SKILLS-5 | Simplify circuit_breaker.sh | Important | Medium | **Done** | -375 |
+| 5 | SKILLS-3 | Remove response_analyzer.sh | Important | Medium | **Done** | -935 |
 
 ---
 
-## Phase 4 — Agent Teams (Experimental)
+## Phase 4 — Complete (Agent Teams, Experimental)
 
 ### RALPH-TEAMS: Agent Teams + Parallelism
 **Priority:** Nice-to-have | **Status:** Done | **Target:** v1.1.0 | **Dependencies:** RALPH-HOOKS, RALPH-SUBAGENTS
@@ -138,38 +127,19 @@ Phase 0 (DONE)     Phase 0.5 (NEXT)    Phase 1              Phase 2             
 
 | Priority | Open | Done | Total |
 |----------|------|------|-------|
-| Critical | 2 | 9 | 11 |
+| Critical | 0 | 11 | 11 |
 | High | 0 | 4 | 4 |
-| Important | 8 | 7 | 15 |
+| Important | 0 | 15 | 15 |
 | Medium | 0 | 4 | 4 |
-| Nice-to-have | 1 | 1 | 2 |
+| Nice-to-have | 0 | 2 | 2 |
 | Defensive/Low | 0 | 1 | 1 |
-| **Total** | **11** | **26** | **37** |
-
-## Effort Estimate (Open Stories Only)
-
-| Effort | Count | Approx Scope |
-|--------|-------|--------------|
-| Trivial | 1 | < 30 min each |
-| Small | 7 | 1-2 hours each |
-| Medium | 3 | 2-4 hours each |
-| **Total** | **11** | |
+| **Total** | **0** | **37** | **37** |
 
 ## Critical Path
 
-The shortest path to v1.0.0 follows this critical dependency chain:
+All phases complete. v1.0.0 epic/story goals achieved.
 
 ```
-LOOP-1 ──▶ LOOP-4
-  │
-  ▼
-HOOKS-1 ──▶ HOOKS-6 ──▶ SUBAGENTS-4 ──▶ SKILLS-1
-   │                                        │
-HOOKS-2 ──▶ HOOKS-4 ──────────────────▶ SKILLS-3 (production validation gate)
-   │            │
-   ├──▶ HOOKS-3 ├──▶ SKILLS-5
-   └──▶ HOOKS-5 └──▶ SKILLS-4
+Phase 0 ──▶ Phase 0.5 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 4
+  DONE         DONE          DONE        DONE        DONE        DONE
 ```
-
-**Gate:** ~~LOOP-1 (eliminate `jq -s` crash) must be validated in production before Phase 1 can begin~~ — **DONE. Phase 1 unblocked.**
-**Gate:** SKILLS-3 (remove response_analyzer.sh) requires HOOKS-4 (on-stop.sh) to be validated in production before the 935-line removal is safe.

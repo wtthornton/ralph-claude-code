@@ -1,8 +1,8 @@
 # Implementation Status Summary
 
-**Last Updated**: 2026-03-21  
-**Version**: v0.11.6 (user-facing); see README for feature list  
-**Overall Status**: Core loop and CLI modernization delivered; see sections below for historical phases
+**Last Updated**: 2026-03-21
+**Version**: v1.0.0-rc (user-facing); see README for feature list
+**Overall Status**: All 37 epic stories complete. Sub-agents, skills, and bash reduction delivered.
 
 > **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count.
 
@@ -59,6 +59,30 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 - [x] **TEAMS-3:** `ralph-bg-tester.md` background agent (sonnet, maxTurns 10, report-only)
 - [x] **TEAMS-4:** `TeammateIdle` + `TaskCompleted` hooks with live.log logging
 - [x] **TEAMS-5:** `.gitignore` exclusions for worktrees, settings.local.json, agent-memory
+
+---
+
+## Completed: Sub-agents (March 2026)
+
+**Epic:** [RALPH-SUBAGENTS: Sub-agents](docs/specs/epic-subagents.md) (Phase 2) — **Done**
+
+- [x] **SUBAGENTS-1:** Created `.claude/agents/ralph-explorer.md` (haiku, read-only, maxTurns 20)
+- [x] **SUBAGENTS-2:** Created `.claude/agents/ralph-tester.md` (sonnet, worktree isolation, maxTurns 15)
+- [x] **SUBAGENTS-3:** Created `.claude/agents/ralph-reviewer.md` (sonnet, read-only, maxTurns 10)
+- [x] **SUBAGENTS-4:** Updated ralph.md with sub-agent workflow and `Agent(ralph-explorer, ralph-tester, ralph-reviewer)` allowlist
+- [x] **SUBAGENTS-5:** Enhanced `on-subagent-done.sh` hook with duration tracking, error logging, and failure handling instructions
+
+---
+
+## Completed: Skills + Bash Reduction (March 2026)
+
+**Epic:** [RALPH-SKILLS: Skills + Bash Reduction](docs/specs/epic-skills-bash-reduction.md) (Phase 3) — **Done**
+
+- [x] **SKILLS-1:** Created `.claude/skills/ralph-loop/SKILL.md` (user-invocable, dynamic context injection)
+- [x] **SKILLS-2:** Created `.claude/skills/ralph-research/SKILL.md` (model-invocable, delegates to ralph-explorer)
+- [x] **SKILLS-4:** Removed `lib/file_protection.sh` (-58 lines) — superseded by PreToolUse hooks
+- [x] **SKILLS-5:** Simplified `lib/circuit_breaker.sh` (~485 → ~200 lines) — progress detection moved to on-stop.sh hook
+- [x] **SKILLS-3:** Removed `lib/response_analyzer.sh` (-1042 lines) — response analysis handled by on-stop.sh hook → status.json
 
 ---
 
@@ -317,5 +341,6 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 
 ---
 
-**Status**: ✅ 26/37 stories complete (70%). Phases 0–1 and 4 delivered. Phases 2–3 remain (11 stories).
-**Next Steps**: Phase 2 (RALPH-SUBAGENTS: explorer, tester, reviewer agents), then Phase 3 (RALPH-SKILLS: bash code reduction, ~1,368 lines removable)
+**Status**: ✅ 37/37 stories complete (100%). All phases delivered. v1.0.0-rc ready.
+**Removed**: `lib/response_analyzer.sh` (-1042 lines), `lib/file_protection.sh` (-58 lines), simplified `lib/circuit_breaker.sh` (-285 lines). Total: ~1,385 lines of bash removed.
+**Added**: 3 sub-agent definitions, 2 skills, enhanced SubagentStop hook, session functions inlined into ralph_loop.sh.

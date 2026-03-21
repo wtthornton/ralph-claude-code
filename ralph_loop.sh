@@ -12,9 +12,9 @@
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "$SCRIPT_DIR/lib/date_utils.sh" || { echo "FATAL: Failed to source lib/date_utils.sh" >&2; exit 1; }
 source "$SCRIPT_DIR/lib/timeout_utils.sh" || { echo "FATAL: Failed to source lib/timeout_utils.sh" >&2; exit 1; }
-source "$SCRIPT_DIR/lib/response_analyzer.sh" || { echo "FATAL: Failed to source lib/response_analyzer.sh" >&2; exit 1; }
+# response_analyzer.sh removed — response analysis handled by on-stop.sh hook → status.json
 source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source lib/circuit_breaker.sh" >&2; exit 1; }
-source "$SCRIPT_DIR/lib/file_protection.sh" || { echo "FATAL: Failed to source lib/file_protection.sh" >&2; exit 1; }
+# file_protection.sh removed — file protection handled by PreToolUse hooks (protect-ralph-files.sh, validate-command.sh)
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -61,7 +61,8 @@ CLAUDE_MIN_VERSION="2.0.76"              # Minimum required Claude CLI version
 CLAUDE_AUTO_UPDATE="${CLAUDE_AUTO_UPDATE:-true}"  # Auto-update Claude CLI at startup
 
 # Session management configuration (Phase 1.2)
-# Note: SESSION_EXPIRATION_SECONDS is defined in lib/response_analyzer.sh (86400 = 24 hours)
+SESSION_EXPIRATION_SECONDS=86400  # 24 hours
+SESSION_FILE="$RALPH_DIR/.claude_session_id"
 RALPH_SESSION_FILE="$RALPH_DIR/.ralph_session"              # Ralph-specific session tracking (lifecycle)
 RALPH_SESSION_HISTORY_FILE="$RALPH_DIR/.ralph_session_history"  # Session transition history
 # Session expiration: 24 hours default balances project continuity with fresh context
@@ -92,7 +93,7 @@ VALID_TOOL_PATTERNS=(
 
 # Exit detection configuration
 EXIT_SIGNALS_FILE="$RALPH_DIR/.exit_signals"
-RESPONSE_ANALYSIS_FILE="$RALPH_DIR/.response_analysis"
+# Response analysis now handled by on-stop.sh hook → status.json (SKILLS-3)
 MAX_CONSECUTIVE_TEST_LOOPS=3
 MAX_CONSECUTIVE_DONE_SIGNALS=2
 TEST_PERCENTAGE_THRESHOLD=30  # If more than 30% of recent loops are test-only, flag it
@@ -415,7 +416,7 @@ log_status() {
     echo "[$timestamp] [$level] $message" >> "$LOG_DIR/ralph.log" 2>/dev/null
 }
 
-# Pre-analysis: log permission denials from raw output (survives analyze_response crashes)
+# Pre-analysis: log permission denials from raw output
 ralph_log_permission_denials_from_raw_output() {
     local output_file=$1
     [[ -f "$output_file" ]] || return 0
@@ -509,6 +510,158 @@ ralph_prepare_claude_output_for_analysis() {
     ralph_log_permission_denials_from_raw_output "$output_file"
     ralph_log_failed_mcp_servers_from_output "$output_file"
     ralph_emergency_jsonl_normalize "$output_file"
+}
+
+# =============================================================================
+# SESSION PERSISTENCE FUNCTIONS (moved from lib/response_analyzer.sh)
+# =============================================================================
+
+# Store session ID to file with timestamp
+store_session_id() {
+    local session_id=$1
+    [[ -z "$session_id" ]] && return 1
+    jq -n \
+        --arg session_id "$session_id" \
+        --arg timestamp "$(get_iso_timestamp)" \
+        '{ session_id: $session_id, timestamp: $timestamp }' > "$SESSION_FILE"
+    return 0
+}
+
+# Get the last stored session ID
+get_last_session_id() {
+    if [[ ! -f "$SESSION_FILE" ]]; then
+        echo ""
+        return 0
+    fi
+    jq -r '.session_id // ""' "$SESSION_FILE" 2>/dev/null
+    return 0
+}
+
+# Check if the stored session should be resumed
+should_resume_session() {
+    if [[ ! -f "$SESSION_FILE" ]]; then
+        echo "false"
+        return 1
+    fi
+
+    local timestamp
+    timestamp=$(jq -r '.timestamp // ""' "$SESSION_FILE" 2>/dev/null)
+    if [[ -z "$timestamp" ]]; then
+        echo "false"
+        return 1
+    fi
+
+    local now session_time clean_timestamp
+    now=$(get_epoch_seconds)
+    clean_timestamp="${timestamp}"
+    if [[ "$timestamp" =~ \.[0-9]+[+-Z] ]]; then
+        clean_timestamp=$(echo "$timestamp" | sed 's/\.[0-9]*\([+-Z]\)/\1/')
+    fi
+
+    if command -v gdate &>/dev/null; then
+        session_time=$(gdate -d "$clean_timestamp" +%s 2>/dev/null)
+    elif date --version 2>&1 | grep -q GNU; then
+        session_time=$(date -d "$clean_timestamp" +%s 2>/dev/null)
+    else
+        local date_only="${clean_timestamp%[+-Z]*}"
+        session_time=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$date_only" +%s 2>/dev/null)
+    fi
+
+    if [[ -z "$session_time" || ! "$session_time" =~ ^[0-9]+$ ]]; then
+        echo "false"
+        return 1
+    fi
+
+    local age=$((now - session_time))
+    if [[ $age -lt $SESSION_EXPIRATION_SECONDS ]]; then
+        echo "true"
+        return 0
+    else
+        echo "false"
+        return 1
+    fi
+}
+
+# =============================================================================
+# STATUS.JSON-BASED ANALYSIS FUNCTIONS (replaces analyze_response + friends)
+# =============================================================================
+
+# Update exit signals file based on status.json (replaces update_exit_signals from response_analyzer.sh)
+update_exit_signals_from_status() {
+    local status_file="${RALPH_DIR}/status.json"
+    local exit_signals_file="${EXIT_SIGNALS_FILE}"
+
+    if [[ ! -f "$status_file" ]]; then
+        return 1
+    fi
+
+    # Read status.json fields (written by on-stop.sh hook)
+    local exit_signal status tasks_completed files_modified work_type loop_number
+    exit_signal=$(jq -r '.exit_signal // "false"' "$status_file" 2>/dev/null || echo "false")
+    status=$(jq -r '.status // "UNKNOWN"' "$status_file" 2>/dev/null || echo "UNKNOWN")
+    tasks_completed=$(jq -r '.tasks_completed // 0' "$status_file" 2>/dev/null || echo "0")
+    files_modified=$(jq -r '.files_modified // 0' "$status_file" 2>/dev/null || echo "0")
+    work_type=$(jq -r '.work_type // "UNKNOWN"' "$status_file" 2>/dev/null || echo "UNKNOWN")
+    loop_number=$(jq -r '.loop_count // 0' "$status_file" 2>/dev/null || echo "0")
+
+    # Determine derived flags
+    local is_test_only="false"
+    [[ "$work_type" == "TESTING" ]] && is_test_only="true"
+
+    local has_completion_signal="false"
+    [[ "$status" == "COMPLETE" ]] && has_completion_signal="true"
+
+    local has_progress="false"
+    [[ "$files_modified" -gt 0 || "$tasks_completed" -gt 0 ]] && has_progress="true"
+
+    # Read current exit signals
+    local signals
+    signals=$(cat "$exit_signals_file" 2>/dev/null || echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}')
+
+    # Update test_only_loops
+    if [[ "$is_test_only" == "true" ]]; then
+        signals=$(echo "$signals" | jq ".test_only_loops += [$loop_number]")
+    elif [[ "$has_progress" == "true" ]]; then
+        signals=$(echo "$signals" | jq '.test_only_loops = []')
+    fi
+
+    # Update done_signals
+    if [[ "$has_completion_signal" == "true" ]]; then
+        signals=$(echo "$signals" | jq ".done_signals += [$loop_number]")
+    fi
+
+    # Update completion_indicators (only when Claude explicitly signals exit)
+    if [[ "$exit_signal" == "true" ]]; then
+        signals=$(echo "$signals" | jq ".completion_indicators += [$loop_number]")
+    fi
+
+    # Keep only last 5 signals (rolling window)
+    signals=$(echo "$signals" | jq '.test_only_loops = .test_only_loops[-5:] | .done_signals = .done_signals[-5:] | .completion_indicators = .completion_indicators[-5:]')
+
+    echo "$signals" > "$exit_signals_file"
+    return 0
+}
+
+# Log analysis summary from status.json (replaces log_analysis_summary from response_analyzer.sh)
+log_status_summary() {
+    local status_file="${RALPH_DIR}/status.json"
+    [[ -f "$status_file" ]] || return 1
+
+    local loop exit_sig files_modified work_type recommendation
+    loop=$(jq -r '.loop_count' "$status_file" 2>/dev/null || echo "?")
+    exit_sig=$(jq -r '.exit_signal' "$status_file" 2>/dev/null || echo "false")
+    files_modified=$(jq -r '.files_modified' "$status_file" 2>/dev/null || echo "0")
+    work_type=$(jq -r '.work_type' "$status_file" 2>/dev/null || echo "UNKNOWN")
+    recommendation=$(jq -r '.recommendation' "$status_file" 2>/dev/null || echo "")
+
+    echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║           Response Analysis - Loop #$loop                 ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${YELLOW}Exit Signal:${NC}      $exit_sig"
+    echo -e "${YELLOW}Files Changed:${NC}    $files_modified"
+    echo -e "${YELLOW}Work Type:${NC}        $work_type"
+    echo -e "${YELLOW}Summary:${NC}          $recommendation"
+    echo ""
 }
 
 # Update status JSON for external monitoring
@@ -613,14 +766,12 @@ should_exit_gracefully() {
     # Check for exit conditions
 
     # 0. Permission denials (highest priority - Issue #101)
-    # When Claude Code is denied permission to run commands, halt immediately
-    # to allow user to update .ralphrc ALLOWED_TOOLS configuration
-    if [[ -f "$RESPONSE_ANALYSIS_FILE" ]]; then
-        local has_permission_denials=$(jq -r '.analysis.has_permission_denials // false' "$RESPONSE_ANALYSIS_FILE" 2>/dev/null || echo "false")
-        if [[ "$has_permission_denials" == "true" ]]; then
-            local denied_count=$(jq -r '.analysis.permission_denial_count // 0' "$RESPONSE_ANALYSIS_FILE" 2>/dev/null || echo "0")
-            local denied_cmds=$(jq -r '.analysis.denied_commands | join(", ")' "$RESPONSE_ANALYSIS_FILE" 2>/dev/null || echo "unknown")
-            log_status "WARN" "🚫 Permission denied for $denied_count command(s): $denied_cmds"
+    # Check circuit breaker state for permission denial tracking (set by on-stop.sh hook)
+    if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
+        local perm_denials
+        perm_denials=$(jq -r '.consecutive_permission_denials // 0' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "0")
+        if [[ "$perm_denials" -ge "${CB_PERMISSION_DENIAL_THRESHOLD:-2}" ]]; then
+            log_status "WARN" "🚫 Permission denied in $perm_denials consecutive loops"
             log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required tools"
             echo "permission_denied"
             return 0
@@ -656,10 +807,10 @@ should_exit_gracefully() {
     # 4. Strong completion indicators (only if Claude's EXIT_SIGNAL is true)
     # This prevents premature exits when heuristics detect completion patterns
     # but Claude explicitly indicates work is still in progress via RALPH_STATUS block.
-    # The exit_signal in .response_analysis represents Claude's explicit intent.
+    # The exit_signal in status.json represents Claude's explicit intent (written by on-stop.sh hook).
     local claude_exit_signal="false"
-    if [[ -f "$RESPONSE_ANALYSIS_FILE" ]]; then
-        claude_exit_signal=$(jq -r '.analysis.exit_signal // false' "$RESPONSE_ANALYSIS_FILE" 2>/dev/null || echo "false")
+    if [[ -f "$RALPH_DIR/status.json" ]]; then
+        claude_exit_signal=$(jq -r '.exit_signal // "false"' "$RALPH_DIR/status.json" 2>/dev/null || echo "false")
     fi
 
     if [[ $recent_completion_indicators -ge 2 ]] && [[ "$claude_exit_signal" == "true" ]]; then
@@ -891,20 +1042,12 @@ build_loop_context() {
         fi
     fi
 
-    # Add previous loop summary (truncated)
-    if [[ -f "$RESPONSE_ANALYSIS_FILE" ]]; then
-        local prev_summary=$(jq -r '.analysis.work_summary // ""' "$RESPONSE_ANALYSIS_FILE" 2>/dev/null | head -c 200)
+    # Add previous loop summary from status.json (written by on-stop.sh hook)
+    if [[ -f "$RALPH_DIR/status.json" ]]; then
+        local prev_summary
+        prev_summary=$(jq -r '.recommendation // ""' "$RALPH_DIR/status.json" 2>/dev/null | head -c 200)
         if [[ -n "$prev_summary" && "$prev_summary" != "null" ]]; then
             context+="Previous: ${prev_summary} "
-        fi
-    fi
-
-    # If previous loop detected questions, inject corrective guidance (Issue #190 Bug 2)
-    if [[ -f "$RESPONSE_ANALYSIS_FILE" ]]; then
-        local prev_asking_questions
-        prev_asking_questions=$(jq -r '.analysis.asking_questions // false' "$RESPONSE_ANALYSIS_FILE" 2>/dev/null || echo "false")
-        if [[ "$prev_asking_questions" == "true" ]]; then
-            context+="IMPORTANT: You asked questions in the previous loop. This is a headless automation loop with no human to answer. Do NOT ask questions. Choose the most conservative/safe default and proceed autonomously. "
         fi
     fi
 
@@ -1089,9 +1232,6 @@ reset_session() {
         echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}' > "$EXIT_SIGNALS_FILE"
         [[ "${VERBOSE_PROGRESS:-}" == "true" ]] && log_status "INFO" "Cleared exit signals file"
     fi
-
-    # Clear response analysis to prevent stale EXIT_SIGNAL from previous session
-    rm -f "$RESPONSE_ANALYSIS_FILE" 2>/dev/null
 
     # Log the session transition
     log_session_transition "active" "reset" "$reason" "${loop_count:-0}"
@@ -1540,7 +1680,7 @@ execute_claude_code() {
                 # Validate that extracted line is valid JSON before using it
                 if echo "$result_line" | jq -e . >/dev/null 2>&1; then
                     # Write validated result as the output_file for downstream processing
-                    # (save_claude_session and analyze_response expect JSON format)
+                    # (save_claude_session expects JSON format)
                     echo "$result_line" > "$output_file"
                     log_status "INFO" "Extracted and validated session data from stream output"
                 else
@@ -1714,24 +1854,15 @@ EOF
             save_claude_session "$output_file"
         fi
 
-        # Analyze the response
-        log_status "INFO" "🔍 Analyzing Claude Code response..."
-        analyze_response "$output_file" "$loop_count"
-        local analysis_exit_code=$?
+        # Update exit signals from status.json (written by on-stop.sh hook)
+        log_status "INFO" "🔍 Reading response analysis from status.json..."
+        if ! update_exit_signals_from_status; then
+            log_status "WARN" "Exit signal update failed; continuing with stale signals"
+        fi
 
-        if [[ $analysis_exit_code -eq 0 ]]; then
-            # Update exit signals based on analysis (fail-open: continue on error)
-            if ! update_exit_signals; then
-                log_status "WARN" "Exit signal update failed; continuing with stale signals"
-            fi
-
-            # Log analysis summary (non-critical)
-            if ! log_analysis_summary; then
-                log_status "WARN" "Analysis summary logging failed; non-critical, continuing"
-            fi
-        else
-            log_status "WARN" "Response analysis failed (exit $analysis_exit_code); skipping signal updates"
-            rm -f "$RESPONSE_ANALYSIS_FILE"
+        # Log analysis summary (non-critical)
+        if ! log_status_summary; then
+            log_status "WARN" "Analysis summary logging failed; non-critical, continuing"
         fi
 
         # Get file change count for circuit breaker
@@ -1794,11 +1925,8 @@ EOF
         fi
         local output_length=$(wc -c < "$output_file" 2>/dev/null || echo 0)
 
-        # Record result in circuit breaker
-        record_loop_result "$loop_count" "$files_changed" "$has_errors" "$output_length"
-        local circuit_result=$?
-
-        if [[ $circuit_result -ne 0 ]]; then
+        # Check if on-stop.sh hook transitioned circuit breaker to OPEN
+        if cb_is_open; then
             log_status "WARN" "Circuit breaker opened - halting execution"
             return 3  # Special code for circuit breaker trip
         fi
@@ -1855,32 +1983,17 @@ EOF
                     save_claude_session "$output_file"
                 fi
 
-                # Run analysis pipeline on whatever output exists
-                log_status "INFO" "🔍 Analyzing response from productive timeout..."
-                analyze_response "$output_file" "$loop_count"
-                local timeout_analysis_exit=$?
-
-                if [[ $timeout_analysis_exit -eq 0 ]]; then
-                    if ! update_exit_signals; then
-                        log_status "WARN" "Exit signal update failed; continuing with stale signals"
-                    fi
-                    if ! log_analysis_summary; then
-                        log_status "WARN" "Analysis summary logging failed; non-critical, continuing"
-                    fi
-                else
-                    # Clear stale response analysis to prevent next loop from reusing
-                    # old EXIT_SIGNAL, permission-denial, or question-detection state
-                    log_status "WARN" "Timeout response analysis failed (exit $timeout_analysis_exit); clearing stale analysis"
-                    rm -f "$RESPONSE_ANALYSIS_FILE"
+                # Update exit signals from status.json (written by on-stop.sh hook)
+                log_status "INFO" "🔍 Reading response analysis from status.json..."
+                if ! update_exit_signals_from_status; then
+                    log_status "WARN" "Exit signal update failed; continuing with stale signals"
+                fi
+                if ! log_status_summary; then
+                    log_status "WARN" "Analysis summary logging failed; non-critical, continuing"
                 fi
 
-                # Feed circuit breaker with progress data
-                local timeout_output_length
-                timeout_output_length=$(wc -c < "$output_file" 2>/dev/null || echo "0")
-                record_loop_result "$loop_count" "$timeout_files_changed" "false" "$timeout_output_length"
-                local timeout_circuit_result=$?
-
-                if [[ $timeout_circuit_result -ne 0 ]]; then
+                # Check if on-stop.sh hook transitioned circuit breaker to OPEN
+                if cb_is_open; then
                     log_status "WARN" "Circuit breaker opened - halting execution"
                     return 3
                 fi
@@ -2021,14 +2134,8 @@ main() {
         exit 1
     fi
 
-    # Verify Ralph file integrity on startup (Issue #149)
-    if ! validate_ralph_integrity; then
-        log_status "ERROR" "Ralph integrity check failed - critical files missing"
-        echo ""
-        echo "$(get_integrity_report)"
-        echo ""
-        exit 1
-    fi
+    # File integrity validation removed — PreToolUse hooks handle file protection
+    # (protect-ralph-files.sh blocks edits to .ralph/, validate-command.sh blocks destructive commands)
 
     # Initialize session tracking before entering the loop
     init_session_tracking
@@ -2054,7 +2161,6 @@ main() {
     # This is unconditional: regardless of how the previous run ended (crash, SIGKILL, API limit exit),
     # every new ralph invocation starts with a clean exit-signal slate.
     echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}' > "$EXIT_SIGNALS_FILE"
-    rm -f "$RESPONSE_ANALYSIS_FILE" 2>/dev/null
     log_status "INFO" "Reset exit signals for fresh start"
 
     # Reset per-session circuit breaker counters (preserve OPEN/CLOSED state and thresholds)
@@ -2110,18 +2216,7 @@ main() {
 
         log_status "LOOP" "=== Starting Loop #$loop_count (total: #$persistent_loops) ==="
         
-        # Verify Ralph's critical files still exist (Issue #149)
-        if ! validate_ralph_integrity; then
-            # Ensure log directory exists for logging even if .ralph/ was deleted
-            mkdir -p "$LOG_DIR" 2>/dev/null
-            log_status "ERROR" "Ralph integrity check failed - critical files missing"
-            echo ""
-            echo "$(get_integrity_report)"
-            echo ""
-            reset_session "integrity_failure"
-            update_status "$loop_count" "$(cat "$CALL_COUNT_FILE" 2>/dev/null || echo 0)" "integrity_failure" "halted" "files_deleted"
-            break
-        fi
+        # File integrity validation removed — PreToolUse hooks handle file protection in real-time
 
         # Check circuit breaker before attempting execution
         if should_halt_execution; then
@@ -2303,8 +2398,8 @@ Files created:
 Behavior notes (v0.11.6+):
     - --live uses stream-json-friendly output: full stream preserved (*_stream.log), result line
       extracted when possible; WSL2/NTFS mounts retry file visibility before extraction.
-    - Before each analyze_response: emergency JSONL normalize if needed; permission denials and
-      failed MCP servers logged from raw output (see docs/specs/epic-*.md in Ralph repo).
+    - Before each loop iteration: emergency JSONL normalize if needed; permission denials and
+      failed MCP servers logged from raw output. Analysis via on-stop.sh hook → status.json.
     - New ralph invocation resets circuit breaker *counters* (not OPEN/CLOSED state).
     - Optional: Docker containers labeled ralph.mcp=true are checked at startup (non-fatal).
 

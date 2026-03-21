@@ -2,7 +2,7 @@
 
 **Epic:** [Sub-agents](epic-subagents.md)
 **Priority:** Important
-**Status:** Open
+**Status:** Done
 **Effort:** Medium
 **Component:** `.ralph/hooks/on-subagent-done.sh`, `.claude/agents/ralph.md`
 **Depends on:** RALPH-SUBAGENTS-4, RALPH-HOOKS-2

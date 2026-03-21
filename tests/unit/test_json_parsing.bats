@@ -6,6 +6,9 @@ load '../helpers/test_helper'
 load '../helpers/fixtures'
 
 setup() {
+    # response_analyzer.sh removed (SKILLS-3) — skip entire file if missing
+    [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
+
     # Create temporary test directory
     TEST_DIR="$(mktemp -d)"
     cd "$TEST_DIR"

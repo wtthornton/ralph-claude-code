@@ -40,12 +40,6 @@ setup() {
 init_circuit_breaker() { :; }
 EOF
 
-    cat > "$MOCK_SOURCE_DIR/lib/response_analyzer.sh" << 'EOF'
-#!/bin/bash
-# Mock response_analyzer.sh
-analyze_response() { :; }
-EOF
-
     cat > "$MOCK_SOURCE_DIR/lib/date_utils.sh" << 'EOF'
 #!/bin/bash
 # Mock date_utils.sh
@@ -233,7 +227,6 @@ run_install() {
 
     # Verify lib scripts are executable
     [[ -x "$TEST_RALPH_HOME/lib/circuit_breaker.sh" ]]
-    [[ -x "$TEST_RALPH_HOME/lib/response_analyzer.sh" ]]
     [[ -x "$TEST_RALPH_HOME/lib/date_utils.sh" ]]
 }
 
@@ -267,12 +260,10 @@ run_install() {
 
     # Check lib files were copied
     assert_file_exists "$TEST_RALPH_HOME/lib/circuit_breaker.sh"
-    assert_file_exists "$TEST_RALPH_HOME/lib/response_analyzer.sh"
     assert_file_exists "$TEST_RALPH_HOME/lib/date_utils.sh"
 
     # Verify files are executable
     [[ -x "$TEST_RALPH_HOME/lib/circuit_breaker.sh" ]]
-    [[ -x "$TEST_RALPH_HOME/lib/response_analyzer.sh" ]]
     [[ -x "$TEST_RALPH_HOME/lib/date_utils.sh" ]]
 }
 
@@ -577,7 +568,6 @@ EOF
 
     # Verify all lib files copied
     assert_file_exists "$TEST_RALPH_HOME/lib/circuit_breaker.sh"
-    assert_file_exists "$TEST_RALPH_HOME/lib/response_analyzer.sh"
     assert_file_exists "$TEST_RALPH_HOME/lib/date_utils.sh"
 
     # Verify all scripts in ralph home

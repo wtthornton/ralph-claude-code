@@ -493,6 +493,7 @@ EOF
 # Test 32: update_exit_signals should NOT add to completion_indicators when exit_signal=false
 @test "update_exit_signals does NOT add to completion_indicators when exit_signal=false" {
     # Source the response analyzer library
+    [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
 
     # Initialize exit signals file
@@ -529,6 +530,7 @@ EOF
 # Test 33: update_exit_signals SHOULD add to completion_indicators when exit_signal=true
 @test "update_exit_signals adds to completion_indicators when exit_signal=true" {
     # Source the response analyzer library
+    [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
 
     # Initialize exit signals file
@@ -568,6 +570,7 @@ EOF
 # Test 34: update_exit_signals accumulates completion_indicators only on exit_signal=true
 @test "update_exit_signals accumulates completion_indicators only when exit_signal=true" {
     # Source the response analyzer library
+    [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
 
     # Initialize exit signals file
@@ -629,6 +632,7 @@ EOF
 # Test 35: JSON mode simulation - 5 loops with exit_signal=false should NOT trigger safety breaker
 @test "update_exit_signals JSON mode - 5 loops with exit_signal=false does not fill completion_indicators" {
     # Source the response analyzer library
+    [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
 
     # Initialize exit signals file
@@ -1199,6 +1203,7 @@ detect_progress_with_commits() {
     git add init.txt
     git commit --quiet -m "init"
 
+    [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
     source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
     mkdir -p "$RALPH_DIR/logs"
 
@@ -1218,6 +1223,8 @@ detect_progress_with_commits() {
     if ! command -v git &>/dev/null; then
         skip "git not available"
     fi
+
+    [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
 
     git init --quiet
     git config user.email "test@test.com"

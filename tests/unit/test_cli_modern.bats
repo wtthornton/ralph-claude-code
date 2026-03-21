@@ -39,7 +39,10 @@ setup() {
 
     # Source library components
     source "${BATS_TEST_DIRNAME}/../../lib/date_utils.sh"
-    source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
+    # response_analyzer.sh removed (SKILLS-3); source only if still present
+    if [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]]; then
+        source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
+    fi
     source "${BATS_TEST_DIRNAME}/../../lib/circuit_breaker.sh"
 
     # Define color variables for log_status
@@ -119,19 +122,12 @@ setup() {
             fi
         fi
 
-        if [[ -f "$RALPH_DIR/.response_analysis" ]]; then
-            local prev_summary=$(jq -r '.analysis.work_summary // ""' "$RALPH_DIR/.response_analysis" 2>/dev/null | head -c 200)
+        # Read previous loop summary from status.json (written by on-stop.sh hook)
+        if [[ -f "$RALPH_DIR/status.json" ]]; then
+            local prev_summary
+            prev_summary=$(jq -r '.recommendation // ""' "$RALPH_DIR/status.json" 2>/dev/null | head -c 200)
             if [[ -n "$prev_summary" && "$prev_summary" != "null" ]]; then
                 context+="Previous: ${prev_summary} "
-            fi
-        fi
-
-        # If previous loop detected questions, inject corrective guidance (Issue #190 Bug 2)
-        if [[ -f "$RALPH_DIR/.response_analysis" ]]; then
-            local prev_asking_questions
-            prev_asking_questions=$(jq -r '.analysis.asking_questions // false' "$RALPH_DIR/.response_analysis" 2>/dev/null || echo "false")
-            if [[ "$prev_asking_questions" == "true" ]]; then
-                context+="IMPORTANT: You asked questions in the previous loop. This is a headless automation loop with no human to answer. Do NOT ask questions. Choose the most conservative/safe default and proceed autonomously. "
             fi
         fi
 
@@ -304,10 +300,9 @@ EOF
 }
 
 @test "build_loop_context includes circuit breaker state" {
-    # Set up circuit breaker in HALF_OPEN state
+    # Set up circuit breaker in HALF_OPEN state directly (record_loop_result removed in SKILLS-5)
     init_circuit_breaker
-    record_loop_result 1 0 "false" 1000
-    record_loop_result 2 0 "false" 1000
+    echo '{"state": "HALF_OPEN", "consecutive_no_progress": 2, "total_opens": 0, "reason": "test"}' > "$RALPH_DIR/.circuit_breaker_state"
 
     run build_loop_context 3
 
@@ -316,13 +311,16 @@ EOF
 }
 
 @test "build_loop_context includes previous loop summary" {
-    # Create previous response analysis
-    cat > "$RALPH_DIR/.response_analysis" << 'EOF'
+    # Create previous status.json (written by on-stop.sh hook, replaces .response_analysis)
+    cat > "$RALPH_DIR/status.json" << 'EOF'
 {
-    "loop_number": 1,
-    "analysis": {
-        "work_summary": "Implemented user authentication"
-    }
+    "loop_count": 1,
+    "status": "IN_PROGRESS",
+    "exit_signal": "false",
+    "tasks_completed": 1,
+    "files_modified": 2,
+    "work_type": "IMPLEMENTATION",
+    "recommendation": "Implemented user authentication"
 }
 EOF
 
@@ -333,14 +331,14 @@ EOF
 }
 
 @test "build_loop_context limits output length to 500 chars" {
-    # Create very long work summary
+    # Create very long recommendation
     local long_summary=$(printf 'x%.0s' {1..1000})
-    cat > "$RALPH_DIR/.response_analysis" << EOF
+    cat > "$RALPH_DIR/status.json" << EOF
 {
-    "loop_number": 1,
-    "analysis": {
-        "work_summary": "$long_summary"
-    }
+    "loop_count": 1,
+    "status": "IN_PROGRESS",
+    "exit_signal": "false",
+    "recommendation": "$long_summary"
 }
 EOF
 
@@ -359,8 +357,8 @@ EOF
     assert_equal "$status" "0"
 }
 
-@test "build_loop_context handles missing .response_analysis gracefully" {
-    rm -f "$RALPH_DIR/.response_analysis"
+@test "build_loop_context handles missing status.json gracefully" {
+    rm -f "$RALPH_DIR/status.json"
 
     run build_loop_context 1
 
@@ -1339,7 +1337,7 @@ EOF
     local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
 
     # All 5 library source lines must have || { echo "FATAL: ..."; exit 1; }
-    local libs=("date_utils.sh" "timeout_utils.sh" "response_analyzer.sh" "circuit_breaker.sh" "file_protection.sh")
+    local libs=("date_utils.sh" "timeout_utils.sh" "circuit_breaker.sh")
     for lib in "${libs[@]}"; do
         run grep "source.*${lib}.*|| { echo.*FATAL.*exit 1; }" "$script"
         assert_success
@@ -1360,12 +1358,7 @@ EOF
 }
 
 @test "analyze_response failure skips signal updates" {
-    # Verify that when analysis fails, stale response_analysis file is removed
-    local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
-
-    # The pattern: analysis failure should remove the response analysis file
-    run bash -c "grep -A 3 'analysis_exit_code' '$script' | grep 'rm -f.*RESPONSE_ANALYSIS_FILE'"
-    assert_success
+    skip "response_analyzer.sh removed (SKILLS-3) — analysis handled by on-stop.sh hook"
 }
 
 @test "live mode pipeline does not merge stderr into stdout" {
@@ -1418,25 +1411,14 @@ EOF
 # --- Issue #190 Bug 2: Question detection corrective message ---
 
 @test "build_loop_context includes corrective message when previous loop asked questions" {
-    # Create response analysis with asking_questions=true
-    echo '{"analysis":{"work_summary":"Asked about approach","asking_questions":true,"question_count":2}}' > "$RALPH_DIR/.response_analysis"
-    export RESPONSE_ANALYSIS_FILE="$RALPH_DIR/.response_analysis"
-
-    run build_loop_context 5
+    skip "Question detection removed with response_analyzer.sh (SKILLS-3) — handled by on-stop.sh hook"
 
     assert_success
     [[ "$output" == *"Do NOT ask questions"* ]]
 }
 
 @test "build_loop_context omits corrective message when previous loop was normal" {
-    # Create response analysis with asking_questions=false
-    echo '{"analysis":{"work_summary":"Implemented feature X","asking_questions":false,"question_count":0}}' > "$RALPH_DIR/.response_analysis"
-    export RESPONSE_ANALYSIS_FILE="$RALPH_DIR/.response_analysis"
-
-    run build_loop_context 5
-
-    assert_success
-    [[ "$output" != *"Do NOT ask questions"* ]]
+    skip "Question detection removed with response_analyzer.sh (SKILLS-3) — handled by on-stop.sh hook"
 }
 
 # =============================================================================
@@ -1543,20 +1525,19 @@ EOF
     assert_success
 }
 
-@test "timeout handler calls analyze_response on productive timeout" {
-    # When timeout occurs but files were changed, analyze_response must be called
+@test "timeout handler calls update_exit_signals on productive timeout" {
+    # When timeout occurs but files were changed, exit signals must be updated from status.json
     local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
 
-    # The timeout block should contain analyze_response call (for productive timeouts)
-    run bash -c "sed -n '/Layer 1.*Timeout guard/,/fi  # end timeout/p' '$script' | grep -q 'analyze_response'"
+    run bash -c "grep -q 'update_exit_signals_from_status' '$script'"
     assert_success
 }
 
-@test "timeout handler calls record_loop_result on productive timeout" {
-    # Circuit breaker must see progress from productive timeouts
+@test "timeout handler checks circuit breaker on productive timeout" {
+    # Circuit breaker state must be checked after productive timeouts
     local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
 
-    run bash -c "sed -n '/Layer 1.*Timeout guard/,/fi  # end timeout/p' '$script' | grep -q 'record_loop_result'"
+    run bash -c "grep -q 'cb_is_open' '$script'"
     assert_success
 }
 
@@ -1758,13 +1739,7 @@ EOF
 }
 
 @test "timeout handler clears stale response analysis on analysis failure" {
-    # The timeout handler must rm -f RESPONSE_ANALYSIS_FILE when analyze_response fails
-    # This prevents the next loop from reusing stale EXIT_SIGNAL or permission data
-    local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
-
-    # Extract the timeout handler block and check for rm -f RESPONSE_ANALYSIS_FILE
-    run bash -c "sed -n '/Layer 1.*Timeout guard/,/fi  # end timeout/p' '$script' | grep -q 'rm -f.*RESPONSE_ANALYSIS_FILE'"
-    assert_success
+    skip "RESPONSE_ANALYSIS_FILE removed (SKILLS-3) — analysis handled by on-stop.sh hook → status.json"
 }
 
 # --- Monitor I/O Error Fix (Issue #188) ---

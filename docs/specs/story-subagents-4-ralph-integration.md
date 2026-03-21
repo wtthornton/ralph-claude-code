@@ -2,7 +2,7 @@
 
 **Epic:** [Sub-agents](epic-subagents.md)
 **Priority:** Important
-**Status:** Open
+**Status:** Done
 **Effort:** Small
 **Component:** `.claude/agents/ralph.md`
 **Depends on:** RALPH-SUBAGENTS-1, RALPH-SUBAGENTS-2, RALPH-SUBAGENTS-3

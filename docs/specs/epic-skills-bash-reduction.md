@@ -52,11 +52,11 @@ adjustments to the original RFC:
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SKILLS-1](story-skills-1-loop-skill.md) | Create ralph-loop skill | Important | Small | Open |
-| [RALPH-SKILLS-2](story-skills-2-research-skill.md) | Create ralph-research skill | Nice-to-have | Small | Open |
-| [RALPH-SKILLS-3](story-skills-3-remove-response-analyzer.md) | Remove response_analyzer.sh (hooks handle it) | Important | Medium | Open |
-| [RALPH-SKILLS-4](story-skills-4-remove-file-protection.md) | Remove file_protection.sh (hooks handle it) | Important | Trivial | Open |
-| [RALPH-SKILLS-5](story-skills-5-simplify-circuit-breaker.md) | Simplify circuit_breaker.sh (hooks provide state) | Important | Medium | Open |
+| [RALPH-SKILLS-1](story-skills-1-loop-skill.md) | Create ralph-loop skill | Important | Small | Done |
+| [RALPH-SKILLS-2](story-skills-2-research-skill.md) | Create ralph-research skill | Nice-to-have | Small | Done |
+| [RALPH-SKILLS-3](story-skills-3-remove-response-analyzer.md) | Remove response_analyzer.sh (hooks handle it) | Important | Medium | Done |
+| [RALPH-SKILLS-4](story-skills-4-remove-file-protection.md) | Remove file_protection.sh (hooks handle it) | Important | Trivial | Done |
+| [RALPH-SKILLS-5](story-skills-5-simplify-circuit-breaker.md) | Simplify circuit_breaker.sh (hooks provide state) | Important | Medium | Done |
 
 ## Implementation Order
 

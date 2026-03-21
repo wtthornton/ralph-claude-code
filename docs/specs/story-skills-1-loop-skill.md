@@ -2,7 +2,7 @@
 
 **Epic:** [Skills + Bash Reduction](epic-skills-bash-reduction.md)
 **Priority:** Important
-**Status:** Open
+**Status:** Done
 **Effort:** Small
 **Component:** `.claude/skills/ralph-loop/SKILL.md`
 

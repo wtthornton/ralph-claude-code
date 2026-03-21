@@ -2,7 +2,7 @@
 
 **Epic:** [Skills + Bash Reduction](epic-skills-bash-reduction.md)
 **Priority:** Important
-**Status:** Open
+**Status:** Done
 **Effort:** Trivial
 **Component:** `lib/file_protection.sh`, `ralph_loop.sh`
 **Depends on:** RALPH-HOOKS-5 (file protection hooks validated)

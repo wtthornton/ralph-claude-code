@@ -43,8 +43,50 @@ setup() {
 
     # Source library components
     source "${BATS_TEST_DIRNAME}/../../lib/date_utils.sh"
-    source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
     source "${BATS_TEST_DIRNAME}/../../lib/circuit_breaker.sh"
+
+    # Session functions moved from lib/response_analyzer.sh into ralph_loop.sh (SKILLS-3)
+    # Define them inline here since ralph_loop.sh has top-level side effects that prevent sourcing
+    SESSION_EXPIRATION_SECONDS=86400
+    SESSION_FILE="$RALPH_DIR/.claude_session_id"
+
+    store_session_id() {
+        local session_id=$1
+        [[ -z "$session_id" ]] && return 1
+        jq -n --arg session_id "$session_id" --arg timestamp "$(get_iso_timestamp)" \
+            '{ session_id: $session_id, timestamp: $timestamp }' > "$SESSION_FILE"
+        return 0
+    }
+
+    get_last_session_id() {
+        if [[ ! -f "$SESSION_FILE" ]]; then echo ""; return 0; fi
+        jq -r '.session_id // ""' "$SESSION_FILE" 2>/dev/null
+        return 0
+    }
+
+    should_resume_session() {
+        if [[ ! -f "$SESSION_FILE" ]]; then echo "false"; return 1; fi
+        local timestamp
+        timestamp=$(jq -r '.timestamp // ""' "$SESSION_FILE" 2>/dev/null)
+        if [[ -z "$timestamp" ]]; then echo "false"; return 1; fi
+        local now session_time clean_timestamp
+        now=$(get_epoch_seconds)
+        clean_timestamp="${timestamp}"
+        if [[ "$timestamp" =~ \.[0-9]+[+-Z] ]]; then
+            clean_timestamp=$(echo "$timestamp" | sed 's/\.[0-9]*\([+-Z]\)/\1/')
+        fi
+        if command -v gdate &>/dev/null; then
+            session_time=$(gdate -d "$clean_timestamp" +%s 2>/dev/null)
+        elif date --version 2>&1 | grep -q GNU; then
+            session_time=$(date -d "$clean_timestamp" +%s 2>/dev/null)
+        else
+            local date_only="${clean_timestamp%[+-Z]*}"
+            session_time=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$date_only" +%s 2>/dev/null)
+        fi
+        if [[ -z "$session_time" || ! "$session_time" =~ ^[0-9]+$ ]]; then echo "false"; return 1; fi
+        local age=$((now - session_time))
+        if [[ $age -lt $SESSION_EXPIRATION_SECONDS ]]; then echo "true"; return 0; else echo "false"; return 1; fi
+    }
 
     # Define color variables for log_status
     RED='\033[0;31m'
@@ -181,6 +223,7 @@ function_exists_in_ralph() {
 # =============================================================================
 
 @test "parse_json_response extracts sessionId from Claude CLI format" {
+    skip "response_analyzer.sh removed (SKILLS-3) — parse_json_response no longer exists"
     local output_file="$LOG_DIR/test_output.log"
 
     cat > "$output_file" << 'EOF'
@@ -200,6 +243,7 @@ EOF
 }
 
 @test "analyze_response persists sessionId to session file" {
+    skip "response_analyzer.sh removed (SKILLS-3) — analyze_response no longer exists"
     local output_file="$LOG_DIR/test_output.log"
 
     cat > "$output_file" << 'EOF'

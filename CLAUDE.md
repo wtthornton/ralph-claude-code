@@ -45,14 +45,14 @@ bats tests/unit/test_cli_parsing.bats
 
 | Module | Purpose |
 |--------|---------|
-| `response_analyzer.sh` | Parses Claude CLI output (JSON/text), including **stream-json / JSONL** (multi-value normalization), exit signals, sessions, permission denials, multi–RALPH_STATUS handling |
-| `circuit_breaker.sh` | Three-state pattern (CLOSED/HALF_OPEN/OPEN) to halt runaway loops on stagnation |
+| `circuit_breaker.sh` | Simplified three-state pattern (CLOSED/HALF_OPEN/OPEN) — reads state written by `on-stop.sh` hook, handles cooldown/auto-recovery |
 | `enable_core.sh` | Shared logic for ralph_enable and ralph_enable_ci (idempotency, detection, template generation) |
 | `task_sources.sh` | Task import from beads, GitHub Issues, or PRD documents |
 | `wizard_utils.sh` | Interactive prompt utilities (confirm, select, text input) |
 | `date_utils.sh` | Cross-platform date/epoch utilities |
 | `timeout_utils.sh` | Cross-platform timeout command detection (`timeout` on Linux, `gtimeout` on macOS) |
-| `file_protection.sh` | Pre-loop integrity validation of `.ralph/` directory |
+| ~~`response_analyzer.sh`~~ | Removed — response analysis handled by `on-stop.sh` hook → `status.json` |
+| ~~`file_protection.sh`~~ | Removed — file protection handled by PreToolUse hooks |
 
 ### Key Design Patterns
 
@@ -64,9 +64,13 @@ bats tests/unit/test_cli_parsing.bats
 
 **Session continuity**: Claude session IDs persist in `.ralph/.claude_session_id` with 24-hour expiration. Sessions auto-reset on circuit breaker open, manual interrupt, or `is_error: true` API responses.
 
-**File protection**: Three layers — (1) granular `ALLOWED_TOOLS` restrictions prevent destructive git commands, (2) PROMPT.md warns Claude not to modify `.ralph/`, (3) `validate_ralph_integrity()` runs before every loop iteration.
+**File protection**: Two layers — (1) granular `ALLOWED_TOOLS` restrictions prevent destructive git commands, (2) PreToolUse hooks (`protect-ralph-files.sh`, `validate-command.sh`) block modifications to `.ralph/` in real-time.
 
-**Live / JSONL pipeline**: `--live` captures NDJSON; the loop copies the full stream, retries `-f` on the output file (WSL2/9P), extracts the last `type: "result"` line when `CLAUDE_USE_CONTINUE` is true, then `ralph_prepare_claude_output_for_analysis` logs permission denials and failed MCP init, collapses any remaining multi-value JSON to a single result object, and passes the file to `analyze_response` / `parse_json_response`.
+**Hook-based response analysis**: The `on-stop.sh` hook runs after every Claude response, extracts RALPH_STATUS fields, writes `status.json`, and updates circuit breaker state. The loop reads from `status.json` instead of parsing raw CLI output.
+
+**Sub-agents**: Three specialized agents (ralph-explorer, ralph-tester, ralph-reviewer) keep search, testing, and review output out of the main context. The main Ralph agent spawns them via `Agent(ralph-explorer, ralph-tester, ralph-reviewer)` allowlist.
+
+**Live / JSONL pipeline**: `--live` captures NDJSON; the loop copies the full stream, retries `-f` on the output file (WSL2/9P), extracts the last `type: "result"` line when `CLAUDE_USE_CONTINUE` is true, then `ralph_prepare_claude_output_for_analysis` logs permission denials and failed MCP init, and collapses any remaining multi-value JSON to a single result object.
 
 **Design documentation**: Reliability epics and stories live in **`docs/specs/`** (e.g. `epic-jsonl-stream-resilience.md`, `epic-multi-task-cascading-failures.md`). Long-term platform integration is drafted in `docs/specs/claude-code-2026-enhancements.md`.
 
@@ -74,13 +78,12 @@ bats tests/unit/test_cli_parsing.bats
 
 - `.call_count` / `.last_reset` — Rate limit tracking (hourly reset)
 - `.exit_signals` — Exit signal history
-- `.response_analysis` — Last response analysis (JSON)
+- `status.json` — Real-time status and response analysis (written by on-stop.sh hook)
 - `.circuit_breaker_state` — Circuit breaker state (JSON)
 - `.claude_session_id` — Session persistence
 - `PROMPT.md` — Main development instructions driving each loop
 - `fix_plan.md` — Prioritized task list
 - `AGENT.md` — Build/run instructions
-- `status.json` — Real-time status
 
 ### Configuration
 
