@@ -836,6 +836,7 @@ ralph-migrate             # Migrate existing project to .ralph/ structure
 ### Ralph Loop Options
 ```bash
 ralph [OPTIONS]
+  -V, --version           Show version and exit
   -h, --help              Show help message
   -c, --calls NUM         Set max calls per hour (default: 100)
   -p, --prompt FILE       Set prompt file (default: PROMPT.md)

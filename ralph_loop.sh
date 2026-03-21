@@ -16,6 +16,9 @@ source "$SCRIPT_DIR/lib/timeout_utils.sh" || { echo "FATAL: Failed to source lib
 source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source lib/circuit_breaker.sh" >&2; exit 1; }
 # file_protection.sh removed — file protection handled by PreToolUse hooks (protect-ralph-files.sh, validate-command.sh)
 
+# Version
+RALPH_VERSION="1.0.0"
+
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
 RALPH_DIR=".ralph"
@@ -1543,8 +1546,8 @@ execute_claude_code() {
         # - -p (prompt content)
 
         # Check dependencies for live mode
-        if ! command -v jq &> /dev/null; then
-            log_status "ERROR" "Live mode requires 'jq' but it's not installed. Falling back to background mode."
+        if ! command -v awk &> /dev/null; then
+            log_status "ERROR" "Live mode requires 'awk' but it's not installed. Falling back to background mode."
             LIVE_OUTPUT=false
         elif ! command -v stdbuf &> /dev/null; then
             log_status "ERROR" "Live mode requires 'stdbuf' (from coreutils) but it's not installed. Falling back to background mode."
@@ -1585,25 +1588,167 @@ execute_claude_code() {
         # These are required for stream-json to work properly
         LIVE_CMD_ARGS+=("--verbose" "--include-partial-messages")
 
-        # jq filter: show text + tool names + sub-agent progress + newlines for readability
-        local jq_filter='
-            if .type == "stream_event" then
-                if .event.type == "content_block_delta" and .event.delta.type == "text_delta" then
-                    .event.delta.text
-                elif .event.type == "content_block_start" and .event.content_block.type == "tool_use" then
-                    "\n\n⚡ [" + .event.content_block.name + "]\n"
-                elif .event.type == "content_block_stop" then
-                    "\n"
-                else
-                    empty
-                end
-            elif .type == "system" and .subtype == "task_started" then
-                "\n\n🚀 Agent: " + (.description // "started") + "\n"
-            elif .type == "system" and .subtype == "task_progress" then
-                "📌 " + (.description // "working...") + "\n"
+        # awk stream filter: compact display with tool context, timing, and progress
+        # Replaces the old jq filter with stateful processing that shows:
+        # - Tool names with key parameters (file paths, commands, patterns)
+        # - Per-tool elapsed time from execution start
+        # - Sub-agent events with numbering
+        # - Error indicators for failed tool results
+        # - Summary stats line at the end
+        local start_epoch
+        start_epoch=$(date +%s)
+        local stream_filter='
+{
+    line = $0
+
+    # --- Text delta: extract and print Claude text output ---
+    if (line ~ /"text_delta"/) {
+        txt = line
+        sub(/.*"text":"/, "", txt)
+        sub(/"[}]*$/, "", txt)
+        gsub(/\\n/, "\n", txt)
+        gsub(/\\t/, "\t", txt)
+        gsub(/\\"/, "\"", txt)
+        gsub(/\\\\/, "\\", txt)
+        printf "%s", txt
+        fflush()
+        next
+    }
+
+    # --- Tool use start: capture name, reset input accumulator ---
+    if (line ~ /"tool_use"/ && line ~ /"content_block_start"/) {
+        tc++
+        it = 1
+        ti = ""
+        ct = line
+        sub(/.*"name":"/, "", ct)
+        sub(/".*/, "", ct)
+        next
+    }
+
+    # --- Input JSON delta: accumulate tool parameters ---
+    if (it && line ~ /"input_json_delta"/) {
+        pj = line
+        sub(/.*"partial_json":"/, "", pj)
+        sub(/"[}]*$/, "", pj)
+        gsub(/\\"/, "\"", pj)
+        gsub(/\\\\/, "\\", pj)
+        ti = ti pj
+        next
+    }
+
+    # --- Content block stop: emit compact tool summary ---
+    if (line ~ /"content_block_stop"/) {
+        if (it && ct != "") {
+            cmd = "date +%s"
+            cmd | getline now
+            close(cmd)
+            el = now - st
+            mn = int(el / 60)
+            sc = el % 60
+
+            # Extract key parameter from accumulated tool input
+            param = ""
+            if (ct == "Read" || ct == "Write" || ct == "Edit") {
+                if (ti ~ /"file_path"/) {
+                    param = ti
+                    sub(/.*"file_path"[[:space:]]*:[[:space:]]*"/, "", param)
+                    sub(/".*/, "", param)
+                    # Shorten: show last 2-3 path components
+                    n = split(param, parts, /[\/\\]/)
+                    if (n > 3) param = ".../" parts[n-2] "/" parts[n-1] "/" parts[n]
+                    else if (n > 2) param = ".../" parts[n-1] "/" parts[n]
+                }
+            } else if (ct == "Bash") {
+                if (ti ~ /"command"/) {
+                    param = ti
+                    sub(/.*"command"[[:space:]]*:[[:space:]]*"/, "", param)
+                    sub(/".*/, "", param)
+                    gsub(/\\n/, " ", param)
+                    if (length(param) > 60) param = substr(param, 1, 57) "..."
+                }
+            } else if (ct == "Glob" || ct == "Grep") {
+                if (ti ~ /"pattern"/) {
+                    param = ti
+                    sub(/.*"pattern"[[:space:]]*:[[:space:]]*"/, "", param)
+                    sub(/".*/, "", param)
+                }
+            } else if (ct == "Agent") {
+                if (ti ~ /"description"/) {
+                    param = ti
+                    sub(/.*"description"[[:space:]]*:[[:space:]]*"/, "", param)
+                    sub(/".*/, "", param)
+                }
+            } else if (ct == "TodoWrite") {
+                if (ti ~ /"task"/) {
+                    param = ti
+                    sub(/.*"task"[[:space:]]*:[[:space:]]*"/, "", param)
+                    sub(/".*/, "", param)
+                    if (length(param) > 50) param = substr(param, 1, 47) "..."
+                }
+            }
+
+            # Compact single-line: tool count, name, parameter, elapsed time
+            if (param != "")
+                printf "  [%d] %s(%s) [%dm%02ds]\n", tc, ct, param, mn, sc
             else
-                empty
-            end'
+                printf "  [%d] %s [%dm%02ds]\n", tc, ct, mn, sc
+            fflush()
+
+            it = 0; ct = ""; ti = ""
+        } else {
+            it = 0
+        }
+        next
+    }
+
+    # --- Sub-agent started ---
+    if (line ~ /"task_started"/) {
+        ac++
+        desc = line
+        if (desc ~ /"description"/) {
+            sub(/.*"description"[[:space:]]*:[[:space:]]*"/, "", desc)
+            sub(/".*/, "", desc)
+        } else {
+            desc = "started"
+        }
+        printf "\n>> Agent #%d: %s\n", ac, desc
+        fflush()
+        next
+    }
+
+    # --- Sub-agent progress ---
+    if (line ~ /"task_progress"/) {
+        desc = line
+        if (desc ~ /"description"/) {
+            sub(/.*"description"[[:space:]]*:[[:space:]]*"/, "", desc)
+            sub(/".*/, "", desc)
+        } else {
+            desc = "working..."
+        }
+        printf "   ...%s\n", desc
+        fflush()
+        next
+    }
+
+    # --- Error in result ---
+    if (line ~ /"is_error"[[:space:]]*:[[:space:]]*true/) {
+        ec++
+        printf "  ❌ Error detected in response\n"
+        fflush()
+        next
+    }
+}
+END {
+    cmd = "date +%s"
+    cmd | getline now
+    close(cmd)
+    el = now - st
+    mn = int(el / 60)
+    sc = el % 60
+    printf "\n─── %d tools | %d agents | %d errors | %dm%02ds total ───\n", tc, ac, ec, mn, sc
+    fflush()
+}'
 
         # Execute with streaming, preserving all flags from build_claude_command()
         # Use stdbuf to disable buffering for real-time output
@@ -1612,10 +1757,10 @@ execute_claude_code() {
         # stdin must be redirected from /dev/null because newer Claude CLI versions
         # read from stdin even in -p (print) mode, causing the process to hang
         # Redirect stderr to separate file to prevent Node.js warnings (e.g., UNDICI)
-        # from corrupting the jq JSON pipeline (Issue #190)
+        # from corrupting the stream parser pipeline (Issue #190)
         local stderr_file="${LOG_DIR}/claude_stderr_$(date '+%Y%m%d_%H%M%S').log"
         portable_timeout ${timeout_seconds}s stdbuf -oL "${LIVE_CMD_ARGS[@]}" \
-            < /dev/null 2>"$stderr_file" | stdbuf -oL tee "$output_file" | stdbuf -oL jq --unbuffered -j "$jq_filter" 2>/dev/null | tee "$LIVE_LOG_FILE"
+            < /dev/null 2>"$stderr_file" | stdbuf -oL tee "$output_file" | stdbuf -oL awk -v st="$start_epoch" -v tc=0 -v ac=0 -v ec=0 -v it=0 -v ct="" -v ti="" "$stream_filter" 2>/dev/null | tee "$LIVE_LOG_FILE"
 
         # Capture exit codes from pipeline
         local -a pipe_status=("${PIPESTATUS[@]}")
@@ -1640,13 +1785,23 @@ execute_claude_code() {
             log_status "WARN" "Failed to write stream output to log file (exit code ${pipe_status[1]})"
         fi
 
-        # Check for jq failures (third command) - warn but don't fail
+        # Check for awk stream filter issues (third command) - warn but don't fail
         if [[ ${pipe_status[2]} -ne 0 ]]; then
-            log_status "WARN" "jq filter had issues parsing some stream events (exit code ${pipe_status[2]})"
+            log_status "WARN" "Stream filter had issues parsing some events (exit code ${pipe_status[2]})"
         fi
 
         echo ""
         echo -e "${PURPLE}━━━━━━━━━━━━━━━━ End of Output ━━━━━━━━━━━━━━━━━━━${NC}"
+
+        # Post-execution stats from stream output (logged for monitoring/ralph.log)
+        local _tool_count=$(grep -c '"type":"tool_use"' "$output_file" 2>/dev/null || echo 0)
+        local _agent_count=$(grep -c '"subtype":"task_started"' "$output_file" 2>/dev/null || echo 0)
+        local _error_count=$(grep -c '"is_error":true' "$output_file" 2>/dev/null || echo 0)
+        if [[ $_error_count -gt 0 ]]; then
+            log_status "WARN" "Execution stats: Tools=$_tool_count Agents=$_agent_count Errors=$_error_count"
+        else
+            log_status "INFO" "Execution stats: Tools=$_tool_count Agents=$_agent_count Errors=$_error_count"
+        fi
 
         # Extract session ID from stream-json output for session continuity
         # Stream-json format has session_id in the final "result" type message
@@ -2366,6 +2521,7 @@ IMPORTANT: This command must be run from a Ralph project directory.
            Use 'ralph-setup project-name' to create a new project first.
 
 Options:
+    -V, --version           Show version and exit
     -h, --help              Show this help message
     -c, --calls NUM         Set max calls per hour (default: $MAX_CALLS_PER_HOUR)
     -p, --prompt FILE       Set prompt file (default: $PROMPT_FILE)
@@ -2425,6 +2581,10 @@ HELPEOF
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        -V|--version)
+            echo "ralph $RALPH_VERSION"
+            exit 0
+            ;;
         -h|--help)
             show_help
             exit 0

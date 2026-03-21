@@ -28,6 +28,7 @@ Check out the [examples/](../../examples/) directory for complete, realistic pro
 
 | I want to... | Do this |
 |-------------|---------|
+| Check installed Ralph version | `ralph --version` |
 | Enable Ralph on an existing project | `ralph-enable` |
 | Import a PRD/requirements doc | `ralph-import requirements.md project-name` |
 | Create a new project from scratch | `ralph-setup my-project` |

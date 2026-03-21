@@ -60,6 +60,26 @@ teardown() {
 }
 
 # =============================================================================
+# VERSION FLAG TESTS (2 tests)
+# =============================================================================
+
+@test "--version flag displays version and exits" {
+    run bash "$RALPH_SCRIPT" --version
+
+    assert_success
+    [[ "$output" == *"ralph "* ]]
+    [[ "$output" =~ [0-9]+\.[0-9]+\.[0-9]+ ]]
+}
+
+@test "-V short flag displays version and exits" {
+    run bash "$RALPH_SCRIPT" -V
+
+    assert_success
+    [[ "$output" == *"ralph "* ]]
+    [[ "$output" =~ [0-9]+\.[0-9]+\.[0-9]+ ]]
+}
+
+# =============================================================================
 # HELP FLAG TESTS (2 tests)
 # =============================================================================
 
@@ -73,6 +93,7 @@ teardown() {
     [[ "$output" == *"Options:"* ]]
 
     # Verify all flags are documented
+    [[ "$output" == *"--version"* ]]
     [[ "$output" == *"--calls"* ]]
     [[ "$output" == *"--prompt"* ]]
     [[ "$output" == *"--status"* ]]

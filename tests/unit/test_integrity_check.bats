@@ -13,8 +13,8 @@ setup() {
     TEST_DIR="$(mktemp -d)"
     cd "$TEST_DIR"
 
-    # Source file protection library
-    source "$FILE_PROTECTION"
+    # file_protection.sh removed (SKILLS-4) — protection handled by PreToolUse hooks
+    [[ -f "$FILE_PROTECTION" ]] || skip "file_protection.sh removed (SKILLS-4)"
 
     # Set up environment
     export RALPH_DIR=".ralph"

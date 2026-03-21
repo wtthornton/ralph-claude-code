@@ -79,7 +79,7 @@ Add a dedicated test for `--allowed-tools` validation to match the pattern used 
 
 ### Excellent Practices
 
-- **Comprehensive Flag Coverage:** All 12 CLI flags are tested including both long and short forms
+- **Comprehensive Flag Coverage:** All 13 CLI flags are tested including both long and short forms
 - **Boundary Testing:** The `--timeout` test validates edge cases (0, 1, 120, 121, -5, "abc")
 - **Clear Organization:** Well-structured sections with descriptive headers make tests easy to navigate
 - **Early Exit Pattern:** Clever use of `--help` as escape hatch to test flag parsing without triggering main loop
@@ -192,4 +192,4 @@ The CLI parsing test file is production-ready with excellent coverage of all CLI
 ### Metrics
 - **Lines of Code Reviewed:** 354
 - **Test Cases Reviewed:** 26
-- **CLI Flags Covered:** 12/12 (100%)
+- **CLI Flags Covered:** 13/13 (100%)

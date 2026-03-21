@@ -153,45 +153,11 @@ get_past_timestamp() {
 }
 
 @test "HALF_OPEN from cooldown + progress recovers to CLOSED" {
-    # First: simulate cooldown recovery to HALF_OPEN
-    local old_timestamp
-    old_timestamp=$(get_past_timestamp 35)
-    create_open_state "$old_timestamp"
-    export CB_COOLDOWN_MINUTES=30
-    export CB_AUTO_RESET=false
-
-    init_circuit_breaker
-    local state
-    state=$(jq -r '.state' "$CB_STATE_FILE")
-    [[ "$state" == "HALF_OPEN" ]]
-
-    # Now: simulate a loop with progress
-    record_loop_result 8 3 "false" 5000
-
-    state=$(jq -r '.state' "$CB_STATE_FILE")
-    [[ "$state" == "CLOSED" ]]
+    skip "record_loop_result removed (SKILLS-5) — progress detection handled by on-stop.sh hook"
 }
 
 @test "HALF_OPEN from cooldown + no progress re-trips to OPEN" {
-    # First: simulate cooldown recovery to HALF_OPEN
-    local old_timestamp
-    old_timestamp=$(get_past_timestamp 35)
-    create_open_state "$old_timestamp"
-    export CB_COOLDOWN_MINUTES=30
-    export CB_AUTO_RESET=false
-
-    init_circuit_breaker
-    local state
-    state=$(jq -r '.state' "$CB_STATE_FILE")
-    [[ "$state" == "HALF_OPEN" ]]
-
-    # Simulate enough no-progress loops to re-trip
-    for i in $(seq 1 $CB_NO_PROGRESS_THRESHOLD); do
-        record_loop_result $((7 + i)) 0 "false" 100 || true
-    done
-
-    state=$(jq -r '.state' "$CB_STATE_FILE")
-    [[ "$state" == "OPEN" ]]
+    skip "record_loop_result removed (SKILLS-5) — progress detection handled by on-stop.sh hook"
 }
 
 @test "CB_COOLDOWN_MINUTES=0 means immediate recovery attempt" {
@@ -317,21 +283,7 @@ get_past_timestamp() {
 # =============================================================================
 
 @test "Entering OPEN state sets opened_at field" {
-    # Start CLOSED, trigger OPEN via no-progress
-    create_closed_state
-    export CB_NO_PROGRESS_THRESHOLD=3
-
-    for i in 1 2 3; do
-        record_loop_result "$i" 0 "false" 100 || true
-    done
-
-    local state opened_at
-    state=$(jq -r '.state' "$CB_STATE_FILE")
-    opened_at=$(jq -r '.opened_at // "missing"' "$CB_STATE_FILE")
-    [[ "$state" == "OPEN" ]]
-    [[ "$opened_at" != "missing" ]]
-    [[ "$opened_at" != "null" ]]
-    [[ "$opened_at" != "" ]]
+    skip "record_loop_result removed (SKILLS-5) — state transitions handled by on-stop.sh hook"
 }
 
 @test "Staying OPEN preserves opened_at field" {
@@ -441,23 +393,23 @@ TUEOF
 
 # --- Current Loop Display Fix (Issue #194) ---
 
-@test "init_circuit_breaker includes current_loop in state file" {
-    # Fresh init should include current_loop: 0 so --circuit-status never shows #null
+@test "init_circuit_breaker creates valid state file" {
+    # Fresh init should create a valid state file
     rm -f "$CB_STATE_FILE"
     init_circuit_breaker
 
-    local current_loop
-    current_loop=$(jq -r '.current_loop' "$CB_STATE_FILE")
-    assert_equal "$current_loop" "0"
+    local state
+    state=$(jq -r '.state' "$CB_STATE_FILE")
+    assert_equal "$state" "CLOSED"
 }
 
-@test "reset_circuit_breaker includes current_loop in state file" {
-    # After reset, current_loop should be 0 (not missing)
+@test "reset_circuit_breaker creates valid state file" {
+    # After reset, state should be CLOSED
     reset_circuit_breaker "test reset"
 
-    local current_loop
-    current_loop=$(jq -r '.current_loop' "$CB_STATE_FILE")
-    assert_equal "$current_loop" "0"
+    local state
+    state=$(jq -r '.state' "$CB_STATE_FILE")
+    assert_equal "$state" "CLOSED"
 }
 
 @test "show_circuit_status uses fallback for missing current_loop" {

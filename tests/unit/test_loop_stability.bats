@@ -208,15 +208,15 @@ EOF
 }
 
 @test "LOOP-4: ralph_loop.sh guards update_exit_signals calls" {
-    # Check that both call sites have error guards
+    # Check that both call sites have error guards (now update_exit_signals_from_status)
     local guarded_count
-    guarded_count=$(grep -c 'if ! update_exit_signals' "$RALPH_LOOP")
+    guarded_count=$(grep -c 'if ! update_exit_signals_from_status' "$RALPH_LOOP")
     [ "$guarded_count" -ge 2 ]
 }
 
-@test "LOOP-4: ralph_loop.sh guards log_analysis_summary calls" {
+@test "LOOP-4: ralph_loop.sh guards log_status_summary calls" {
     local guarded_count
-    guarded_count=$(grep -c 'if ! log_analysis_summary' "$RALPH_LOOP")
+    guarded_count=$(grep -c 'if ! log_status_summary' "$RALPH_LOOP")
     [ "$guarded_count" -ge 2 ]
 }
 

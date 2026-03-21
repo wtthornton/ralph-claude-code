@@ -70,7 +70,7 @@ bats tests/unit/test_cli_parsing.bats
 
 **Sub-agents**: Three specialized agents (ralph-explorer, ralph-tester, ralph-reviewer) keep search, testing, and review output out of the main context. The main Ralph agent spawns them via `Agent(ralph-explorer, ralph-tester, ralph-reviewer)` allowlist.
 
-**Live / JSONL pipeline**: `--live` captures NDJSON; the loop copies the full stream, retries `-f` on the output file (WSL2/9P), extracts the last `type: "result"` line when `CLAUDE_USE_CONTINUE` is true, then `ralph_prepare_claude_output_for_analysis` logs permission denials and failed MCP init, and collapses any remaining multi-value JSON to a single result object.
+**Live / JSONL pipeline**: `--live` captures NDJSON via an `awk` stream filter (replaced the earlier `jq` filter) that shows tool names with parameters (file paths, commands, patterns), per-tool elapsed time, sub-agent events, error indicators, and a summary stats line. The loop copies the full stream, retries `-f` on the output file (WSL2/9P), extracts the last `type: "result"` line when `CLAUDE_USE_CONTINUE` is true, then `ralph_prepare_claude_output_for_analysis` logs permission denials and failed MCP init, and collapses any remaining multi-value JSON to a single result object.
 
 **Design documentation**: Reliability epics and stories live in **`docs/specs/`** (e.g. `epic-jsonl-stream-resilience.md`, `epic-multi-task-cascading-failures.md`). Long-term platform integration is drafted in `docs/specs/claude-code-2026-enhancements.md`.
 
@@ -103,6 +103,17 @@ Environment variables override `.ralphrc` settings.
 - **Prerequisites**: Node.js 18+, jq, git
 - **Quality gate**: 100% test pass rate (code coverage via kcov is informational only due to subprocess tracing limitations)
 - Tests live in `tests/unit/` and `tests/integration/`; helpers in `tests/helpers/`
+
+## Versioning
+
+The version string exists in **two** files that **must stay in sync**:
+
+| File | Location | Format |
+|------|----------|--------|
+| `package.json` | `"version": "X.Y.Z"` | npm standard |
+| `ralph_loop.sh` | `RALPH_VERSION="X.Y.Z"` (near top of file) | bash variable, powers `ralph --version` / `ralph -V` |
+
+**When bumping the version** (release, build, or deploy), update **both** files to the same value. A mismatch means `ralph --version` will report a different version than `npm version` / `package.json`.
 
 ## Development Standards
 

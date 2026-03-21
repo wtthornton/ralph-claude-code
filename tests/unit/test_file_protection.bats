@@ -8,6 +8,9 @@ load '../helpers/test_helper'
 FILE_PROTECTION="${BATS_TEST_DIRNAME}/../../lib/file_protection.sh"
 
 setup() {
+    # file_protection.sh removed (SKILLS-4) — protection handled by PreToolUse hooks
+    [[ -f "$FILE_PROTECTION" ]] || skip "file_protection.sh removed (SKILLS-4)"
+
     # Create temporary test directory
     TEST_DIR="$(mktemp -d)"
     cd "$TEST_DIR"

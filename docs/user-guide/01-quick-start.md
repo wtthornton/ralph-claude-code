@@ -4,7 +4,7 @@ This tutorial walks you through enabling Ralph on an existing project and runnin
 
 ## Prerequisites
 
-- Ralph installed globally (`./install.sh` from the ralph-claude-code repo)
+- Ralph installed globally (`./install.sh` from the ralph-claude-code repo) — verify with `ralph --version`
 - Claude Code CLI installed (`npm install -g @anthropic-ai/claude-code`)
 - A project directory (we'll create one)
 
