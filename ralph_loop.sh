@@ -17,7 +17,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 # file_protection.sh removed — file protection handled by PreToolUse hooks (protect-ralph-files.sh, validate-command.sh)
 
 # Version
-RALPH_VERSION="1.1.0"
+RALPH_VERSION="1.2.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -466,7 +466,8 @@ ralph_log_permission_denials_from_raw_output() {
 }
 
 # Pre-analysis: if stream is still multi-value JSONL, collapse to last result object
-ralph_emergency_jsonl_normalize() {
+# STREAM-1: Renamed from ralph_emergency_jsonl_normalize — JSONL is the primary path since CLI v2.1+
+ralph_extract_result_from_stream() {
     local output_file=$1
     [[ -f "$output_file" ]] || return 0
     local _tl_count
@@ -477,27 +478,35 @@ ralph_emergency_jsonl_normalize() {
     _tl_count=$((_tl_count + 0))
     [[ "$_tl_count" -gt 1 ]] || return 0
 
-    local _result_count
+    # STREAM-2: Count only top-level result objects — subagent results contain a
+    # subagent or parent_tool_use_id field and should not trigger multi-task warnings
+    local _result_count _toplevel_count
     _result_count=$(grep -c -E '"type"[[:space:]]*:[[:space:]]*"result"' "$output_file" 2>/dev/null || echo "0")
     _result_count=$(echo "$_result_count" | tr -d '[:space:]')
     _result_count=$((_result_count + 0))
-    if [[ "$_result_count" -gt 1 ]]; then
-        log_status "WARN" "Stream contains $_result_count result objects (expected 1). Multi-task loop violation detected."
+    _toplevel_count=$(jq -c 'select(.type == "result") | select(.subagent == null and .parent_tool_use_id == null)' "$output_file" 2>/dev/null | wc -l || echo "$_result_count")
+    _toplevel_count=$(echo "$_toplevel_count" | tr -d '[:space:]')
+    _toplevel_count=$((_toplevel_count + 0))
+
+    if [[ "$_toplevel_count" -gt 1 ]]; then
+        log_status "WARN" "Stream contains $_toplevel_count top-level result objects (expected 1). Multi-task loop violation detected."
+    elif [[ "$_result_count" -gt 1 ]]; then
+        log_status "INFO" "Stream contains $_result_count result objects ($_toplevel_count top-level, $((_result_count - _toplevel_count)) subagent)"
     fi
 
-    local _emergency_result
-    _emergency_result=$(jq -c 'select(.type == "result")' "$output_file" 2>/dev/null | tail -1)
+    local _extracted_result
+    _extracted_result=$(jq -c 'select(.type == "result")' "$output_file" 2>/dev/null | tail -1)
 
-    if [[ -n "$_emergency_result" ]] && echo "$_emergency_result" | jq -e . >/dev/null 2>&1; then
+    if [[ -n "$_extracted_result" ]] && echo "$_extracted_result" | jq -e . >/dev/null 2>&1; then
         local _backup="${output_file%.log}_stream.log"
         if [[ ! -f "$_backup" ]]; then
             cp "$output_file" "$_backup"
             log_status "INFO" "Created stream backup: $_backup"
         fi
-        echo "$_emergency_result" > "$output_file"
-        log_status "WARN" "Emergency JSONL extraction: converted multi-value stream to single result object"
+        echo "$_extracted_result" > "$output_file"
+        log_status "INFO" "Stream extraction: isolated result object from JSONL stream (extraction_method=stream)"
     else
-        log_status "ERROR" "Emergency JSONL extraction failed: no valid result object in stream"
+        log_status "ERROR" "Stream extraction failed: no valid result object in stream"
     fi
 }
 
@@ -517,10 +526,10 @@ ralph_log_failed_mcp_servers_from_output() {
 # Run all lightweight pre-analyze steps on Claude output
 ralph_prepare_claude_output_for_analysis() {
     local output_file=$1
-    # Log from full stream before emergency collapse removes system / multi-line context
+    # Log from full stream before extraction removes system / multi-line context
     ralph_log_permission_denials_from_raw_output "$output_file"
     ralph_log_failed_mcp_servers_from_output "$output_file"
-    ralph_emergency_jsonl_normalize "$output_file"
+    ralph_extract_result_from_stream "$output_file"
 }
 
 # =============================================================================
@@ -2053,6 +2062,7 @@ END {
 
         # Get PID and monitor progress
         local claude_pid=$!
+        RALPH_PIPELINE_PID=$claude_pid  # WSL-2: Track for cleanup handler
         local progress_counter=0
 
         # Early failure detection: if the command doesn't exist or fails immediately,
@@ -2359,6 +2369,12 @@ cleanup() {
     if [[ "$_CLEANUP_DONE" == "true" ]]; then return; fi
     _CLEANUP_DONE=true
 
+    # WSL-2: Kill pipeline children to prevent spurious exit-code-130 log spam
+    if [[ -n "${RALPH_PIPELINE_PID:-}" ]]; then
+        kill -- -"$RALPH_PIPELINE_PID" 2>/dev/null || kill "$RALPH_PIPELINE_PID" 2>/dev/null || true
+        wait "$RALPH_PIPELINE_PID" 2>/dev/null || true
+    fi
+
     if [[ $loop_count -gt 0 ]]; then
         if [[ $trap_exit_code -ne 0 ]]; then
             log_status "ERROR" "Ralph loop crashed (exit code: $trap_exit_code)"
@@ -2521,6 +2537,10 @@ main() {
     # Perform initial log rotation at startup
     rotate_ralph_log
     cleanup_old_output_logs
+
+    # WSL-1: Clean stale temp files from previous runs (cross-fs orphans)
+    find "$RALPH_DIR" -name "status.json.*" -mmin +60 -delete 2>/dev/null || true
+    find "$RALPH_DIR" -name ".circuit_breaker_state.*" -mmin +60 -delete 2>/dev/null || true
 
     if [[ "$DRY_RUN" == "true" ]]; then
         log_status "INFO" "DRY-RUN MODE: No API calls will be made"
@@ -2734,13 +2754,16 @@ Files created:
     - .ralph/.call_count: API call counter for rate limiting
     - .ralph/.last_reset: Timestamp of last rate limit reset
 
-Behavior notes (v0.11.6+):
-    - --live uses stream-json-friendly output: full stream preserved (*_stream.log), result line
+Behavior notes (v1.2.0+):
+    - --live uses stream-json output: full stream preserved (*_stream.log), result line
       extracted when possible; WSL2/NTFS mounts retry file visibility before extraction.
-    - Before each loop iteration: emergency JSONL normalize if needed; permission denials and
-      failed MCP servers logged from raw output. Analysis via on-stop.sh hook → status.json.
+    - Before each loop iteration: JSONL stream extraction isolates the result object;
+      permission denials and failed MCP servers logged from raw output.
+    - Analysis via on-stop.sh hook → status.json (RALPH_STATUS fields auto-unescaped).
+    - Subagent result objects are filtered from multi-result count (no false violations).
     - New ralph invocation resets circuit breaker *counters* (not OPEN/CLOSED state).
-    - Optional: Docker containers labeled ralph.mcp=true are checked at startup (non-fatal).
+    - Stale temp files (status.json.*, .circuit_breaker_state.*) cleaned on startup.
+    - Pipeline children are killed cleanly on SIGINT (no spurious exit-130 warnings).
 
 Example workflow:
     ralph-setup my-project     # Create project

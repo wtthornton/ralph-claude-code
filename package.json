@@ -1,6 +1,6 @@
 {
   "name": "ralph-claude-code",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "> **Autonomous AI development loop with intelligent exit detection and rate limiting**",
   "main": "index.js",
   "directories": {

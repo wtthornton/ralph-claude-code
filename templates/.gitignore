@@ -27,6 +27,10 @@ Thumbs.db
 *.tmp
 .temp/
 
+# WSL-1: Orphaned temp files from atomic writes (cross-fs copy+unlink)
+.ralph/status.json.*
+.ralph/.circuit_breaker_state.*
+
 # Node modules (if using Node.js projects)
 node_modules/
 

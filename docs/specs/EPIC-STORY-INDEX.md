@@ -1,20 +1,20 @@
 # Ralph Claude Code — Epic & Story Index
 
-> **Generated:** 2026-03-21 | **Total Epics:** 7 | **Total Stories:** 37 (37 Done, 0 Open)
+> **Generated:** 2026-03-21 | **Total Epics:** 9 | **Total Stories:** 42 (42 Done, 0 Open)
 
 ---
 
 ## Execution Plan Overview
 
 ```
-Phase 0 (DONE)     Phase 0.5 (DONE)    Phase 1 (DONE)       Phase 2 (DONE)       Phase 3 (DONE)       Phase 4 (DONE)
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│ RALPH-JSONL  │──▶│ RALPH-LOOP   │──▶│ RALPH-HOOKS  │───▶│RALPH-SUBAGENTS│──▶│ RALPH-SKILLS │──▶│ RALPH-TEAMS  │
-│ 4/4 Done     │   │ 5/5 Done     │   │ 6/6 Done     │    │ 5/5 Done      │   │ 5/5 Done     │   │ 5/5 Done     │
-│              │   │              │   │              │    │               │   │              │   │              │
-│ RALPH-MULTI  │   │ Critical     │   │ Critical     │    │ Important     │   │ Important    │   │ Nice-to-have │
-│ 6/6 Done     │   │ P0 Regrssion │   │ Foundation   │    │ Sub-agents    │   │ -1,368 lines │   │ Experimental │
-└──────────────┘   └──────────────┘   └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
+Phase 0 (DONE)     Phase 0.5 (DONE)    Phase 1 (DONE)       Phase 2 (DONE)       Phase 3 (DONE)       Phase 4 (DONE)       Phase 5 (DONE)
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│ RALPH-JSONL  │──▶│ RALPH-LOOP   │──▶│ RALPH-HOOKS  │───▶│RALPH-SUBAGENTS│──▶│ RALPH-SKILLS │──▶│ RALPH-TEAMS  │──▶│RALPH-STREAM  │
+│ 4/4 Done     │   │ 5/5 Done     │   │ 6/6 Done     │    │ 5/5 Done      │   │ 5/5 Done     │   │ 5/5 Done     │   │ 3/3 Done     │
+│              │   │              │   │              │    │               │   │              │   │              │   │              │
+│ RALPH-MULTI  │   │ Critical     │   │ Critical     │    │ Important     │   │ Important    │   │ Nice-to-have │   │ RALPH-WSL    │
+│ 6/6 Done     │   │ P0 Regrssion │   │ Foundation   │    │ Sub-agents    │   │ -1,368 lines │   │ Experimental │   │ 2/2 Done     │
+└──────────────┘   └──────────────┘   └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
 ```
 
 ---
@@ -123,6 +123,29 @@ Phase 0 (DONE)     Phase 0.5 (DONE)    Phase 1 (DONE)       Phase 2 (DONE)      
 
 ---
 
+## Phase 5 — Complete (Stream & WSL Polish)
+
+### RALPH-STREAM: Stream Parser v2 — JSONL as Primary Path
+**Priority:** Medium | **Status:** Done | **Dependencies:** None
+**Source:** [ralph-feedback-report.md](../../../../tapps-brain/ralph-feedback-report.md) (Issues #1, #2, #7)
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | STREAM-1 | Promote JSONL Parsing to Primary Path | Medium | Small | **Done** |
+| 2 | STREAM-2 | Filter Multi-Result Count by Parent Context | Medium | Trivial | **Done** |
+| 3 | STREAM-3 | Unescape RALPH_STATUS Before Field Extraction | Medium | Small | **Done** |
+
+### RALPH-WSL: WSL Reliability Polish
+**Priority:** Low | **Status:** Done | **Dependencies:** None
+**Source:** [ralph-feedback-report.md](../../../../tapps-brain/ralph-feedback-report.md) (Issues #3, #4)
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | WSL-1 | Add Temp File Cleanup After Atomic Writes | Low | Trivial | **Done** |
+| 2 | WSL-2 | Add Child Process Cleanup to Trap Handler | Low | Small | **Done** |
+
+---
+
 ## Priority Summary
 
 | Priority | Open | Done | Total |
@@ -130,16 +153,16 @@ Phase 0 (DONE)     Phase 0.5 (DONE)    Phase 1 (DONE)       Phase 2 (DONE)      
 | Critical | 0 | 11 | 11 |
 | High | 0 | 4 | 4 |
 | Important | 0 | 15 | 15 |
-| Medium | 0 | 4 | 4 |
+| Medium | 0 | 7 | 7 |
 | Nice-to-have | 0 | 2 | 2 |
-| Defensive/Low | 0 | 1 | 1 |
-| **Total** | **0** | **37** | **37** |
+| Defensive/Low | 0 | 3 | 3 |
+| **Total** | **0** | **42** | **42** |
 
 ## Critical Path
 
-All phases complete. v1.0.0 epic/story goals achieved.
+All phases complete. v1.1.0 goals achieved. 42/42 stories done.
 
 ```
-Phase 0 ──▶ Phase 0.5 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 4
-  DONE         DONE          DONE        DONE        DONE        DONE
+Phase 0 ──▶ Phase 0.5 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 4 ──▶ Phase 5
+  DONE         DONE          DONE        DONE        DONE        DONE        DONE
 ```

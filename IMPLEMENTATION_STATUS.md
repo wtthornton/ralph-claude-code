@@ -1,10 +1,10 @@
 # Implementation Status Summary
 
 **Last Updated**: 2026-03-21
-**Version**: v1.1.0
-**Overall Status**: All 37 epic stories complete. v1.1.0 adds log rotation, dry-run mode, WSL/Windows version divergence detection, and on-stop.sh hook fallback.
+**Version**: v1.2.0
+**Overall Status**: All 42 epic stories complete across 9 epics (Phases 0-5). v1.2.0 completes Phase 5 stream parsing and WSL reliability polish.
 
-> **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count.
+> **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count (736+ tests).
 
 ---
 
@@ -86,41 +86,39 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 
 ---
 
+## Completed: Stream Parser v2 & WSL Polish (March 2026)
+
+**Epic:** [RALPH-STREAM: Stream Parser v2](docs/specs/epic-stream-parser-v2.md) (Phase 5) — **Done**
+
+- [x] **STREAM-1:** Renamed `ralph_emergency_jsonl_normalize` → `ralph_extract_result_from_stream`; WARN→INFO for normal extraction
+- [x] **STREAM-2:** Multi-result count now filters subagent results (no false "multi-task violation" warnings)
+- [x] **STREAM-3:** Auto-unescapes JSON-encoded `\n` in on-stop.sh before RALPH_STATUS field extraction; fallback WORK_TYPE inference
+
+**Epic:** [RALPH-WSL: WSL Reliability Polish](docs/specs/epic-wsl-reliability-polish.md) (Phase 5) — **Done**
+
+- [x] **WSL-1:** Added `rm -f` after atomic `mv` calls, `.gitignore` patterns for orphans, stale temp cleanup on startup
+- [x] **WSL-2:** Pipeline PID tracking + kill in `cleanup()` trap handler; clean SIGINT exit without child process noise
+
+---
+
 ## Current State
 
 ### Test Coverage
 
-| Metric | Current | Target |
-|--------|---------|--------|
-| **Total Tests** | 276 | 300+ |
-| **Pass Rate** | 100% | 100% |
-| **Unit Tests** | 154 | 160+ |
-| **Integration Tests** | 122 | 140+ |
-| **E2E Tests** | 0 | 10+ |
-
-### Test Files (11 files, 276 tests)
-
-| File | Tests | Status |
-|------|-------|--------|
-| test_cli_parsing.bats | 27 | ✅ Complete |
-| test_cli_modern.bats | 29 | ✅ Complete |
-| test_json_parsing.bats | 36 | ✅ Complete |
-| test_session_continuity.bats | 26 | ✅ Complete |
-| test_exit_detection.bats | 20 | ✅ Complete |
-| test_rate_limiting.bats | 15 | ✅ Complete |
-| test_loop_execution.bats | 20 | ✅ Complete |
-| test_edge_cases.bats | 20 | ✅ Complete |
-| test_installation.bats | 14 | ✅ Complete |
-| test_project_setup.bats | 36 | ✅ Complete |
-| test_prd_import.bats | 33 | ✅ Complete |
+| Metric | Current |
+|--------|---------|
+| **Total Tests** | 736+ |
+| **Pass Rate** | 100% |
+| **Test Files** | 17 unit + integration |
 
 ### Code Quality
 
 - **CI/CD**: ✅ GitHub Actions operational
-- **Response Analyzer**: ✅ lib/response_analyzer.sh (JSON parsing, session management)
-- **Circuit Breaker**: ✅ lib/circuit_breaker.sh (three-state pattern)
+- **Hook-based analysis**: ✅ on-stop.sh → status.json (replaces removed response_analyzer.sh)
+- **Circuit Breaker**: ✅ lib/circuit_breaker.sh (simplified three-state pattern)
 - **Date Utilities**: ✅ lib/date_utils.sh (cross-platform)
-- **Test Helpers**: ✅ Complete infrastructure
+- **Sub-agents**: ✅ ralph-explorer, ralph-tester, ralph-reviewer, ralph-bg-tester
+- **Skills**: ✅ ralph-loop, ralph-research
 
 ---
 
@@ -334,17 +332,15 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 
 | Category | Count |
 |----------|-------|
-| Total Open Issues | 28 |
-| P2 Issues | 8 |
-| P3 Issues | 8 |
-| P4 Issues | 13 |
-| Closed Issues | 28 |
-| Total Tests | 566+ |
+| Total Open Issues | 50 |
+| Closed Issues | 28+ |
+| Total Tests | 736+ |
 | Test Pass Rate | 100% |
+| Epic Stories | 42/42 Done |
 
 ---
 
-**Status**: ✅ 37/37 stories complete (100%). All phases delivered. v1.1.0 released.
-**Removed**: `lib/response_analyzer.sh` (-1042 lines), `lib/file_protection.sh` (-58 lines), simplified `lib/circuit_breaker.sh` (-285 lines). Total: ~1,385 lines of bash removed.
-**Added**: 3 sub-agent definitions, 2 skills, enhanced SubagentStop hook, session functions inlined into ralph_loop.sh.
-**v1.1.0**: Log rotation (#18), dry-run mode (#19), WSL/Windows version divergence fix, on-stop.sh hook text fallback, 35 new tests.
+**Status**: ✅ 42/42 stories complete (100%). All 9 epics and 5 phases delivered. v1.2.0 released.
+**Removed** (cumulative): `lib/response_analyzer.sh` (-1042 lines), `lib/file_protection.sh` (-58 lines), simplified `lib/circuit_breaker.sh` (-285 lines). Total: ~1,385 lines of bash removed.
+**Added**: 4 sub-agent definitions, 2 skills, hook-based analysis, session functions inlined.
+**v1.2.0**: Phase 5 complete — stream parser v2 (JSONL as primary path, subagent result filtering, RALPH_STATUS unescaping) + WSL reliability polish (temp file cleanup, child process cleanup).

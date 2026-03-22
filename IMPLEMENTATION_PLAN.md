@@ -1,6 +1,6 @@
 # Ralph for Claude Code - Implementation Plan
 
-**Version**: v1.1.0 | **Tests**: 701+ passing (100% pass rate) | **CI/CD**: GitHub Actions
+**Version**: v1.2.0 | **Tests**: 736+ passing (100% pass rate) | **CI/CD**: GitHub Actions
 
 ---
 
@@ -138,7 +138,7 @@ Run Ralph in isolated sandbox environments for security and reproducibility.
 
 ## Test Coverage
 
-**Current**: Run `npm test` for the live count (566+ as of v0.11.6); historically 11+ test files under `tests/unit/` and `tests/integration/` (100% pass rate expected in CI)
+**Current**: Run `npm test` for the live count (736+ as of v1.2.0); 17 test files under `tests/unit/` and `tests/integration/` (100% pass rate expected in CI)
 
 | Category | Tests | Files |
 |----------|-------|-------|
@@ -220,4 +220,4 @@ Run Ralph in isolated sandbox environments for security and reproducibility.
 ---
 
 **Last Updated**: 2026-03-21
-**Status**: Phase 1 complete, Phase 3 partially complete (log rotation, dry-run, .ralphrc done). Phases 2, 4-6 planned.
+**Status**: All epic stories complete (42/42). Phases 0-5 delivered. Phases 2-6 (GitHub issue phases) planned as future enhancements.
