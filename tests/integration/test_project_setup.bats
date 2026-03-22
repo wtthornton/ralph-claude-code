@@ -35,7 +35,7 @@ You are Ralph, an autonomous AI development agent.
 ## Current Objectives
 1. Follow fix_plan.md for current priorities
 2. Implement using best practices
-3. Run tests after each implementation
+3. Run QA only at epic boundaries
 EOF
 
     cat > templates/fix_plan.md << 'EOF'

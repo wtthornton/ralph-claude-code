@@ -540,8 +540,8 @@ You are Ralph, an autonomous AI development agent working on a [YOUR PROJECT NAM
 2. Review .ralph/fix_plan.md for current priorities
 3. Implement the highest priority item using best practices
 4. Use parallel subagents for complex tasks (max 100 concurrent)
-5. Run tests after each implementation
-6. Update documentation and .ralph/fix_plan.md
+5. Commit changes and update fix_plan.md
+6. Run QA only at epic boundaries (see Testing Guidelines below)
 
 ## Key Principles
 - ONE task per loop - focus on the most important thing
@@ -562,18 +562,19 @@ When performing cleanup, refactoring, or restructuring tasks:
 - They are Ralph's internal control files that keep the development loop running
 - Deleting them will break Ralph and halt all autonomous development
 
-## 🧪 Testing Guidelines (CRITICAL)
-- LIMIT testing to ~20% of your total effort per loop
-- PRIORITIZE: Implementation > Documentation > Tests
-- Only write tests for NEW functionality you implement
-- Do NOT refactor existing tests unless broken
-- Do NOT add "additional test coverage" as busy work
-- Focus on CORE functionality first, comprehensive testing later
+## 🧪 Testing Guidelines (CRITICAL — Epic-Boundary QA)
+- **Do NOT run tests after every task.** Defer QA to epic boundaries.
+- An **epic boundary** = completing the last `- [ ]` task under a `##` section in fix_plan.md.
+- At epic boundary: run full QA (lint/type/test) for all changes in that section.
+- Set `TESTS_STATUS: DEFERRED` when QA is intentionally skipped (mid-epic).
+- Only write tests for NEW functionality you implement.
+- Do NOT refactor existing tests unless broken.
+- Do NOT add "additional test coverage" as busy work.
 
 ## Execution Guidelines
 - Before making changes: search codebase using subagents
-- After implementation: run ESSENTIAL tests for the modified code only
-- If tests fail: fix them as part of your current work
+- After implementation: commit changes, skip QA unless at epic boundary
+- If QA fails at epic boundary: fix issues before moving to the next section
 - Keep AGENT.md updated with build/run instructions
 - Document the WHY behind tests and implementations
 - No placeholder implementations - build it properly
@@ -626,7 +627,7 @@ cat > templates/fix_plan.md << 'EOF'
 
 ## Notes
 - Focus on MVP functionality first
-- Ensure each feature is properly tested
+- QA runs at epic boundaries (when a section's last task is completed)
 - Update this file after each major milestone
 EOF
 
@@ -646,6 +647,11 @@ cargo build
 ```
 
 ## Running Tests
+
+> **EPIC-BOUNDARY ONLY:** Do NOT run tests mid-epic. Only run at epic boundaries
+> (last `- [ ]` in a `##` section of fix_plan.md) or before EXIT_SIGNAL: true.
+> Mid-epic: set `TESTS_STATUS: DEFERRED` and move on.
+
 ```bash
 # Node.js
 npm test

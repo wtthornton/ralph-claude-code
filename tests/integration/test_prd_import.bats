@@ -131,8 +131,8 @@ You are Ralph, an autonomous AI development agent working on a Task Management A
 2. Review fix_plan.md for current priorities
 3. Implement the highest priority item using best practices
 4. Use parallel subagents for complex tasks (max 100 concurrent)
-5. Run tests after each implementation
-6. Update documentation and fix_plan.md
+5. Commit changes and update fix_plan.md
+6. Run QA only at epic boundaries (see Testing Guidelines below)
 
 ## Key Principles
 - ONE task per loop - focus on the most important thing

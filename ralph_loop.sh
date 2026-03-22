@@ -1978,10 +1978,31 @@ execute_claude_code() {
         local start_epoch
         start_epoch=$(date +%s)
         local stream_filter='
+function flush_text() {
+    if (tb == "") return
+    # Skip stream metadata noise (session_id, uuid, parent_tool_use_id)
+    if (tb ~ /session_id/ || tb ~ /parent_tool_use_id/ || tb ~ /"uuid"[[:space:]]*:/) { tb = ""; return }
+    # Skip raw JSON object/array dumps
+    if (tb ~ /^\s*[\{\[]/ && tb ~ /"[a-z_]+"[[:space:]]*:/) { tb = ""; return }
+    # Skip text dominated by UUIDs (hex-dash patterns)
+    if (tb ~ /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/) { tb = ""; return }
+    # Clean whitespace
+    gsub(/^[[:space:]]+/, "", tb)
+    gsub(/[[:space:]]+$/, "", tb)
+    if (length(tb) < 3) { tb = ""; return }
+    # Collapse newlines for compact single-line display
+    gsub(/\n+/, " ", tb)
+    gsub(/  +/, " ", tb)
+    # Truncate long text for monitoring readability
+    if (length(tb) > 200) tb = substr(tb, 1, 197) "..."
+    printf "  > %s\n", tb
+    fflush()
+    tb = ""
+}
 {
     line = $0
 
-    # --- Text delta: extract and print Claude text output ---
+    # --- Text delta: buffer for filtered display at block boundaries ---
     if (line ~ /"text_delta"/) {
         txt = line
         sub(/.*"text":"/, "", txt)
@@ -1991,10 +2012,12 @@ execute_claude_code() {
         gsub(/\\n/, "\n", txt)
         gsub(/\\t/, "\t", txt)
         gsub(/\\\\/, "\\", txt)
-        printf "%s", txt
-        fflush()
+        tb = tb txt
         next
     }
+
+    # --- Flush buffered text before processing any non-text event ---
+    flush_text()
 
     # --- Tool use start: capture name, reset input accumulator ---
     if (line ~ /"tool_use"/ && line ~ /"content_block_start"/) {
@@ -2143,6 +2166,7 @@ execute_claude_code() {
     next
 }
 END {
+    flush_text()
     cmd = "date +%s"
     cmd | getline now
     close(cmd)
