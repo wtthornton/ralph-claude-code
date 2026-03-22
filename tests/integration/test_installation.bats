@@ -50,6 +50,7 @@ EOF
     cat > "$MOCK_SOURCE_DIR/ralph_loop.sh" << 'EOF'
 #!/bin/bash
 # Mock ralph_loop.sh
+RALPH_VERSION="1.8.5"
 echo "Ralph loop running"
 EOF
 
@@ -193,12 +194,15 @@ run_install() {
 @test "install.sh creates ~/.local/bin commands" {
     run run_install
 
-    # Check all five wrapper commands exist
+    # Check all wrapper commands exist
     assert_file_exists "$TEST_INSTALL_DIR/ralph"
     assert_file_exists "$TEST_INSTALL_DIR/ralph-monitor"
     assert_file_exists "$TEST_INSTALL_DIR/ralph-setup"
     assert_file_exists "$TEST_INSTALL_DIR/ralph-import"
     assert_file_exists "$TEST_INSTALL_DIR/ralph-migrate"
+    assert_file_exists "$TEST_INSTALL_DIR/ralph-enable"
+    assert_file_exists "$TEST_INSTALL_DIR/ralph-enable-ci"
+    assert_file_exists "$TEST_INSTALL_DIR/ralph-upgrade"
 
     # Verify each command contains proper shebang
     grep -q "#!/bin/bash" "$TEST_INSTALL_DIR/ralph"
@@ -206,6 +210,9 @@ run_install() {
     grep -q "#!/bin/bash" "$TEST_INSTALL_DIR/ralph-setup"
     grep -q "#!/bin/bash" "$TEST_INSTALL_DIR/ralph-import"
     grep -q "#!/bin/bash" "$TEST_INSTALL_DIR/ralph-migrate"
+    grep -q "#!/bin/bash" "$TEST_INSTALL_DIR/ralph-enable"
+    grep -q "#!/bin/bash" "$TEST_INSTALL_DIR/ralph-enable-ci"
+    grep -q "#!/bin/bash" "$TEST_INSTALL_DIR/ralph-upgrade"
 }
 
 @test "install.sh sets executable permissions" {
@@ -217,6 +224,9 @@ run_install() {
     [[ -x "$TEST_INSTALL_DIR/ralph-setup" ]]
     [[ -x "$TEST_INSTALL_DIR/ralph-import" ]]
     [[ -x "$TEST_INSTALL_DIR/ralph-migrate" ]]
+    [[ -x "$TEST_INSTALL_DIR/ralph-enable" ]]
+    [[ -x "$TEST_INSTALL_DIR/ralph-enable-ci" ]]
+    [[ -x "$TEST_INSTALL_DIR/ralph-upgrade" ]]
 
     # Verify executable bit on main scripts
     [[ -x "$TEST_RALPH_HOME/ralph_loop.sh" ]]
@@ -224,6 +234,8 @@ run_install() {
     [[ -x "$TEST_RALPH_HOME/setup.sh" ]]
     [[ -x "$TEST_RALPH_HOME/ralph_import.sh" ]]
     [[ -x "$TEST_RALPH_HOME/migrate_to_ralph_folder.sh" ]]
+    [[ -x "$TEST_RALPH_HOME/ralph_enable.sh" ]]
+    [[ -x "$TEST_RALPH_HOME/ralph_enable_ci.sh" ]]
 
     # Verify lib scripts are executable
     [[ -x "$TEST_RALPH_HOME/lib/circuit_breaker.sh" ]]
@@ -475,6 +487,9 @@ EOF
     assert_file_exists "$TEST_INSTALL_DIR/ralph-setup"
     assert_file_exists "$TEST_INSTALL_DIR/ralph-import"
     assert_file_exists "$TEST_INSTALL_DIR/ralph-migrate"
+    assert_file_exists "$TEST_INSTALL_DIR/ralph-enable"
+    assert_file_exists "$TEST_INSTALL_DIR/ralph-enable-ci"
+    assert_file_exists "$TEST_INSTALL_DIR/ralph-upgrade"
 
     # Run uninstall
     run run_install uninstall
@@ -486,6 +501,9 @@ EOF
     assert_file_not_exists "$TEST_INSTALL_DIR/ralph-setup"
     assert_file_not_exists "$TEST_INSTALL_DIR/ralph-import"
     assert_file_not_exists "$TEST_INSTALL_DIR/ralph-migrate"
+    assert_file_not_exists "$TEST_INSTALL_DIR/ralph-enable"
+    assert_file_not_exists "$TEST_INSTALL_DIR/ralph-enable-ci"
+    assert_file_not_exists "$TEST_INSTALL_DIR/ralph-upgrade"
 }
 
 @test "install.sh uninstall cleans up directories" {
@@ -560,6 +578,9 @@ EOF
     assert_file_exists "$TEST_INSTALL_DIR/ralph-setup"
     assert_file_exists "$TEST_INSTALL_DIR/ralph-import"
     assert_file_exists "$TEST_INSTALL_DIR/ralph-migrate"
+    assert_file_exists "$TEST_INSTALL_DIR/ralph-enable"
+    assert_file_exists "$TEST_INSTALL_DIR/ralph-enable-ci"
+    assert_file_exists "$TEST_INSTALL_DIR/ralph-upgrade"
 
     # Verify all templates copied
     assert_file_exists "$TEST_RALPH_HOME/templates/PROMPT.md"
@@ -584,4 +605,65 @@ EOF
 
     # Verify output contains success message
     [[ "$output" =~ "installed" ]] || [[ "$output" =~ "SUCCESS" ]] || [[ "$output" =~ "success" ]]
+}
+
+# =============================================================================
+# Test 15-17: Upgrade Tests
+# =============================================================================
+
+@test "install.sh upgrade backs up existing installation" {
+    # First install
+    run run_install install
+    assert_success
+
+    # Run upgrade
+    run run_install upgrade
+    assert_success
+
+    # Verify backup was created
+    assert_dir_exists "$TEST_RALPH_HOME.backup"
+
+    # Verify backup contains key files
+    assert_file_exists "$TEST_RALPH_HOME.backup/ralph_loop.sh"
+    assert_file_exists "$TEST_RALPH_HOME.backup/templates/PROMPT.md"
+}
+
+@test "install.sh upgrade cleans up stale files" {
+    # First install
+    run run_install install
+    assert_success
+
+    # Create stale files that should be cleaned up
+    echo "# stale" > "$TEST_RALPH_HOME/lib/response_analyzer.sh"
+    echo "# stale" > "$TEST_RALPH_HOME/lib/file_protection.sh"
+
+    # Run upgrade
+    run run_install upgrade
+    assert_success
+
+    # Verify stale files were removed
+    assert_file_not_exists "$TEST_RALPH_HOME/lib/response_analyzer.sh"
+    assert_file_not_exists "$TEST_RALPH_HOME/lib/file_protection.sh"
+}
+
+@test "install.sh upgrade stores source directory" {
+    # Install
+    run run_install install
+    assert_success
+
+    # Verify source dir was stored
+    assert_file_exists "$TEST_RALPH_HOME/.source_dir"
+}
+
+@test "install.sh upgrade falls back to fresh install when no existing installation" {
+    # Run upgrade without prior install
+    run run_install upgrade
+    assert_success
+
+    # Should have installed everything
+    assert_file_exists "$TEST_INSTALL_DIR/ralph"
+    assert_file_exists "$TEST_RALPH_HOME/ralph_loop.sh"
+
+    # Output should mention fresh install
+    [[ "$output" =~ "No existing installation" ]] || [[ "$output" =~ "installed" ]]
 }

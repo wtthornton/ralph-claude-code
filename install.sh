@@ -412,19 +412,171 @@ DOCTOREOF
     return 0
 }
 
+# Get source version from ralph_loop.sh
+get_source_version() {
+    grep -m1 'RALPH_VERSION=' "$SCRIPT_DIR/ralph_loop.sh" 2>/dev/null | sed 's/.*RALPH_VERSION="\{0,1\}\([^"]*\)"\{0,1\}/\1/'
+}
+
+# Get currently installed version
+get_installed_version() {
+    if [[ -f "$RALPH_HOME/ralph_loop.sh" ]]; then
+        grep -m1 'RALPH_VERSION=' "$RALPH_HOME/ralph_loop.sh" 2>/dev/null | sed 's/.*RALPH_VERSION="\{0,1\}\([^"]*\)"\{0,1\}/\1/'
+    else
+        echo ""
+    fi
+}
+
+# Clean up files that no longer exist in the current version
+cleanup_stale_files() {
+    log "INFO" "Cleaning up stale files from previous versions..."
+
+    local stale_count=0
+
+    # Known removed files from previous versions
+    local stale_files=(
+        "$RALPH_HOME/lib/response_analyzer.sh"
+        "$RALPH_HOME/lib/file_protection.sh"
+    )
+
+    for f in "${stale_files[@]}"; do
+        if [[ -f "$f" ]]; then
+            rm -f "$f"
+            log "INFO" "  Removed stale file: $f"
+            stale_count=$((stale_count + 1))
+        fi
+    done
+
+    # Remove commands that no longer exist in the current version
+    # (future-proofing: if a command is ever retired)
+    local valid_commands=(ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade)
+    for cmd_file in "$INSTALL_DIR"/ralph*; do
+        [[ -f "$cmd_file" ]] || continue
+        local cmd_name
+        cmd_name=$(basename "$cmd_file")
+        local found=false
+        for valid in "${valid_commands[@]}"; do
+            if [[ "$cmd_name" == "$valid" ]]; then
+                found=true
+                break
+            fi
+        done
+        if [[ "$found" == false ]]; then
+            rm -f "$cmd_file"
+            log "INFO" "  Removed stale command: $cmd_name"
+            stale_count=$((stale_count + 1))
+        fi
+    done
+
+    if [[ $stale_count -eq 0 ]]; then
+        log "INFO" "  No stale files found"
+    else
+        log "SUCCESS" "Cleaned up $stale_count stale file(s)"
+    fi
+}
+
+# Backup current installation before upgrade
+backup_installation() {
+    local backup_dir="$RALPH_HOME.backup"
+
+    if [[ -d "$RALPH_HOME" ]]; then
+        log "INFO" "Backing up current installation to $backup_dir..."
+        rm -rf "$backup_dir"
+        cp -r "$RALPH_HOME" "$backup_dir"
+        log "SUCCESS" "Backup created at $backup_dir"
+    fi
+}
+
+# Install ralph-upgrade global command
+install_upgrade_command() {
+    cat > "$INSTALL_DIR/ralph-upgrade" << 'UPGRADEEOF'
+#!/bin/bash
+# Ralph Upgrade - Self-update from source repository
+# Usage: ralph-upgrade [--source /path/to/ralph-claude-code]
+
+RALPH_HOME="$HOME/.ralph"
+SOURCE_DIR=""
+
+# Check for stored source directory
+if [[ -f "$RALPH_HOME/.source_dir" ]]; then
+    SOURCE_DIR=$(cat "$RALPH_HOME/.source_dir")
+fi
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --source)
+            SOURCE_DIR="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Ralph Upgrade - Update Ralph to the latest version"
+            echo ""
+            echo "Usage: ralph-upgrade [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --source DIR  Path to ralph-claude-code repository"
+            echo "  -h, --help    Show this help"
+            echo ""
+            echo "If --source is not provided, uses the stored source directory"
+            echo "from the last install/upgrade."
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$SOURCE_DIR" ]] || [[ ! -f "$SOURCE_DIR/install.sh" ]]; then
+    echo "Error: Cannot find Ralph source repository."
+    echo ""
+    if [[ -n "$SOURCE_DIR" ]]; then
+        echo "Checked: $SOURCE_DIR"
+    fi
+    echo ""
+    echo "Usage: ralph-upgrade --source /path/to/ralph-claude-code"
+    echo ""
+    echo "Or clone the repo first:"
+    echo "  git clone https://github.com/frankbria/ralph-claude-code.git"
+    echo "  ralph-upgrade --source ./ralph-claude-code"
+    exit 1
+fi
+
+# Pull latest if it's a git repo
+if [[ -d "$SOURCE_DIR/.git" ]]; then
+    echo "Pulling latest changes from git..."
+    git -C "$SOURCE_DIR" pull --ff-only 2>/dev/null || {
+        echo "Warning: git pull failed (you may have local changes). Proceeding with current source."
+    }
+fi
+
+exec "$SOURCE_DIR/install.sh" upgrade
+UPGRADEEOF
+    chmod +x "$INSTALL_DIR/ralph-upgrade"
+}
+
+# Store source directory for future upgrades
+store_source_dir() {
+    echo "$SCRIPT_DIR" > "$RALPH_HOME/.source_dir"
+}
+
 # Main installation
 main() {
     echo "🚀 Installing Ralph for Claude Code globally..."
     echo ""
-    
+
     check_dependencies
     create_install_dirs
     install_scripts
     install_ralph_loop
     install_setup
     install_sdk
+    install_upgrade_command
+    store_source_dir
     check_path
-    
+
     echo ""
     log "SUCCESS" "🎉 Ralph for Claude Code installed successfully!"
     echo ""
@@ -438,6 +590,7 @@ main() {
     echo "  ralph-import prd.md     # Convert PRD to Ralph project"
     echo "  ralph-migrate           # Migrate existing project to .ralph/ structure"
     echo "  ralph-monitor           # Manual monitoring dashboard"
+    echo "  ralph-upgrade           # Upgrade Ralph to latest version"
     echo ""
     echo "Quick start:"
     echo "  1. ralph-setup my-awesome-project"
@@ -447,10 +600,58 @@ main() {
     echo ""
     echo "Docs: README.md, docs/user-guide/, docs/specs/ (design). TESTING.md for npm test."
     echo ""
-    
+
     if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
         echo "⚠️  Don't forget to add $INSTALL_DIR to your PATH (see above)"
     fi
+}
+
+# Upgrade existing installation
+upgrade() {
+    local current_version
+    local new_version
+    current_version=$(get_installed_version)
+    new_version=$(get_source_version)
+
+    if [[ -z "$current_version" ]]; then
+        log "WARN" "No existing installation found. Running fresh install instead."
+        main
+        return
+    fi
+
+    echo "🔄 Upgrading Ralph for Claude Code..."
+    echo ""
+    log "INFO" "Current version: $current_version"
+    log "INFO" "New version:     $new_version"
+    echo ""
+
+    if [[ "$current_version" == "$new_version" ]]; then
+        log "INFO" "Already at version $new_version. Reinstalling to ensure all files are current."
+    fi
+
+    backup_installation
+
+    check_dependencies
+    create_install_dirs
+    install_scripts
+    install_ralph_loop
+    install_setup
+    install_sdk
+    install_upgrade_command
+    store_source_dir
+    cleanup_stale_files
+    check_path
+
+    echo ""
+    if [[ "$current_version" == "$new_version" ]]; then
+        log "SUCCESS" "🎉 Ralph $new_version reinstalled successfully!"
+    else
+        log "SUCCESS" "🎉 Ralph upgraded from $current_version to $new_version!"
+    fi
+    echo ""
+    echo "Backup of previous installation: $RALPH_HOME.backup"
+    echo "To rollback: rm -rf $RALPH_HOME && mv $RALPH_HOME.backup $RALPH_HOME"
+    echo ""
 }
 
 # Handle command line arguments
@@ -460,17 +661,24 @@ case "${1:-install}" in
         ;;
     uninstall)
         log "INFO" "Uninstalling Ralph for Claude Code..."
-        rm -f "$INSTALL_DIR/ralph" "$INSTALL_DIR/ralph-monitor" "$INSTALL_DIR/ralph-setup" "$INSTALL_DIR/ralph-import" "$INSTALL_DIR/ralph-migrate" "$INSTALL_DIR/ralph-enable" "$INSTALL_DIR/ralph-enable-ci"
+        rm -f "$INSTALL_DIR/ralph" "$INSTALL_DIR/ralph-monitor" "$INSTALL_DIR/ralph-setup" \
+              "$INSTALL_DIR/ralph-import" "$INSTALL_DIR/ralph-migrate" "$INSTALL_DIR/ralph-enable" \
+              "$INSTALL_DIR/ralph-enable-ci" "$INSTALL_DIR/ralph-sdk" "$INSTALL_DIR/ralph-doctor" \
+              "$INSTALL_DIR/ralph-upgrade"
         rm -rf "$RALPH_HOME"
         log "SUCCESS" "Ralph for Claude Code uninstalled"
+        ;;
+    upgrade)
+        upgrade
         ;;
     --help|-h)
         echo "Ralph for Claude Code Installation"
         echo ""
-        echo "Usage: $0 [install|uninstall]"
+        echo "Usage: $0 [install|upgrade|uninstall]"
         echo ""
         echo "Commands:"
         echo "  install    Install Ralph globally (default)"
+        echo "  upgrade    Upgrade existing installation (backs up first)"
         echo "  uninstall  Remove Ralph installation"
         echo "  --help     Show this help"
         ;;

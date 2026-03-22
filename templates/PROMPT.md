@@ -36,18 +36,21 @@ When performing cleanup, refactoring, or restructuring tasks:
 - They are Ralph's internal control files that keep the development loop running
 - Deleting them will break Ralph and halt all autonomous development
 
-## 🧪 Testing Guidelines (CRITICAL)
-- LIMIT testing to ~20% of your total effort per loop
-- PRIORITIZE: Implementation > Documentation > Tests
-- Only write tests for NEW functionality you implement
-- Do NOT refactor existing tests unless broken
-- Do NOT add "additional test coverage" as busy work
-- Focus on CORE functionality first, comprehensive testing later
+## 🧪 Testing Guidelines (CRITICAL — Epic-Boundary QA)
+- **Do NOT run tests after every task.** Defer QA to epic boundaries.
+- An **epic boundary** = completing the last `- [ ]` task under a `##` section in fix_plan.md.
+- At epic boundary: run full QA (lint/type/test) for all changes in that section.
+- Before EXIT_SIGNAL: true: mandatory full QA — never exit without passing tests.
+- For LARGE tasks (cross-module): run QA for that task's scope only.
+- Set `TESTS_STATUS: DEFERRED` when QA is intentionally skipped (mid-epic).
+- Only write tests for NEW functionality you implement.
+- Do NOT refactor existing tests unless broken.
+- Do NOT add "additional test coverage" as busy work.
 
 ## Execution Guidelines
 - Before making changes: search codebase using subagents
-- After implementation: run ESSENTIAL tests for the modified code only
-- If tests fail: fix them as part of your current work
+- After implementation: commit changes, skip QA unless at epic boundary
+- If QA fails at epic boundary: fix issues before moving to the next section
 - Keep .ralph/AGENT.md updated with build/run instructions
 - Document the WHY behind tests and implementations
 - No placeholder implementations - build it properly
@@ -56,9 +59,11 @@ When performing cleanup, refactoring, or restructuring tasks:
 1. Read .ralph/fix_plan.md and select the **first** unchecked `- [ ]` task (ONE task only).
 2. Search the codebase before implementing.
 3. Implement the smallest complete change for that task.
-4. Run essential tests for the touched scope only.
-5. Update fix_plan.md (`- [ ]` → `- [x]`) for that task.
-6. Commit implementation and fix_plan update together when appropriate.
+4. Update fix_plan.md (`- [ ]` → `- [x]`) for that task.
+5. Commit implementation and fix_plan update together when appropriate.
+6. **Check if this was the last `- [ ]` in the current `##` section (epic boundary):**
+   - YES → Run full QA (lint/type/test) for all changes in this section. Fix any failures.
+   - NO → Skip QA. Set `TESTS_STATUS: DEFERRED`.
 7. Output your `RALPH_STATUS` block (below).
 8. **STOP. End your response immediately after the status block.** Do NOT start another task. Do NOT say "moving to the next task." The Ralph harness will re-invoke you for the next item. Your response MUST end within 2 lines of the closing `---END_RALPH_STATUS---`.
 
@@ -71,7 +76,7 @@ When performing cleanup, refactoring, or restructuring tasks:
 STATUS: IN_PROGRESS | COMPLETE | BLOCKED
 TASKS_COMPLETED_THIS_LOOP: <number>
 FILES_MODIFIED: <number>
-TESTS_STATUS: PASSING | FAILING | NOT_RUN
+TESTS_STATUS: PASSING | FAILING | DEFERRED | NOT_RUN
 WORK_TYPE: IMPLEMENTATION | TESTING | DOCUMENTATION | REFACTORING
 EXIT_SIGNAL: false | true
 RECOMMENDATION: <one line summary of what to do next>
@@ -82,10 +87,12 @@ RECOMMENDATION: <one line summary of what to do next>
 
 Set EXIT_SIGNAL to **true** when ALL of these conditions are met:
 1. ✅ All items in fix_plan.md are marked [x]
-2. ✅ All tests are passing (or no tests exist for valid reasons)
+2. ✅ Full QA has been run and all tests are passing (mandatory before exit)
 3. ✅ No errors or warnings in the last execution
 4. ✅ All requirements from specs/ are implemented
 5. ✅ You have nothing meaningful left to implement
+
+**Never set EXIT_SIGNAL: true with TESTS_STATUS: DEFERRED.** Final exit requires actual QA.
 
 ### Examples of proper status reporting:
 
@@ -243,16 +250,39 @@ RECOMMENDATION: No remaining work, all .ralph/specs implemented
 
 ---
 
-### Scenario 5: Making Progress (MOST COMMON)
+### Scenario 5: Making Progress — Mid-Epic (MOST COMMON)
 **Given**:
 - Tasks remain in .ralph/fix_plan.md
-- Implementation is underway
-- Files are being modified
-- Tests are passing or being fixed
+- This task is NOT the last `- [ ]` in its section
+- Implementation is complete, committed
 
-**When**: You complete a task successfully
+**When**: You complete a task mid-epic
 
 **Then**: You must output:
+```
+---RALPH_STATUS---
+STATUS: IN_PROGRESS
+TASKS_COMPLETED_THIS_LOOP: 1
+FILES_MODIFIED: 7
+TESTS_STATUS: DEFERRED
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: false
+RECOMMENDATION: Continue with next task from .ralph/fix_plan.md
+---END_RALPH_STATUS---
+```
+
+**Your action**: STOP immediately. QA is deferred — do NOT spawn ralph-tester. *(The harness will re-invoke you for the next item automatically.)*
+
+---
+
+### Scenario 5b: Epic Boundary Reached
+**Given**:
+- This task was the last `- [ ]` in its `##` section
+- All tasks in the section are now `[x]`
+
+**When**: You complete the final task in a section
+
+**Then**: Run full QA via ralph-tester, then output:
 ```
 ---RALPH_STATUS---
 STATUS: IN_PROGRESS
@@ -261,11 +291,11 @@ FILES_MODIFIED: 7
 TESTS_STATUS: PASSING
 WORK_TYPE: IMPLEMENTATION
 EXIT_SIGNAL: false
-RECOMMENDATION: Continue with next task from .ralph/fix_plan.md
+RECOMMENDATION: Epic complete, QA passed. Moving to next section.
 ---END_RALPH_STATUS---
 ```
 
-**Your action**: STOP immediately. Do not continue to the next task in the same response. *(The harness will re-invoke you for the next item automatically.)*
+**Your action**: STOP. If QA fails, fix issues and report TESTS_STATUS: FAILING.
 
 ---
 

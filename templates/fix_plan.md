@@ -1,5 +1,7 @@
 # Ralph Fix Plan
 
+<!-- Each ## section is an "epic". QA runs when the last task in a section is completed. -->
+
 ## High Priority
 - [ ] Set up basic project structure and build system
 - [ ] Define core data structures and types
@@ -23,5 +25,5 @@
 
 ## Notes
 - Focus on MVP functionality first
-- Ensure each feature is properly tested
+- QA runs at epic boundaries (when a section's last task is completed)
 - Update this file after each major milestone

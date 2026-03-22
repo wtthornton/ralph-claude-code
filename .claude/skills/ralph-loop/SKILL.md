@@ -36,9 +36,10 @@ argument-hint: "[task description override]"
 ## Constraints
 
 - ONE task only. Stop after completing it.
-- LIMIT testing to ~20% of effort.
+- **Skip QA unless this task completes the last `- [ ]` in its `##` section (epic boundary).**
+- At epic boundary: run full QA via ralph-tester. Otherwise set TESTS_STATUS: DEFERRED.
 - NEVER modify .ralph/ files except fix_plan.md checkboxes.
-- Use ralph-explorer for codebase search, ralph-tester for verification (if available).
+- Use ralph-explorer for codebase search, ralph-tester for verification at epic boundaries.
 
 ## Status Reporting
 
@@ -48,7 +49,7 @@ At the end of your response, include:
 STATUS: IN_PROGRESS | COMPLETE | BLOCKED
 TASKS_COMPLETED_THIS_LOOP: <number>
 FILES_MODIFIED: <number>
-TESTS_STATUS: PASSING | FAILING | NOT_RUN
+TESTS_STATUS: PASSING | FAILING | DEFERRED | NOT_RUN
 WORK_TYPE: IMPLEMENTATION | TESTING | DOCUMENTATION | REFACTORING
 EXIT_SIGNAL: false | true
 RECOMMENDATION: <one line summary>
