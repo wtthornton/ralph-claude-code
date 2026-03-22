@@ -659,9 +659,7 @@ ralph_extract_result_from_stream() {
     local _tl_count
     # Count top-level JSON objects by counting "type" keys (streaming — no memory load)
     # Avoids jq -s which loads entire file into memory and crashes on large JSONL streams
-    _tl_count=$(grep -c -E '"type"[[:space:]]*:' "$output_file" 2>/dev/null || echo "1")
-    _tl_count=$(echo "$_tl_count" | tr -d '[:space:]')
-    _tl_count=$((_tl_count + 0))
+    _tl_count=$(grep -c -E '"type"[[:space:]]*:' "$output_file" 2>/dev/null) || _tl_count=1
     [[ "$_tl_count" -gt 1 ]] || return 0
 
     # STREAM-2: Count only top-level result objects — subagent results contain a
@@ -2222,9 +2220,12 @@ END {
         echo -e "${PURPLE}━━━━━━━━━━━━━━━━ End of Output ━━━━━━━━━━━━━━━━━━━${NC}"
 
         # Post-execution stats from stream output (logged for monitoring/ralph.log)
-        local _tool_count=$(grep -c '"type":"tool_use"' "$output_file" 2>/dev/null || echo 0)
-        local _agent_count=$(grep -c '"subtype":"task_started"' "$output_file" 2>/dev/null || echo 0)
-        local _error_count=$(grep -c '"is_error":true' "$output_file" 2>/dev/null || echo 0)
+        local _tool_count
+        _tool_count=$(grep -c '"type":"tool_use"' "$output_file" 2>/dev/null) || _tool_count=0
+        local _agent_count
+        _agent_count=$(grep -c '"subtype":"task_started"' "$output_file" 2>/dev/null) || _agent_count=0
+        local _error_count
+        _error_count=$(grep -c '"is_error":true' "$output_file" 2>/dev/null) || _error_count=0
         if [[ $_error_count -gt 0 ]]; then
             log_status "WARN" "Execution stats: Tools=$_tool_count Agents=$_agent_count Errors=$_error_count"
         else
