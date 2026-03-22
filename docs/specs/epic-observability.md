@@ -58,3 +58,17 @@ Ralph's observability emits data in formats that TheStudio's Outcome Ingestor ca
 ## Rollback
 
 All features are opt-in via `.ralphrc` / `ralph.config.json` flags. Disabling returns to current behavior.
+
+---
+
+## 2026 Research Addendum
+
+**Added:** 2026-03-22 | **Source:** Phase 14 research review
+
+This epic's lightweight JSONL metrics remain valid as the standalone foundation. However, the 2026 industry has converged on **OpenTelemetry with GenAI Semantic Conventions** as the standard for AI agent observability. Key gaps:
+
+1. **No trace correlation**: Loop iterations, hooks, and sub-agents have no shared `trace_id`
+2. **No GenAI attributes**: Missing standardized fields like `gen_ai.usage.input_tokens`, `gen_ai.request.model`
+3. **No per-trace cost attribution**: Aggregate metrics don't show which tasks consume the most tokens
+
+**Successor epic:** [RALPH-OTEL](epic-otel-observability.md) (Phase 14) extends this epic with OTel-compatible tracing, trace propagation, cost attribution, and optional OTLP export to Langfuse/Helicone/Datadog.

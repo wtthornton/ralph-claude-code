@@ -68,3 +68,17 @@ These capabilities are available when Ralph runs inside TheStudio's execution pl
 ## Rollback
 
 Sandbox is opt-in via `--sandbox` flag. Default behavior remains host execution. Removing sandbox support has no impact on core Ralph functionality.
+
+---
+
+## 2026 Research Addendum
+
+**Added:** 2026-03-22 | **Source:** Phase 14 research review
+
+This epic's Docker-only sandbox remains the foundation. The 2026 security landscape adds three requirements:
+
+1. **Network egress control**: OpenAI Codex blocks all network access during execution. The 2026 standard is "block by default, allow by exception" (`--network none`)
+2. **Rootless Docker**: Standard Docker requires root and shares the host kernel. Container escape CVEs are recurring. Rootless eliminates this class
+3. **gVisor runtime**: Google GKE Agent Sandbox uses gVisor for user-space kernel isolation (10-30% I/O overhead, minimal compute overhead)
+
+**Successor epic:** [RALPH-SANDBOXV2](epic-sandbox-hardening.md) (Phase 14) adds rootless mode, network egress blocking, resource reporting, and optional gVisor support.

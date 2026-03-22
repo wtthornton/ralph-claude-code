@@ -1,6 +1,6 @@
 # Ralph Claude Code — Epic & Story Index
 
-> **Generated:** 2026-03-21 | **Updated:** 2026-03-22 | **Total Epics:** 26 | **Total Stories:** 93 (93 Done, 0 Open)
+> **Generated:** 2026-03-21 | **Updated:** 2026-03-22 | **Total Epics:** 33 | **Total Stories:** 117 (97 Done, 20 Open)
 
 ---
 
@@ -63,6 +63,22 @@ Phase 13 (DONE)
 │ High         │
 │ Pre-QA Deploy│
 └──────────────┘
+
+OPEN (2026 Best Practices Modernization)
+Phase 14
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│RALPH-FAILSPEC│   │ RALPH-OTEL   │   │RALPH-COSTROUTE│  │RALPH-CTXMGMT │
+│ 4/4 Done     │   │ 0/4 Open     │   │ 0/4 Open      │  │ 0/3 Open     │
+│ Critical     │   │ High         │   │ High          │   │ High         │
+│ Compliance   │   │ Observability│   │ Cost Savings  │   │ Context Mgmt │
+└──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘
+
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│RALPH-AGENTMEM│   │RALPH-SANDBOXV2│  │ RALPH-EVALS  │
+│ 0/3 Open     │   │ 0/3 Open     │   │ 0/3 Open     │
+│ Medium       │   │ Medium       │   │ Medium       │
+│ Memory       │   │ Security     │   │ Agent Evals  │
+└──────────────┘   └──────────────┘   └──────────────┘
 ```
 
 ---
@@ -198,17 +214,18 @@ Phase 13 (DONE)
 
 | Priority | Open | Done | Total |
 |----------|------|------|-------|
-| Critical | 0 | 18 | 18 |
-| High | 0 | 16 | 16 |
+| Critical | 1 | 21 | 22 |
+| High | 8 | 17 | 25 |
 | Important | 0 | 16 | 16 |
-| Medium | 0 | 36 | 36 |
+| Medium | 11 | 36 | 47 |
 | Nice-to-have | 0 | 2 | 2 |
 | Defensive/Low | 0 | 5 | 5 |
-| **Total** | **0** | **93** | **93** |
+| **Total** | **20** | **97** | **117** |
 
 ## Critical Path
 
-Phases 0–13 complete (v1.9.0). All 93 stories across 26 epics are done.
+Phases 0–13 complete (v1.9.0). 93 stories across 26 epics are done.
+Phase 14 in progress (v2.x.0). FAILSPEC epic complete (4/4). 20 stories across 6 remaining epics — 2026 best practices modernization.
 
 ### Product Strategy
 
@@ -217,13 +234,16 @@ Ralph is a **standalone product** with full value on its own. TheStudio is the *
 | Feature Area | Ralph Standalone | TheStudio Premium |
 |-------------|-----------------|-------------------|
 | GitHub Issues | Basic import + filter + lifecycle | Full pipeline: intake, intent, expert routing, QA |
-| Sandbox | Docker only | Docker + E2B + Daytona + Cloudflare + plugins |
-| Metrics | Local JSONL + CLI summary | OTel + NATS + dashboards + Reputation Engine |
-| Notifications | Terminal + webhook | SSE + Slack/email/Discord |
-| Quality Gates | Circuit breaker + exit gate | Verification Gate + QA Agent + expert review |
+| Sandbox | Docker + rootless + gVisor | Docker + E2B + Daytona + Cloudflare + plugins |
+| Metrics | OTel-compatible JSONL + CLI summary | Full OTel + NATS + dashboards + Reputation Engine |
+| Notifications | Terminal + webhook + budget alerts | SSE + Slack/email/Discord |
+| Quality Gates | Circuit breaker + exit gate + evals | Verification Gate + QA Agent + expert review |
+| Compliance | FAILURE.md + audit log | Full EU AI Act + ISO 42001 |
+| Cost Optimization | Model routing + prompt caching | Fleet-wide cost dashboards + policy engine |
 
 ```
 Phase 0–13: ALL DONE (93/93 stories, v1.9.0)
+Phase 14:   IN PROGRESS (4/24 stories, v2.x.0 — FAILSPEC complete)
 ```
 
 ---
@@ -417,6 +437,105 @@ Phase 0–13: ALL DONE (93/93 stories, v1.9.0)
 |---|-----|-------|----------|--------|--------|
 | 1 | [UPKEEP-1](story-upkeep-1-update-verification.md) | CLI Auto-Update Verification | Medium | Small | **Done** |
 | 2 | [UPKEEP-2](story-upkeep-2-mcp-failure-suppression.md) | MCP Server Failure Suppression | Medium | Small | **Done** |
+
+---
+
+## Phase 14 — Open (2026 Best Practices Modernization)
+
+**Source:** Comprehensive 2026 research review covering: AI agent loop architecture, reliability patterns, security standards, OpenTelemetry, testing frameworks, cost optimization, and EU AI Act compliance. Research drawn from Anthropic, AWS, OpenAI Codex, Google GKE, Langfuse, AgentAssay, FAILURE.md spec, and 30+ industry references.
+
+```
+Phase 14 (OPEN)
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│RALPH-FAILSPEC│   │ RALPH-OTEL   │   │RALPH-COSTROUTE│  │RALPH-CTXMGMT │
+│ 4/0 Open     │   │ 4/0 Open     │   │ 4/0 Open      │  │ 3/0 Open     │
+│ Critical     │   │ High         │   │ High          │   │ High         │
+│ Compliance   │   │ Observability│   │ Cost 30-70%↓  │   │ Context Mgmt │
+└──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘
+                          │                  │
+                          ▼                  │
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│RALPH-AGENTMEM│   │RALPH-SANDBOXV2│  │ RALPH-EVALS  │◀─┘
+│ 3/0 Open     │   │ 3/0 Open     │   │ 3/0 Open     │
+│ Medium       │   │ Medium       │   │ Medium       │
+│ Cross-session│   │ Security     │   │ Agent testing │
+└──────────────┘   └──────────────┘   └──────────────┘
+       ▲
+       └──────────── OTEL provides trace data for AGENTMEM and EVALS
+```
+
+### RALPH-FAILSPEC: Failure Protocol Compliance
+**Priority:** Critical | **Status:** Done | **Target:** v2.0.0 | **Dependencies:** None
+**Compliance:** FAILURE.md/FAILSAFE.md/KILLSWITCH.md open specs + EU AI Act (August 2026)
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [FAILSPEC-1](story-failspec-1-failure-md.md) | Implement FAILURE.md Specification | Critical | Medium | **Done** |
+| 2 | [FAILSPEC-2](story-failspec-2-failsafe-md.md) | Implement FAILSAFE.md Safe Fallback Behaviors | Critical | Small | **Done** |
+| 3 | [FAILSPEC-3](story-failspec-3-killswitch-md.md) | Implement KILLSWITCH.md Emergency Stop | Critical | Small | **Done** |
+| 4 | [FAILSPEC-4](story-failspec-4-audit-logging.md) | Structured Audit Log for Compliance | High | Medium | **Done** |
+
+### RALPH-OTEL: OpenTelemetry & Observability v2
+**Priority:** High | **Status:** Open | **Target:** v2.1.0 | **Dependencies:** None
+**Upgrade:** Extends Phase 8 RALPH-OBSERVE with OTel GenAI Semantic Conventions
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [OTEL-1](story-otel-1-trace-generation.md) | OTel Trace Generation with GenAI Semantic Conventions | High | Medium | **Open** |
+| 2 | [OTEL-2](story-otel-2-trace-propagation.md) | Trace ID Propagation Across Sub-Agents and Hooks | High | Small | **Open** |
+| 3 | [OTEL-3](story-otel-3-cost-attribution.md) | Per-Trace Cost Attribution and Budget Alerts | Medium | Small | **Open** |
+| 4 | [OTEL-4](story-otel-4-otlp-exporter.md) | OTLP Exporter for External Backends | Medium | Medium | **Open** |
+
+### RALPH-COSTROUTE: Cost-Aware Model Routing
+**Priority:** High | **Status:** Open | **Target:** v2.1.0 | **Dependencies:** None
+**Impact:** 30-70% cost reduction via dynamic model selection + prompt caching
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [COSTROUTE-1](story-costroute-1-complexity-classifier.md) | Task Complexity Classifier | High | Medium | **Open** |
+| 2 | [COSTROUTE-2](story-costroute-2-dynamic-model-selection.md) | Dynamic Model Selection Based on Complexity | High | Medium | **Open** |
+| 3 | [COSTROUTE-3](story-costroute-3-prompt-cache-optimization.md) | Prompt Structure Optimization for Cache Hits | High | Small | **Open** |
+| 4 | [COSTROUTE-4](story-costroute-4-token-budget.md) | Token Budget and Cost Dashboard | Medium | Small | **Open** |
+
+### RALPH-CTXMGMT: Context Window Management
+**Priority:** High | **Status:** Open | **Target:** v2.1.0 | **Dependencies:** None
+**Research:** Success rate drops after 35 min; doubling duration quadruples failure rate
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [CTXMGMT-1](story-ctxmgmt-1-progressive-loading.md) | Progressive Context Loading Strategy | High | Medium | **Open** |
+| 2 | [CTXMGMT-2](story-ctxmgmt-2-task-decomposition.md) | Task Decomposition Signals | High | Small | **Open** |
+| 3 | [CTXMGMT-3](story-ctxmgmt-3-continue-as-new.md) | Continue-As-New Pattern for Long Sessions | Medium | Medium | **Open** |
+
+### RALPH-AGENTMEM: Cross-Session Agent Memory
+**Priority:** Medium | **Status:** Open | **Target:** v2.2.0 | **Dependencies:** RALPH-OTEL
+**Research:** 4 memory types (working, episodic, semantic, procedural) — adding episodic + semantic
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [AGENTMEM-1](story-agentmem-1-episodic-memory.md) | Episodic Memory Store (What Worked/Failed) | Medium | Medium | **Open** |
+| 2 | [AGENTMEM-2](story-agentmem-2-semantic-memory.md) | Codebase Pattern Memory (Semantic) | Medium | Medium | **Open** |
+| 3 | [AGENTMEM-3](story-agentmem-3-memory-decay.md) | Memory Decay and Relevance Scoring | Medium | Small | **Open** |
+
+### RALPH-SANDBOXV2: Sandbox Hardening
+**Priority:** Medium | **Status:** Open | **Target:** v2.2.0 | **Dependencies:** RALPH-SANDBOX (Phase 11)
+**Security:** Rootless Docker, network egress blocking (OpenAI Codex pattern), gVisor option
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [SANDBOXV2-1](story-sandboxv2-1-rootless-egress.md) | Rootless Docker Mode and Network Egress Control | Medium | Medium | **Open** |
+| 2 | [SANDBOXV2-2](story-sandboxv2-2-resource-reporting.md) | Resource Usage Reporting | Medium | Small | **Open** |
+| 3 | [SANDBOXV2-3](story-sandboxv2-3-gvisor.md) | gVisor Runtime Support | Low | Medium | **Open** |
+
+### RALPH-EVALS: Agent Evaluation Framework
+**Priority:** Medium | **Status:** Open | **Target:** v2.2.0 | **Dependencies:** RALPH-OTEL
+**Research:** AgentAssay 3-valued outcomes, golden-file testing, deterministic + stochastic suites
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [EVALS-1](story-evals-1-golden-files.md) | Golden-File Test Infrastructure | Medium | Medium | **Open** |
+| 2 | [EVALS-2](story-evals-2-deterministic-suite.md) | Deterministic Agent Eval Suite | Medium | Medium | **Open** |
+| 3 | [EVALS-3](story-evals-3-stochastic-suite.md) | Stochastic Eval Suite with Three-Valued Outcomes | Medium | Medium | **Open** |
 
 ---
 

@@ -97,3 +97,17 @@ Update R01 to restrict when `safety_bypass` is honored:
 - [ ] Add source-type restriction (`system` only, or config-gated)
 - [ ] Add explicit anti-pattern note: agent self-bypass is prohibited
 - [ ] Review R03 (rate limiting) for similar bypass vectors
+
+---
+
+## 2026 Research Addendum
+
+**Added:** 2026-03-22 | **Source:** Phase 14 research review
+
+This epic's HMAC-SHA256 and access control fixes align with 2026 security standards. Two additional developments are relevant:
+
+1. **EU AI Act enforcement** (August 2, 2026): Autonomous AI systems require documented error handling, access policies, change logs, and audit trails. Ralph's safety bypass controls should be logged in a structured audit log for compliance review.
+
+2. **Dynamic secrets**: The 2026 standard moves from static API keys to dynamic, time-scoped credentials via HashiCorp Vault with just-in-time provisioning. Agent-sourced writes should carry scoped tokens rather than long-lived credentials.
+
+**Related Phase 14 epic:** [RALPH-FAILSPEC](epic-failure-protocol.md) adds structured audit logging for EU AI Act compliance readiness.

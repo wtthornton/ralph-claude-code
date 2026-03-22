@@ -82,3 +82,17 @@ Reference: [npm/write-file-atomic](https://github.com/npm/write-file-atomic), [L
 - Consecutive timeout detection (covered in RALPH-GUARD)
 - CB state persistence format changes (current JSON format is adequate)
 - Distributed circuit breaker (Ralph is single-host)
+
+---
+
+## 2026 Research Addendum
+
+**Added:** 2026-03-22 | **Source:** Phase 14 research review
+
+This epic's sliding window circuit breaker aligns well with 2026 best practices. Two additional patterns have emerged:
+
+1. **Multi-provider failover chains**: Organizations mix Claude, OpenAI, and self-hosted models with circuit breaker chains for automatic failover. Traefik Labs announced composable safety pipelines with multi-provider resilience in March 2026. Ralph is Claude-only; multi-provider support is a future consideration.
+
+2. **FAILURE.md protocol**: The FAILURE.md open specification provides a standard format for documenting circuit breaker behavior, failure modes, and recovery procedures. Ralph's CB behavior should be documented in this format.
+
+**Related Phase 14 epic:** [RALPH-FAILSPEC](epic-failure-protocol.md) documents circuit breaker behavior in FAILURE.md standard format.

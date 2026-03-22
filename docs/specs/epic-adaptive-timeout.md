@@ -76,3 +76,17 @@ Reference: [Codecentric — Resilience Design Patterns](https://www.codecentric.
 - Heartbeat-based timeout (would require Claude CLI changes)
 - Dynamic timeout adjustment mid-execution (would require streaming analysis)
 - Pre-QA deployment verification (covered in RALPH-DEPLOY)
+
+---
+
+## 2026 Research Addendum
+
+**Added:** 2026-03-22 | **Source:** Phase 14 research review
+
+This epic's adaptive timeout strategy aligns with 2026 best practices. Two complementary patterns have emerged:
+
+1. **Context window management**: Research shows agent success rate decreases after 35 minutes and doubling duration quadruples failure rate. Ralph's adaptive timeout should be combined with task decomposition — if P95 exceeds 35 minutes, the task should be split rather than given more time.
+
+2. **Continue-As-New pattern**: From Temporal — when a session exceeds a threshold, atomically save state, end the session, and start a fresh one. This prevents context exhaustion in long sessions.
+
+**Related Phase 14 epic:** [RALPH-CTXMGMT](epic-context-management.md) adds task decomposition signals and Continue-As-New pattern to complement adaptive timeouts.
