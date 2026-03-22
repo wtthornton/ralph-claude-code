@@ -22,7 +22,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/backup.sh" ]] && source "$SCRIPT_DIR/lib/backup.sh"
 
 # Version
-RALPH_VERSION="1.8.6"
+RALPH_VERSION="1.8.7"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -591,12 +591,14 @@ init_call_tracking() {
 }
 
 # Log function with timestamps and colors
+# PERF: Uses printf builtin for timestamp (no date subprocess). Called 30-50x per loop.
 log_status() {
     local level=$1
     local message=$2
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local timestamp
+    printf -v timestamp '%(%Y-%m-%d %H:%M:%S)T' -1
     local color=""
-    
+
     case $level in
         "INFO")  color=$BLUE ;;
         "WARN")  color=$YELLOW ;;
@@ -604,7 +606,7 @@ log_status() {
         "SUCCESS") color=$GREEN ;;
         "LOOP") color=$PURPLE ;;
     esac
-    
+
     # Write to stderr so log messages don't interfere with function return values
     # 2>/dev/null suppresses "Input/output error" when tmux pty is broken (Issue #188)
     echo -e "${color}[$timestamp] [$level] $message${NC}" >&2 2>/dev/null
@@ -893,13 +895,18 @@ update_status() {
 STATUSEOF
 }
 
+# PERF: Helper to read call count without cat subprocess
+_read_call_count() {
+    local _cc=0
+    [[ -f "$CALL_COUNT_FILE" ]] && read -r _cc < "$CALL_COUNT_FILE" 2>/dev/null
+    echo "${_cc:-0}"
+}
+
 # Check if we can make another call
 can_make_call() {
-    local calls_made=0
-    if [[ -f "$CALL_COUNT_FILE" ]]; then
-        calls_made=$(cat "$CALL_COUNT_FILE")
-    fi
-    
+    local calls_made
+    calls_made=$(_read_call_count)
+
     if [[ $calls_made -ge $MAX_CALLS_PER_HOUR ]]; then
         return 1  # Cannot make call
     else
@@ -909,11 +916,9 @@ can_make_call() {
 
 # Increment call counter
 increment_call_counter() {
-    local calls_made=0
-    if [[ -f "$CALL_COUNT_FILE" ]]; then
-        calls_made=$(cat "$CALL_COUNT_FILE")
-    fi
-    
+    local calls_made
+    calls_made=$(_read_call_count)
+
     ((calls_made++))
     echo "$calls_made" > "$CALL_COUNT_FILE"
     echo "$calls_made"
@@ -921,7 +926,8 @@ increment_call_counter() {
 
 # Wait for rate limit reset with countdown
 wait_for_reset() {
-    local calls_made=$(cat "$CALL_COUNT_FILE" 2>/dev/null || echo "0")
+    local calls_made
+    calls_made=$(_read_call_count)
     log_status "WARN" "Rate limit reached ($calls_made/$MAX_CALLS_PER_HOUR). Waiting for reset..."
     
     # Calculate time until next hour
@@ -1617,55 +1623,32 @@ reset_session() {
 
 # Log session state transitions to history file
 # Usage: log_session_transition from_state to_state reason loop_number
+# PERF: Reduced from 4 jq calls to 1 (construct + append + trim in single pipeline)
 log_session_transition() {
     local from_state=$1
     local to_state=$2
     local reason=$3
     local loop_number=${4:-0}
 
-    # Get timestamp once (SC2155: separate declare from assign)
     local ts
-    ts=$(get_iso_timestamp)
+    printf -v ts '%(%Y-%m-%dT%H:%M:%SZ)T' -1
 
-    # Create transition entry using jq for safe JSON (SC2155: separate declare from assign)
-    local transition
-    transition=$(jq -n -c \
-        --arg timestamp "$ts" \
-        --arg from_state "$from_state" \
-        --arg to_state "$to_state" \
-        --arg reason "$reason" \
-        --argjson loop_number "$loop_number" \
-        '{
-            timestamp: $timestamp,
-            from_state: $from_state,
-            to_state: $to_state,
-            reason: $reason,
-            loop_number: $loop_number
-        }')
-
-    # Read history file defensively - fallback to empty array on any failure
-    local history
+    # Build transition JSON and append+trim in single jq call
+    local updated_history
     if [[ -f "$RALPH_SESSION_HISTORY_FILE" ]]; then
-        history=$(cat "$RALPH_SESSION_HISTORY_FILE" 2>/dev/null)
-        # Validate JSON, fallback to empty array if corrupted
-        if ! echo "$history" | jq empty 2>/dev/null; then
-            history='[]'
-        fi
-    else
-        history='[]'
+        updated_history=$(jq -c \
+            --arg ts "$ts" --arg fs "$from_state" --arg tos "$to_state" \
+            --arg r "$reason" --argjson ln "$loop_number" \
+            '. + [{timestamp: $ts, from_state: $fs, to_state: $tos, reason: $r, loop_number: $ln}] | .[-50:]' \
+            "$RALPH_SESSION_HISTORY_FILE" 2>/dev/null)
     fi
 
-    # Append transition and keep only last 50 entries
-    local updated_history
-    updated_history=$(echo "$history" | jq ". += [$transition] | .[-50:]" 2>/dev/null)
-    local jq_status=$?
-
-    # Only write if jq succeeded
-    if [[ $jq_status -eq 0 && -n "$updated_history" ]]; then
+    if [[ -n "$updated_history" ]]; then
         echo "$updated_history" > "$RALPH_SESSION_HISTORY_FILE"
     else
-        # Fallback: start fresh with just this transition
-        echo "[$transition]" > "$RALPH_SESSION_HISTORY_FILE"
+        # Fallback: start fresh
+        printf '[{"timestamp":"%s","from_state":"%s","to_state":"%s","reason":"%s","loop_number":%s}]' \
+            "$ts" "$from_state" "$to_state" "$reason" "$loop_number" > "$RALPH_SESSION_HISTORY_FILE"
     fi
 }
 
@@ -1729,22 +1712,10 @@ init_session_tracking() {
 }
 
 # Update last_used timestamp in session file (called on each loop iteration)
+# PERF: Use touch to update mtime instead of jq read-modify-write (was: jq + get_iso_timestamp = 2 subprocesses)
+# The session expiry check uses file mtime (get_session_file_age_hours), not the JSON field.
 update_session_last_used() {
-    if [[ ! -f "$RALPH_SESSION_FILE" ]]; then
-        return 0
-    fi
-
-    local ts
-    ts=$(get_iso_timestamp)
-
-    # Update last_used in existing session file
-    local updated
-    updated=$(jq --arg last_used "$ts" '.last_used = $last_used' "$RALPH_SESSION_FILE" 2>/dev/null)
-    local jq_status=$?
-
-    if [[ $jq_status -eq 0 && -n "$updated" ]]; then
-        echo "$updated" > "$RALPH_SESSION_FILE"
-    fi
+    [[ -f "$RALPH_SESSION_FILE" ]] && touch "$RALPH_SESSION_FILE" 2>/dev/null
 }
 
 # Global array for Claude command arguments (avoids shell injection)
@@ -1853,6 +1824,36 @@ build_claude_command() {
     local prompt_content
     prompt_content=$(cat "$prompt_file")
     CLAUDE_CMD_ARGS+=("-p" "$prompt_content")
+}
+
+# PERF: Shared helper for git file-change counting (was: duplicated ~30 lines in 2 places)
+# Fix #141: Detect both uncommitted changes AND committed changes
+_count_files_changed_since_loop_start() {
+    local _start_sha="" _current_sha="" _files=0
+
+    [[ -f "$RALPH_DIR/.loop_start_sha" ]] && read -r _start_sha < "$RALPH_DIR/.loop_start_sha" 2>/dev/null
+
+    if command -v git &>/dev/null && git rev-parse --git-dir &>/dev/null 2>&1; then
+        _current_sha=$(git rev-parse HEAD 2>/dev/null || echo "")
+
+        if [[ -n "$_start_sha" && -n "$_current_sha" && "$_start_sha" != "$_current_sha" ]]; then
+            _files=$(
+                {
+                    git diff --name-only "$_start_sha" "$_current_sha" 2>/dev/null
+                    git diff --name-only HEAD 2>/dev/null
+                    git diff --name-only --cached 2>/dev/null
+                } | sort -u | wc -l
+            )
+        else
+            _files=$(
+                {
+                    git diff --name-only 2>/dev/null
+                    git diff --name-only --cached 2>/dev/null
+                } | sort -u | wc -l
+            )
+        fi
+    fi
+    echo "${_files:-0}"
 }
 
 # Main execution function
@@ -2019,9 +2020,7 @@ execute_claude_code() {
     # --- Content block stop: emit compact tool summary ---
     if (line ~ /"content_block_stop"/) {
         if (it && ct != "") {
-            cmd = "date +%s"
-            cmd | getline now
-            close(cmd)
+            now = systime()
             el = now - st
             mn = int(el / 60)
             sc = el % 60
@@ -2424,40 +2423,8 @@ EOF
         fi
 
         # Get file change count for circuit breaker
-        # Fix #141: Detect both uncommitted changes AND committed changes
-        local files_changed=0
-        local loop_start_sha=""
-        local current_sha=""
-
-        if [[ -f "$RALPH_DIR/.loop_start_sha" ]]; then
-            loop_start_sha=$(cat "$RALPH_DIR/.loop_start_sha" 2>/dev/null || echo "")
-        fi
-
-        if command -v git &>/dev/null && git rev-parse --git-dir &>/dev/null 2>&1; then
-            current_sha=$(git rev-parse HEAD 2>/dev/null || echo "")
-
-            # Check if commits were made (HEAD changed)
-            if [[ -n "$loop_start_sha" && -n "$current_sha" && "$loop_start_sha" != "$current_sha" ]]; then
-                # Commits were made - count union of committed files AND working tree changes
-                # This catches cases where Claude commits some files but still has other modified files
-                files_changed=$(
-                    {
-                        git diff --name-only "$loop_start_sha" "$current_sha" 2>/dev/null
-                        git diff --name-only HEAD 2>/dev/null           # unstaged changes
-                        git diff --name-only --cached 2>/dev/null       # staged changes
-                    } | sort -u | wc -l
-                )
-                [[ "$VERBOSE_PROGRESS" == "true" ]] && log_status "DEBUG" "Detected $files_changed unique files changed (commits + working tree) since loop start"
-            else
-                # No commits - check for uncommitted changes (staged + unstaged)
-                files_changed=$(
-                    {
-                        git diff --name-only 2>/dev/null                # unstaged changes
-                        git diff --name-only --cached 2>/dev/null       # staged changes
-                    } | sort -u | wc -l
-                )
-            fi
-        fi
+        local files_changed
+        files_changed=$(_count_files_changed_since_loop_start)
 
         local has_errors="false"
 
@@ -2500,34 +2467,8 @@ EOF
             log_status "WARN" "⏱️ Claude Code execution timed out (not an API limit)"
 
             # Check git for actual changes made during the timed-out execution
-            local timeout_loop_start_sha=""
-            local timeout_current_sha=""
-            local timeout_files_changed=0
-
-            if [[ -f "$RALPH_DIR/.loop_start_sha" ]]; then
-                timeout_loop_start_sha=$(cat "$RALPH_DIR/.loop_start_sha" 2>/dev/null || echo "")
-            fi
-
-            if command -v git &>/dev/null && git rev-parse --git-dir &>/dev/null 2>&1; then
-                timeout_current_sha=$(git rev-parse HEAD 2>/dev/null || echo "")
-
-                if [[ -n "$timeout_loop_start_sha" && -n "$timeout_current_sha" && "$timeout_loop_start_sha" != "$timeout_current_sha" ]]; then
-                    timeout_files_changed=$(
-                        {
-                            git diff --name-only "$timeout_loop_start_sha" "$timeout_current_sha" 2>/dev/null
-                            git diff --name-only HEAD 2>/dev/null
-                            git diff --name-only --cached 2>/dev/null
-                        } | sort -u | wc -l
-                    )
-                else
-                    timeout_files_changed=$(
-                        {
-                            git diff --name-only 2>/dev/null
-                            git diff --name-only --cached 2>/dev/null
-                        } | sort -u | wc -l
-                    )
-                fi
-            fi
+            local timeout_files_changed
+            timeout_files_changed=$(_count_files_changed_since_loop_start)
 
             if [[ $timeout_files_changed -gt 0 ]]; then
                 # Productive timeout — work was done despite the timeout
@@ -2612,7 +2553,7 @@ cleanup() {
     if [[ $loop_count -gt 0 ]]; then
         if [[ $trap_exit_code -ne 0 ]]; then
             log_status "ERROR" "Ralph loop crashed (exit code: $trap_exit_code)"
-            update_status "$loop_count" "$(cat "$CALL_COUNT_FILE" 2>/dev/null || echo "0")" "crashed" "error" "exit_code_$trap_exit_code"
+            update_status "$loop_count" "$(_read_call_count)" "crashed" "error" "exit_code_$trap_exit_code"
             # Record crash for startup detection
             echo "$trap_exit_code" > "$RALPH_DIR/.last_crash_code"
         else
@@ -2621,7 +2562,7 @@ cleanup() {
             current_status=$(jq -r '.status' "$STATUS_FILE" 2>/dev/null || echo "unknown")
             if [[ "$current_status" == "running" ]]; then
                 log_status "WARN" "Ralph exited normally but status still 'running' — possible silent crash"
-                update_status "$loop_count" "$(cat "$CALL_COUNT_FILE" 2>/dev/null || echo "0")" "unexpected_exit" "stopped"
+                update_status "$loop_count" "$(_read_call_count)" "unexpected_exit" "stopped"
             fi
         fi
     fi
@@ -2807,7 +2748,7 @@ main() {
         # Check circuit breaker before attempting execution
         if should_halt_execution; then
             reset_session "circuit_breaker_open"
-            update_status "$loop_count" "$(cat "$CALL_COUNT_FILE")" "circuit_breaker_open" "halted" "stagnation_detected"
+            update_status "$loop_count" "$(_read_call_count)" "circuit_breaker_open" "halted" "stagnation_detected"
             log_status "ERROR" "🛑 Circuit breaker has opened - execution halted"
             break
         fi
@@ -2825,7 +2766,7 @@ main() {
             if [[ "$exit_reason" == "permission_denied" ]]; then
                 log_status "ERROR" "🚫 Permission denied - halting loop"
                 reset_session "permission_denied"
-                update_status "$loop_count" "$(cat "$CALL_COUNT_FILE")" "permission_denied" "halted" "permission_denied"
+                update_status "$loop_count" "$(_read_call_count)" "permission_denied" "halted" "permission_denied"
 
                 # Display helpful guidance for resolving permission issues
                 echo ""
@@ -2862,11 +2803,11 @@ main() {
 
             log_status "SUCCESS" "🏁 Graceful exit triggered: $exit_reason"
             reset_session "project_complete"
-            update_status "$loop_count" "$(cat "$CALL_COUNT_FILE")" "graceful_exit" "completed" "$exit_reason"
+            update_status "$loop_count" "$(_read_call_count)" "graceful_exit" "completed" "$exit_reason"
 
             log_status "SUCCESS" "🎉 Ralph has completed the project! Final stats:"
             log_status "INFO" "  - Total loops: $loop_count"
-            log_status "INFO" "  - API calls used: $(cat "$CALL_COUNT_FILE")"
+            log_status "INFO" "  - API calls used: $(_read_call_count)"
             log_status "INFO" "  - Exit reason: $exit_reason"
 
             break
@@ -2878,7 +2819,7 @@ main() {
         fi
 
         # Update status
-        local calls_made=$(cat "$CALL_COUNT_FILE" 2>/dev/null || echo "0")
+        local calls_made=$(_read_call_count)
         update_status "$loop_count" "$calls_made" "executing" "running"
 
         # Dry-run mode: simulate execution without calling Claude Code
@@ -2893,20 +2834,20 @@ main() {
         local exec_result=$?
         
         if [ $exec_result -eq 0 ]; then
-            update_status "$loop_count" "$(cat "$CALL_COUNT_FILE")" "completed" "success"
+            update_status "$loop_count" "$(_read_call_count)" "completed" "success"
 
             # Brief pause between successful executions (reduced from 5s in v1.8.5)
             sleep 2
         elif [ $exec_result -eq 3 ]; then
             # Circuit breaker opened
             reset_session "circuit_breaker_trip"
-            update_status "$loop_count" "$(cat "$CALL_COUNT_FILE")" "circuit_breaker_open" "halted" "stagnation_detected"
+            update_status "$loop_count" "$(_read_call_count)" "circuit_breaker_open" "halted" "stagnation_detected"
             log_status "ERROR" "🛑 Circuit breaker has opened - halting loop"
             log_status "INFO" "Run 'ralph --reset-circuit' to reset the circuit breaker after addressing issues"
             break
         elif [ $exec_result -eq 2 ]; then
             # API 5-hour limit reached - handle specially
-            update_status "$loop_count" "$(cat "$CALL_COUNT_FILE")" "api_limit" "paused"
+            update_status "$loop_count" "$(_read_call_count)" "api_limit" "paused"
             log_status "WARN" "🛑 Claude API 5-hour limit reached!"
             
             # Ask user whether to wait or exit
@@ -2923,7 +2864,7 @@ main() {
             if [[ "$user_choice" == "2" ]]; then
                 log_status "INFO" "User chose to exit. Exiting loop..."
                 reset_session "api_limit_exit"
-                update_status "$loop_count" "$(cat "$CALL_COUNT_FILE")" "api_limit_exit" "stopped" "api_5hour_limit"
+                update_status "$loop_count" "$(_read_call_count)" "api_limit_exit" "stopped" "api_5hour_limit"
                 break
             else
                 # Auto-wait on timeout (empty choice) or explicit "1" — supports unattended operation
@@ -2944,7 +2885,7 @@ main() {
                 printf "\n"
             fi
         else
-            update_status "$loop_count" "$(cat "$CALL_COUNT_FILE")" "failed" "error"
+            update_status "$loop_count" "$(_read_call_count)" "failed" "error"
             log_status "WARN" "Execution failed, waiting 30 seconds before retry..."
             sleep 30
         fi

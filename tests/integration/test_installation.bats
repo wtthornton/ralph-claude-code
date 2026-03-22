@@ -50,7 +50,7 @@ EOF
     cat > "$MOCK_SOURCE_DIR/ralph_loop.sh" << 'EOF'
 #!/bin/bash
 # Mock ralph_loop.sh
-RALPH_VERSION="1.8.6"
+RALPH_VERSION="1.8.7"
 echo "Ralph loop running"
 EOF
 
