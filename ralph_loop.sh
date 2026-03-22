@@ -2117,6 +2117,9 @@ execute_claude_code() {
         fflush()
         next
     }
+
+    # --- Suppress all other JSONL events (prevent raw JSON leaking to terminal) ---
+    next
 }
 END {
     cmd = "date +%s"
