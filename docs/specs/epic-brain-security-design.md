@@ -2,7 +2,7 @@
 
 **Epic ID:** RALPH-BRAINSEC
 **Priority:** Critical
-**Status:** Open
+**Status:** Done
 **Target Version:** N/A (tapps-brain / TappsMCP changes, tracked here for planning)
 **Dependencies:** None
 **Source:** [TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md](../../../../TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md) — Review feedback (2026-03-21)
@@ -27,8 +27,8 @@ The tapps-brain integration recommendations document (R01, R02) contains two sec
 
 | # | ID | Story | Priority | Effort | Status |
 |---|-----|-------|----------|--------|--------|
-| 1 | BRAINSEC-1 | Upgrade R02 from SHA-256 to HMAC-SHA256 | Critical | Small | **Open** |
-| 2 | BRAINSEC-2 | Add Access Control to R01 Safety Bypass | Critical | Small | **Open** |
+| 1 | BRAINSEC-1 | Upgrade R02 from SHA-256 to HMAC-SHA256 | Critical | Small | **Done** |
+| 2 | BRAINSEC-2 | Add Access Control to R01 Safety Bypass | Critical | Small | **Done** |
 
 ## Acceptance Criteria (Epic Level)
 
@@ -43,7 +43,7 @@ The tapps-brain integration recommendations document (R01, R02) contains two sec
 
 **Epic:** [epic-brain-security-design.md](epic-brain-security-design.md)
 **Priority:** Critical
-**Status:** Open
+**Status:** Done
 **Effort:** Small
 **Component:** `TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md` (R02 section)
 
@@ -74,7 +74,7 @@ Update R02 to specify HMAC-SHA256 with a user-held secret key stored outside the
 
 **Epic:** [epic-brain-security-design.md](epic-brain-security-design.md)
 **Priority:** Critical
-**Status:** Open
+**Status:** Done
 **Effort:** Small
 **Component:** `TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md` (R01 section)
 

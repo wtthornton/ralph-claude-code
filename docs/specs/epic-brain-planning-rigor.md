@@ -2,7 +2,7 @@
 
 **Epic ID:** RALPH-BRAINPLAN
 **Priority:** High
-**Status:** Open
+**Status:** Done
 **Target Version:** N/A (documentation and planning changes)
 **Dependencies:** None
 **Source:** [TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md](../../../../TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md) — Review feedback (2026-03-21)
@@ -32,10 +32,10 @@ The tapps-brain integration recommendations document has 18 well-researched reco
 
 | # | ID | Story | Priority | Effort | Status |
 |---|-----|-------|----------|--------|--------|
-| 1 | BRAINPLAN-1 | Align Priority Tiers with Roadmap Phases | High | Trivial | **Open** |
-| 2 | BRAINPLAN-2 | Demote R04 from P0 to P1 | High | Trivial | **Open** |
-| 3 | BRAINPLAN-3 | Add Performance Budget Section | High | Small | **Open** |
-| 4 | BRAINPLAN-4 | Add Migration and Rollback Strategy | High | Small | **Open** |
+| 1 | BRAINPLAN-1 | Align Priority Tiers with Roadmap Phases | High | Trivial | **Done** |
+| 2 | BRAINPLAN-2 | Demote R04 from P0 to P1 | High | Trivial | **Done** |
+| 3 | BRAINPLAN-3 | Add Performance Budget Section | High | Small | **Done** |
+| 4 | BRAINPLAN-4 | Add Migration and Rollback Strategy | High | Small | **Done** |
 
 ## Acceptance Criteria (Epic Level)
 
@@ -51,7 +51,7 @@ The tapps-brain integration recommendations document has 18 well-researched reco
 
 **Epic:** [epic-brain-planning-rigor.md](epic-brain-planning-rigor.md)
 **Priority:** High
-**Status:** Open
+**Status:** Done
 **Effort:** Trivial
 **Component:** `TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md` (Roadmap section)
 
@@ -79,7 +79,7 @@ Either:
 
 **Epic:** [epic-brain-planning-rigor.md](epic-brain-planning-rigor.md)
 **Priority:** High
-**Status:** Open
+**Status:** Done
 **Effort:** Trivial
 **Component:** `TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md` (R04 + Quick Reference)
 
@@ -107,7 +107,7 @@ R04 (Trust-Scored Retrieval) adds a `source_trust` signal to composite scoring. 
 
 **Epic:** [epic-brain-planning-rigor.md](epic-brain-planning-rigor.md)
 **Priority:** High
-**Status:** Open
+**Status:** Done
 **Effort:** Small
 **Component:** `TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md` (new section)
 
@@ -149,7 +149,7 @@ Several recommendations add overhead to hot paths (save, recall, search). Target
 
 **Epic:** [epic-brain-planning-rigor.md](epic-brain-planning-rigor.md)
 **Priority:** High
-**Status:** Open
+**Status:** Done
 **Effort:** Small
 **Component:** `TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md` (new section in Roadmap)
 

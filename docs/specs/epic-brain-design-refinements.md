@@ -2,7 +2,7 @@
 
 **Epic ID:** RALPH-BRAINDESIGN
 **Priority:** Medium
-**Status:** Open
+**Status:** Done
 **Target Version:** N/A (design refinements for tapps-brain integration recommendations)
 **Dependencies:** RALPH-BRAINSEC (security fixes should land first)
 **Source:** [TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md](../../../../TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md) — Review feedback (2026-03-21)
@@ -32,10 +32,10 @@ Four recommendations in the tapps-brain integration document have design gaps th
 
 | # | ID | Story | Priority | Effort | Status |
 |---|-----|-------|----------|--------|--------|
-| 1 | BRAINDESIGN-1 | Add Success Criteria to P0 Security Recommendations | Medium | Small | **Open** |
-| 2 | BRAINDESIGN-2 | Add Privacy Safeguards to R08 Hive and R14 Auto-Save | Medium | Small | **Open** |
-| 3 | BRAINDESIGN-3 | Gate R10 Graph Boost on Relation Density | Medium | Trivial | **Open** |
-| 4 | BRAINDESIGN-4 | Add Batch-Mode Exemption to R03 Rate Limiting | Medium | Trivial | **Open** |
+| 1 | BRAINDESIGN-1 | Add Success Criteria to P0 Security Recommendations | Medium | Small | **Done** |
+| 2 | BRAINDESIGN-2 | Add Privacy Safeguards to R08 Hive and R14 Auto-Save | Medium | Small | **Done** |
+| 3 | BRAINDESIGN-3 | Gate R10 Graph Boost on Relation Density | Medium | Trivial | **Done** |
+| 4 | BRAINDESIGN-4 | Add Batch-Mode Exemption to R03 Rate Limiting | Medium | Trivial | **Done** |
 
 ## Acceptance Criteria (Epic Level)
 
@@ -50,7 +50,7 @@ Four recommendations in the tapps-brain integration document have design gaps th
 
 **Epic:** [epic-brain-design-refinements.md](epic-brain-design-refinements.md)
 **Priority:** Medium
-**Status:** Open
+**Status:** Done
 **Effort:** Small
 **Component:** `TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md` (R01, R02, R03, R04)
 
@@ -103,7 +103,7 @@ Add a "Success Criteria" section to each P0 recommendation:
 
 **Epic:** [epic-brain-design-refinements.md](epic-brain-design-refinements.md)
 **Priority:** Medium
-**Status:** Open
+**Status:** Done
 **Effort:** Small
 **Component:** `TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md` (R08, R14)
 
@@ -141,7 +141,7 @@ Add privacy safeguards to both recommendations:
 
 **Epic:** [epic-brain-design-refinements.md](epic-brain-design-refinements.md)
 **Priority:** Medium
-**Status:** Open
+**Status:** Done
 **Effort:** Trivial
 **Component:** `TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md` (R10)
 
@@ -177,7 +177,7 @@ Update R10 to gate activation on relation density:
 
 **Epic:** [epic-brain-design-refinements.md](epic-brain-design-refinements.md)
 **Priority:** Medium
-**Status:** Open
+**Status:** Done
 **Effort:** Trivial
 **Component:** `TappMCP/docs/planning/TAPPS_BRAIN_INTEGRATION_RECOMMENDATIONS.md` (R03)
 
