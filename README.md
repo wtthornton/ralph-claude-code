@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml"><img src="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/version-1.8.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.8.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-736%20passing-green" alt="Tests">
   <a href="https://github.com/frankbria/ralph-claude-code/issues"><img src="https://img.shields.io/github/issues/frankbria/ralph-claude-code" alt="GitHub Issues"></a>
   <a href="https://github.com/hesreallyhim/awesome-claude-code"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome Claude Code"></a>
@@ -29,15 +29,19 @@ Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named
 
 **Install once, use everywhere** — Ralph becomes a global command available in any directory.
 
-## What's New in v1.2.0
+## What's New in v1.8.2
 
-- **Stream Parser v2** — JSONL is now the primary parsing path (renamed from "emergency" extraction). Subagent results are filtered from multi-result counts — no more false "multi-task violation" warnings
-- **RALPH_STATUS auto-unescaping** — JSON-escaped `\n` is automatically unescaped before field extraction, fixing WORK_TYPE returning UNKNOWN from JSONL streams
-- **WSL reliability polish** — Orphaned temp files cleaned up after atomic writes; pipeline children killed cleanly on SIGINT (no more exit-code-130 spam)
-- **42/42 epic stories complete** — All 9 epics across 5 phases delivered
+- **Agent mode prompt fix** — `--agent ralph` with `--output-format json` now correctly passes prompt content via `-p`, fixing "Input must be provided" CLI errors
+- **Live stream cleanup** — Raw JSONL events no longer leak to terminal in `--live` mode; only formatted tool summaries, text output, and stats are shown
+- **Windows support** — Added `ralph.cmd` wrapper for native PowerShell/CMD invocation and a Windows Users section in docs
+- **WSL deploy fix** — Line-ending issues resolved for cross-platform installs; stale `response_analyzer.sh` cleanup
 
 <details>
 <summary><strong>Previous releases</strong></summary>
+
+**v1.8.1** — Phases 6-11 (SDK integration, observability, GitHub Issues, Docker sandbox, validation testing), version badge correction
+
+**v1.2.0** — Stream Parser v2, RALPH_STATUS auto-unescaping, WSL reliability polish, 42/42 epic stories complete
 
 **v1.1.0** — Agent teams + parallelism, log rotation, dry-run mode, WSL/Windows version divergence detection
 
