@@ -1,6 +1,6 @@
 # Ralph Claude Code — Epic & Story Index
 
-> **Generated:** 2026-03-21 | **Updated:** 2026-03-21 | **Total Epics:** 18 | **Total Stories:** 76 (76 Done, 0 Open)
+> **Generated:** 2026-03-21 | **Updated:** 2026-03-22 | **Total Epics:** 26 | **Total Stories:** 93 (93 Done, 0 Open)
 
 ---
 
@@ -37,6 +37,32 @@ Phase 12 (DONE)
 └──────────────┘   └──────────────┘   └──────────────┘
                                              ▲
        ──────────────────────────────────────┘ (BRAINDESIGN depends on BRAINSEC)
+
+COMPLETED (Reliability & Resilience — sourced from 12-hour log review 2026-03-22)
+Phase 13 (DONE)
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│ RALPH-GUARD  │   │ RALPH-LOCK   │   │RALPH-CAPTURE │   │RALPH-CBDECAY │
+│ 2/2 Done     │   │ 1/1 Done     │   │ 3/3 Done     │   │ 2/2 Done     │
+│ Critical     │   │ Critical     │   │ High         │   │ High         │
+│ Progress Det.│   │ Instance Lock│   │ Stream Recov.│   │ Failure Decay│
+└──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘
+       │                                                         │
+       ▼                                                         │
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐          │
+│RALPH-ADAPTIVE│   │ RALPH-XPLAT  │   │RALPH-UPKEEP  │          │
+│ 2/2 Done     │   │ 3/3 Done     │   │ 2/2 Done     │          │
+│ High         │   │ Medium       │   │ Medium       │          │
+│ Adapt+Deadline│  │ WSL/Platform │   │ Update + MCP │          │
+└──────────────┘   └──────────────┘   └──────────────┘          │
+       ▲                                                         │
+       └─────────────────────────────────────────────────────────┘ (ADAPTIVE depends on GUARD)
+
+┌──────────────┐
+│ RALPH-DEPLOY │
+│ 2/2 Done     │
+│ High         │
+│ Pre-QA Deploy│
+└──────────────┘
 ```
 
 ---
@@ -172,17 +198,17 @@ Phase 12 (DONE)
 
 | Priority | Open | Done | Total |
 |----------|------|------|-------|
-| Critical | 0 | 14 | 14 |
-| High | 0 | 10 | 10 |
+| Critical | 0 | 18 | 18 |
+| High | 0 | 16 | 16 |
 | Important | 0 | 16 | 16 |
-| Medium | 0 | 30 | 30 |
+| Medium | 0 | 36 | 36 |
 | Nice-to-have | 0 | 2 | 2 |
-| Defensive/Low | 0 | 4 | 4 |
-| **Total** | **0** | **76** | **76** |
+| Defensive/Low | 0 | 5 | 5 |
+| **Total** | **0** | **93** | **93** |
 
 ## Critical Path
 
-All phases complete (v1.8.0 + Phase 12). 76/76 stories done across 18 epics and 13 phases.
+Phases 0–13 complete (v1.9.0). All 93 stories across 26 epics are done.
 
 ### Product Strategy
 
@@ -197,16 +223,7 @@ Ralph is a **standalone product** with full value on its own. TheStudio is the *
 | Quality Gates | Circuit breaker + exit gate | Verification Gate + QA Agent + expert review |
 
 ```
-Phase 0 ──▶ Phase 0.5 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 4 ──▶ Phase 5
-  DONE         DONE          DONE        DONE        DONE        DONE        DONE
-
-Phase 6 ──────────▶ Phase 7 ──▶ Phase 9 (testing depends on 6+7)
- RALPH-SDK            CONFIG       TEST
-  0/4 Open            0/3 Open     0/7 Open
-
-Phase 8 (independent)   Phase 10 (independent)   Phase 11 (independent)
- RALPH-OBSERVE           RALPH-GHISSUE            RALPH-SANDBOX
-  0/3 Open               0/5 Open                 0/2 Open
+Phase 0–13: ALL DONE (93/93 stories, v1.9.0)
 ```
 
 ---
@@ -329,6 +346,77 @@ Phase 8 (independent)   Phase 10 (independent)   Phase 11 (independent)
 | 2 | BRAINDESIGN-2 | [Add Privacy Safeguards to R08 Hive and R14 Auto-Save](epic-brain-design-refinements.md) | Medium | Small | **Done** |
 | 3 | BRAINDESIGN-3 | [Gate R10 Graph Boost on Relation Density](epic-brain-design-refinements.md) | Medium | Trivial | **Done** |
 | 4 | BRAINDESIGN-4 | [Add Batch-Mode Exemption to R03 Rate Limiting](epic-brain-design-refinements.md) | Medium | Trivial | **Done** |
+
+---
+
+## Phase 13 — Complete (Reliability & Resilience)
+
+**Source:** 12-hour log review of TheStudio and tapps-brain (2026-03-22). All issues identified from production Ralph logs.
+
+### RALPH-GUARD: Loop Progress Detection & Guard Rails
+**Priority:** Critical | **Status:** Done | **Target:** v1.9.0 | **Dependencies:** None
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [GUARD-1](story-guard-1-baseline-snapshotting.md) | Git Diff Baseline Snapshotting | Critical | Small | **Done** |
+| 2 | [GUARD-2](story-guard-2-consecutive-timeout-breaker.md) | Consecutive Timeout Circuit Breaker | Critical | Small | **Done** |
+
+### RALPH-LOCK: Concurrent Instance Prevention
+**Priority:** Critical | **Status:** Done | **Target:** v1.9.0 | **Dependencies:** None
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [LOCK-1](story-lock-1-flock-instance-locking.md) | Flock-Based Instance Locking | Critical | Small | **Done** |
+
+### RALPH-CAPTURE: Stream Capture & Recovery
+**Priority:** High | **Status:** Done | **Target:** v1.9.0 | **Dependencies:** None
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [CAPTURE-1](story-capture-1-progressive-stream-capture.md) | Progressive Stream Capture Before SIGTERM | High | Medium | **Done** |
+| 2 | [CAPTURE-2](story-capture-2-multi-result-merging.md) | Multi-Result Stream Merging Strategy | Medium | Small | **Done** |
+| 3 | [CAPTURE-3](story-capture-3-stats-newline-fix.md) | Fix Execution Stats Newline Parsing | Low | Trivial | **Done** |
+
+### RALPH-CBDECAY: Circuit Breaker Failure Decay
+**Priority:** High | **Status:** Done | **Target:** v1.9.0 | **Dependencies:** None
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [CBDECAY-1](story-cbdecay-1-sliding-window.md) | Time-Weighted Sliding Window | High | Medium | **Done** |
+| 2 | [CBDECAY-2](story-cbdecay-2-session-reinitialization.md) | Session State Reinitialization After CB Reset | Medium | Small | **Done** |
+
+### RALPH-ADAPTIVE: Adaptive Timeout Strategy
+**Priority:** High | **Status:** Done | **Target:** v1.9.0 | **Dependencies:** RALPH-GUARD
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [ADAPTIVE-1](story-adaptive-1-percentile-timeout.md) | Percentile-Based Adaptive Timeout | High | Medium | **Done** |
+| 2 | [ADAPTIVE-2](story-adaptive-2-sub-agent-deadline-budget.md) | Sub-Agent Deadline Budget | High | Medium | **Done** |
+
+### RALPH-DEPLOY: Pre-QA Environment Verification
+**Priority:** High | **Status:** Done | **Target:** v1.9.0 | **Dependencies:** None
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [DEPLOY-1](story-deploy-1-container-freshness-check.md) | Container Freshness Check Before Integration Tests | High | Small | **Done** |
+| 2 | [DEPLOY-2](story-deploy-2-agent-build-instructions.md) | Add Build/Deploy Instructions to QA Agent Prompts | Medium | Small | **Done** |
+
+### RALPH-XPLAT: Cross-Platform Compatibility
+**Priority:** Medium | **Status:** Done | **Target:** v1.9.0 | **Dependencies:** None
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [XPLAT-1](story-xplat-1-version-divergence-fix.md) | Fix False Version Divergence Warning | Medium | Trivial | **Done** |
+| 2 | [XPLAT-2](story-xplat-2-hook-environment-detection.md) | Cross-Platform Hook Environment Detection | Medium | Small | **Done** |
+| 3 | [XPLAT-3](story-xplat-3-python3-wsl-alias.md) | Python3 Alias in WSL Agent Environments | Low | Trivial | **Done** |
+
+### RALPH-UPKEEP: Update & Log Reliability
+**Priority:** Medium | **Status:** Done | **Target:** v1.9.0 | **Dependencies:** None
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [UPKEEP-1](story-upkeep-1-update-verification.md) | CLI Auto-Update Verification | Medium | Small | **Done** |
+| 2 | [UPKEEP-2](story-upkeep-2-mcp-failure-suppression.md) | MCP Server Failure Suppression | Medium | Small | **Done** |
 
 ---
 

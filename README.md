@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml"><img src="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/version-1.8.2-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.9.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-736%20passing-green" alt="Tests">
   <a href="https://github.com/frankbria/ralph-claude-code/issues"><img src="https://img.shields.io/github/issues/frankbria/ralph-claude-code" alt="GitHub Issues"></a>
   <a href="https://github.com/hesreallyhim/awesome-claude-code"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome Claude Code"></a>
@@ -29,15 +29,20 @@ Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named
 
 **Install once, use everywhere** — Ralph becomes a global command available in any directory.
 
-## What's New in v1.8.2
+## What's New in v1.9.0
 
-- **Agent mode prompt fix** — `--agent ralph` with `--output-format json` now correctly passes prompt content via `-p`, fixing "Input must be provided" CLI errors
-- **Live stream cleanup** — Raw JSONL events no longer leak to terminal in `--live` mode; only formatted tool summaries, text output, and stats are shown
-- **Windows support** — Added `ralph.cmd` wrapper for native PowerShell/CMD invocation and a Windows Users section in docs
-- **WSL deploy fix** — Line-ending issues resolved for cross-platform installs; stale `response_analyzer.sh` cleanup
+- **Cost-aware agent routing** — Main ralph agent runs on Sonnet for speed; complex/architectural tasks delegate to ralph-architect (Opus) with mandatory code review
+- **Task batching** — Up to 8 small / 5 medium tasks per invocation with epic-boundary QA deferral
+- **Speed optimizations** — `bypassPermissions` mode, disabled PostToolUse hooks, reduced inter-loop pause (5s → 2s), subprocess batching (~50 → ~10 jq calls per loop), version caching
+- **Epic-boundary deferral** — QA (tester + reviewer), explorer, backups, and log rotation deferred to epic boundaries for faster throughput
+- **Live stream text filtering** — Stream metadata, raw JSON dumps, and UUID patterns suppressed; text collapsed and truncated for readability
+- **Circuit breaker decay** — Sliding window and session reinitialization support
+- **Cross-platform compatibility** — Hook environment detection, version divergence fixes, Python3 WSL alias handling
 
 <details>
 <summary><strong>Previous releases</strong></summary>
+
+**v1.8.2** — Agent mode prompt fix, live stream JSONL suppression, Windows `.cmd` wrapper, WSL deploy line-ending fixes
 
 **v1.8.1** — Phases 6-11 (SDK integration, observability, GitHub Issues, Docker sandbox, validation testing), version badge correction
 

@@ -1516,13 +1516,12 @@ EOF
 # --- Productive Timeout Detection Tests (Issue #198) ---
 
 @test "timeout handler checks git for productive work before returning" {
-    # The timeout handler (exit_code 124) must check .loop_start_sha vs HEAD
-    # instead of immediately returning 1
+    # The timeout handler (exit_code 124) must check for real changes
+    # GUARD-1: Uses ralph_has_real_changes (baseline comparison) instead of raw loop_start_sha
     local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
 
-    # Extract the failure path (else branch) containing the timeout handler
-    # Find the timeout guard block and verify it references loop_start_sha
-    run bash -c "sed -n '/Layer 1.*Timeout guard/,/return [12]/p' '$script' | grep -q 'loop_start_sha'"
+    # Verify the timeout guard block uses ralph_has_real_changes for baseline comparison
+    run bash -c "sed -n '/Layer 1.*Timeout guard/,/end timeout/p' '$script' | grep -q 'ralph_has_real_changes'"
     assert_success
 }
 

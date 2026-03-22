@@ -165,6 +165,13 @@ show_circuit_status() {
     echo -e "${color}Reason:${NC}                $reason"
     echo -e "${color}Loops since progress:${NC} $no_progress"
     echo -e "${color}Total opens:${NC}          $total_opens"
+
+    # CBDECAY-1: Show sliding window stats
+    local window_stats window_total window_failures
+    window_stats=$(cb_get_window_stats)
+    window_total=$(echo "$window_stats" | cut -d' ' -f1)
+    window_failures=$(echo "$window_stats" | cut -d' ' -f2)
+    echo -e "${color}Failure window:${NC}       $window_failures failures / $window_total calls in last ${CB_FAILURE_DECAY_MINUTES}m"
     echo ""
 }
 
@@ -181,6 +188,9 @@ reset_circuit_breaker() {
     "reason": "$reason"
 }
 EOF
+
+    # CBDECAY-1: Clear sliding window event log on reset
+    : > "$CB_FAILURE_LOG" 2>/dev/null
 
     echo -e "${GREEN}✅ Circuit breaker reset to CLOSED state${NC}"
 }
@@ -243,6 +253,108 @@ _cb_log_transition() {
     esac
 }
 
+# =============================================================================
+# CBDECAY-1: Time-Weighted Sliding Window (Phase 13)
+# Replace cumulative failure counter with time-based sliding window.
+# Only failures within CB_FAILURE_DECAY_MINUTES contribute to threshold.
+# =============================================================================
+
+CB_FAILURE_LOG="${RALPH_DIR}/.circuit_breaker_events"
+CB_FAILURE_DECAY_MINUTES=${CB_FAILURE_DECAY_MINUTES:-30}
+CB_FAILURE_THRESHOLD=${CB_FAILURE_THRESHOLD:-5}
+CB_MIN_CALLS=${CB_MIN_CALLS:-3}  # Don't evaluate until N calls in window
+
+# Record a failure event with timestamp
+cb_record_failure() {
+    local now
+    now=$(date +%s)
+    echo "$now fail" >> "$CB_FAILURE_LOG"
+    cb_evaluate_window
+}
+
+# Record a success event
+cb_record_success() {
+    local now
+    now=$(date +%s)
+    echo "$now ok" >> "$CB_FAILURE_LOG"
+    # Prune old entries beyond the window
+    cb_prune_old_events
+}
+
+# Remove events outside the sliding window
+cb_prune_old_events() {
+    local now cutoff
+    now=$(date +%s)
+    cutoff=$((now - CB_FAILURE_DECAY_MINUTES * 60))
+
+    if [[ -f "$CB_FAILURE_LOG" ]]; then
+        awk -v cutoff="$cutoff" '$1 >= cutoff' "$CB_FAILURE_LOG" > "${CB_FAILURE_LOG}.tmp"
+        mv "${CB_FAILURE_LOG}.tmp" "$CB_FAILURE_LOG"
+        rm -f "${CB_FAILURE_LOG}.tmp" 2>/dev/null  # WSL cleanup
+    fi
+}
+
+# Get windowed stats: "total failures" on stdout
+cb_get_window_stats() {
+    local now cutoff total failures
+    now=$(date +%s)
+    cutoff=$((now - CB_FAILURE_DECAY_MINUTES * 60))
+
+    if [[ ! -f "$CB_FAILURE_LOG" ]]; then
+        echo "0 0"
+        return
+    fi
+
+    total=$(awk -v cutoff="$cutoff" '$1 >= cutoff' "$CB_FAILURE_LOG" | wc -l | tr -d '[:space:]')
+    failures=$(awk -v cutoff="$cutoff" '$1 >= cutoff && $2 == "fail"' "$CB_FAILURE_LOG" | wc -l | tr -d '[:space:]')
+    echo "$total $failures"
+}
+
+# Evaluate the sliding window and trip CB if threshold reached
+cb_evaluate_window() {
+    local stats total failures
+    stats=$(cb_get_window_stats)
+    total=$(echo "$stats" | cut -d' ' -f1)
+    failures=$(echo "$stats" | cut -d' ' -f2)
+
+    # Don't evaluate until minimum calls reached
+    if [[ "$total" -lt "$CB_MIN_CALLS" ]]; then
+        return 0
+    fi
+
+    if [[ "$failures" -ge "$CB_FAILURE_THRESHOLD" ]]; then
+        echo -e "${YELLOW}WARN: Circuit breaker threshold reached: $failures failures in last ${CB_FAILURE_DECAY_MINUTES}m (window: $total calls)${NC}" >&2
+
+        # Trip the breaker
+        local total_opens
+        total_opens=$(jq -r '.total_opens // 0' "$CB_STATE_FILE" 2>/dev/null || echo "0")
+        total_opens=$((total_opens + 1))
+        _cb_log_transition "$(get_circuit_state)" "$CB_STATE_OPEN" \
+            "Sliding window: $failures failures in ${CB_FAILURE_DECAY_MINUTES}m"
+
+        local tmp
+        tmp=$(mktemp "${CB_STATE_FILE}.XXXXXX")
+        jq -n \
+            --arg state "$CB_STATE_OPEN" \
+            --arg last_change "$(get_iso_timestamp)" \
+            --arg opened_at "$(get_iso_timestamp)" \
+            --arg reason "failure_threshold: $failures failures in ${CB_FAILURE_DECAY_MINUTES}m window" \
+            --argjson no_progress "$failures" \
+            --argjson total_opens "$total_opens" \
+            '{state: $state, last_change: $last_change, opened_at: $opened_at, consecutive_no_progress: $no_progress, total_opens: $total_opens, reason: $reason}' \
+            > "$tmp" && mv "$tmp" "$CB_STATE_FILE"
+        rm -f "$tmp" 2>/dev/null
+        return 1
+    fi
+
+    return 0
+}
+
+# Override reset to also clear the event log
+_cb_reset_events() {
+    : > "$CB_FAILURE_LOG" 2>/dev/null
+}
+
 # Export functions for use in other scripts
 export -f init_circuit_breaker
 export -f get_circuit_state
@@ -251,3 +363,8 @@ export -f should_halt_execution
 export -f cb_is_open
 export -f show_circuit_status
 export -f reset_circuit_breaker
+export -f cb_record_failure
+export -f cb_record_success
+export -f cb_prune_old_events
+export -f cb_get_window_stats
+export -f cb_evaluate_window

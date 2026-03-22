@@ -27,6 +27,9 @@ Thumbs.db
 *.tmp
 .temp/
 
+# LOCK-1: Instance lock file (auto-released by flock kernel syscall)
+.ralph/.ralph.lock
+
 # WSL-1: Orphaned temp files from atomic writes (cross-fs copy+unlink)
 .ralph/status.json.*
 .ralph/.circuit_breaker_state.*

@@ -22,7 +22,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/backup.sh" ]] && source "$SCRIPT_DIR/lib/backup.sh"
 
 # Version
-RALPH_VERSION="1.8.9"
+RALPH_VERSION="1.9.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -71,6 +71,17 @@ CLAUDE_USE_CONTINUE="${CLAUDE_USE_CONTINUE:-true}"
 CLAUDE_SESSION_FILE="$RALPH_DIR/.claude_session_id" # Session ID persistence file
 CLAUDE_MIN_VERSION="2.0.76"              # Minimum required Claude CLI version
 CLAUDE_AUTO_UPDATE="${CLAUDE_AUTO_UPDATE:-true}"  # Auto-update Claude CLI at startup
+
+# GUARD-2: Consecutive timeout circuit breaker (Phase 13)
+MAX_CONSECUTIVE_TIMEOUTS="${MAX_CONSECUTIVE_TIMEOUTS:-5}"
+CONSECUTIVE_TIMEOUT_COUNT=0
+
+# ADAPTIVE-1: Adaptive timeout configuration (Phase 13)
+ADAPTIVE_TIMEOUT_ENABLED="${ADAPTIVE_TIMEOUT_ENABLED:-true}"
+ADAPTIVE_TIMEOUT_MULTIPLIER="${ADAPTIVE_TIMEOUT_MULTIPLIER:-2}"
+ADAPTIVE_TIMEOUT_MIN_MINUTES="${ADAPTIVE_TIMEOUT_MIN_MINUTES:-10}"
+ADAPTIVE_TIMEOUT_MAX_MINUTES="${ADAPTIVE_TIMEOUT_MAX_MINUTES:-60}"
+ADAPTIVE_TIMEOUT_MIN_SAMPLES="${ADAPTIVE_TIMEOUT_MIN_SAMPLES:-5}"
 
 # Session management configuration (Phase 1.2)
 SESSION_EXPIRATION_SECONDS=86400  # 24 hours
@@ -651,8 +662,9 @@ ralph_log_permission_denials_from_raw_output() {
     log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required tools"
 }
 
-# Pre-analysis: if stream is still multi-value JSONL, collapse to last result object
-# STREAM-1: Renamed from ralph_emergency_jsonl_normalize — JSONL is the primary path since CLI v2.1+
+# CAPTURE-2: Multi-result stream merging — JSONL is the primary path since CLI v2.1+
+# Uses last-writer-wins: the final top-level result is authoritative.
+# Sub-agent results (with parent_tool_use_id/subagent) are excluded from result count.
 ralph_extract_result_from_stream() {
     local output_file=$1
     [[ -f "$output_file" ]] || return 0
@@ -662,22 +674,29 @@ ralph_extract_result_from_stream() {
     _tl_count=$(grep -c -E '"type"[[:space:]]*:' "$output_file" 2>/dev/null) || _tl_count=1
     [[ "$_tl_count" -gt 1 ]] || return 0
 
-    # STREAM-2: Count only top-level result objects — subagent results contain a
-    # subagent or parent_tool_use_id field and should not trigger multi-task warnings
+    # Count only top-level result objects — subagent results contain a
+    # subagent or parent_tool_use_id field and should not be counted
     local _result_count _toplevel_count
     _result_count=$(grep -c -E '"type"[[:space:]]*:[[:space:]]*"result"' "$output_file" 2>/dev/null) || _result_count=0
     _toplevel_count=$(jq -c 'select(.type == "result") | select(.subagent == null and .parent_tool_use_id == null)' "$output_file" 2>/dev/null | wc -l || echo "$_result_count")
     _toplevel_count=$(echo "$_toplevel_count" | tr -d '[:space:]')
     _toplevel_count=$((_toplevel_count + 0))
 
-    if [[ "$_toplevel_count" -gt 1 ]]; then
-        log_status "WARN" "Stream contains $_toplevel_count top-level result objects (expected 1). Multi-task loop violation detected."
-    elif [[ "$_result_count" -gt 1 ]]; then
-        log_status "INFO" "Stream contains $_result_count result objects ($_toplevel_count top-level, $((_result_count - _toplevel_count)) subagent)"
+    if [[ "$_toplevel_count" -eq 0 ]]; then
+        log_status "ERROR" "Stream extraction failed: no valid result object in stream"
+        return 1
     fi
 
+    # CAPTURE-2: Multi-result is expected for multi-task batches — log at DEBUG, not WARN
+    if [[ "$_toplevel_count" -gt 1 ]]; then
+        log_status "DEBUG" "Stream contains $_toplevel_count top-level result objects — using last (authoritative)"
+    elif [[ "$_result_count" -gt 1 ]]; then
+        log_status "DEBUG" "Stream contains $_result_count result objects ($_toplevel_count top-level, $((_result_count - _toplevel_count)) subagent)"
+    fi
+
+    # Last-writer-wins: take the final top-level result (most authoritative)
     local _extracted_result
-    _extracted_result=$(jq -c 'select(.type == "result")' "$output_file" 2>/dev/null | tail -1)
+    _extracted_result=$(jq -c 'select(.type == "result") | select(.subagent == null and .parent_tool_use_id == null)' "$output_file" 2>/dev/null | tail -1)
 
     if [[ -n "$_extracted_result" ]] && echo "$_extracted_result" | jq -e . >/dev/null 2>&1; then
         local _backup="${output_file%.log}_stream.log"
@@ -689,10 +708,44 @@ ralph_extract_result_from_stream() {
         log_status "INFO" "Stream extraction: isolated result object from JSONL stream (extraction_method=stream)"
     else
         log_status "ERROR" "Stream extraction failed: no valid result object in stream"
+        return 1
     fi
 }
 
-# Post-run: log MCP servers that failed to connect (from system init line in stream-json)
+# CAPTURE-1: Partial result extraction fallback for truncated streams (timeout/SIGTERM)
+ralph_extract_partial_result() {
+    local stream_file="$1"
+    local result_file="$2"
+
+    # Try normal extraction first
+    if ralph_extract_result_from_stream "$stream_file"; then
+        return 0
+    fi
+
+    # Fallback: find the last valid JSON line with type=result
+    local last_result
+    last_result=$(tac "$stream_file" 2>/dev/null | while IFS= read -r line; do
+        if echo "$line" | jq -e '.type == "result"' >/dev/null 2>&1; then
+            echo "$line"
+            break
+        fi
+    done)
+
+    if [[ -n "$last_result" ]]; then
+        echo "$last_result" > "$result_file"
+        log_status "INFO" "Extracted partial result from truncated stream"
+        return 0
+    fi
+
+    # Last resort: count valid NDJSON lines for stats
+    local valid_lines
+    valid_lines=$(jq -c '.' "$stream_file" 2>/dev/null | wc -l)
+    valid_lines=$(echo "$valid_lines" | tr -d '[:space:]')
+    log_status "WARN" "No result object in stream ($valid_lines valid NDJSON lines found)"
+    return 1
+}
+
+# UPKEEP-2: Post-run MCP failure logging with per-session suppression
 ralph_log_failed_mcp_servers_from_output() {
     local output_file=$1
     [[ -f "$output_file" ]] || return 0
@@ -702,7 +755,13 @@ ralph_log_failed_mcp_servers_from_output() {
     local failed_mcps
     failed_mcps=$(echo "$sys_line" | jq -r '[.mcp_servers[]? | select(.status == "failed") | .name] | join(", ")' 2>/dev/null)
     [[ -n "$failed_mcps" && "$failed_mcps" != "null" ]] || return 0
-    log_status "WARN" "MCP servers failed to connect: $failed_mcps"
+
+    # UPKEEP-2: Use per-session suppression instead of logging every time
+    local IFS=','
+    for server in $failed_mcps; do
+        server=$(echo "$server" | tr -d '[:space:]')
+        [[ -n "$server" ]] && ralph_record_mcp_failure "$server"
+    done
 }
 
 # Run all lightweight pre-analyze steps on Claude output
@@ -1104,7 +1163,10 @@ check_claude_version() {
     return 0
 }
 
-# Check for Claude CLI updates and attempt auto-update (Issue #190)
+# UPKEEP-1: Check for Claude CLI updates with post-update verification (Issue #190)
+UPDATE_FAILURE_FILE="${RALPH_DIR}/.update_failures"
+MAX_UPDATE_ATTEMPTS="${MAX_UPDATE_ATTEMPTS:-3}"
+
 check_claude_updates() {
     if [[ "${CLAUDE_AUTO_UPDATE:-true}" != "true" ]]; then
         return 0
@@ -1133,19 +1195,48 @@ check_claude_updates() {
         return 0
     fi
 
+    # UPKEEP-1: Check if we've exceeded update attempts for this version
+    if [[ -f "$UPDATE_FAILURE_FILE" ]]; then
+        local failures
+        failures=$(grep -c "$latest_version" "$UPDATE_FAILURE_FILE" 2>/dev/null || echo "0")
+        if [[ "$failures" -ge "$MAX_UPDATE_ATTEMPTS" ]]; then
+            log_status "DEBUG" "Skipping update to $latest_version (previous $failures failures exceeded threshold)"
+            return 0
+        fi
+    fi
+
     # Auto-update attempt
     log_status "INFO" "Claude CLI update available: $installed_version → $latest_version. Attempting auto-update..."
     local update_output
     if update_output=$(npm update -g @anthropic-ai/claude-code 2>&1); then
+        # UPKEEP-1: Post-update verification — check actual installed version
         local new_version
         new_version=$($CLAUDE_CODE_CMD --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-        log_status "SUCCESS" "Claude CLI updated: $installed_version → ${new_version:-$latest_version}"
-        return 0
+
+        if [[ "$new_version" == "$latest_version" ]]; then
+            log_status "SUCCESS" "Claude CLI updated: $installed_version → $new_version"
+            : > "$UPDATE_FAILURE_FILE" 2>/dev/null  # Clear failures on success
+            return 0
+        elif [[ -n "$new_version" && "$new_version" != "$installed_version" ]]; then
+            log_status "WARN" "Claude CLI updated but to unexpected version: $installed_version → $new_version (expected $latest_version)"
+            return 0
+        else
+            log_status "WARN" "Claude CLI update failed — version unchanged at $installed_version"
+            echo "$(date +%s) $latest_version" >> "$UPDATE_FAILURE_FILE"
+            local fail_count
+            fail_count=$(grep -c "$latest_version" "$UPDATE_FAILURE_FILE" 2>/dev/null || echo "1")
+            if [[ "$fail_count" -ge "$MAX_UPDATE_ATTEMPTS" ]]; then
+                log_status "WARN" "Update to $latest_version has failed $fail_count times — suppressing further attempts"
+                log_status "WARN" "Update manually: npm install -g @anthropic-ai/claude-code@$latest_version"
+            fi
+            return 1
+        fi
     fi
 
     # Auto-update failed — warn with environment-specific guidance
     log_status "WARN" "Claude CLI auto-update failed ($installed_version → $latest_version)"
     [[ -n "$update_output" ]] && log_status "DEBUG" "npm output: $update_output"
+    echo "$(date +%s) $latest_version" >> "$UPDATE_FAILURE_FILE"
     log_status "WARN" "Update manually: npm update -g @anthropic-ai/claude-code"
     log_status "WARN" "In Docker: rebuild your image to include the latest version"
     return 1
@@ -1213,23 +1304,59 @@ check_version_divergence() {
     [[ -z "$win_home" ]] && return 0
 
     local win_script="${win_home}.ralph/ralph_loop.sh"
-    local win_version
-    win_version=$(grep -m1 'RALPH_VERSION=' "$win_script" 2>/dev/null | sed 's/.*RALPH_VERSION="\{0,1\}\([^"]*\)"\{0,1\}/\1/')
+    # XPLAT-1: Strip \r, \n, and whitespace from both version strings before comparison
+    # Windows NTFS files often have \r\n line endings, causing false divergence warnings
+    local wsl_version win_version
+    wsl_version=$(echo "$RALPH_VERSION" | tr -d '\r\n[:space:]')
+    win_version=$(grep -m1 'RALPH_VERSION=' "$win_script" 2>/dev/null | sed 's/.*RALPH_VERSION="\{0,1\}\([^"]*\)"\{0,1\}/\1/' | tr -d '\r\n[:space:]')
 
     if [[ -z "$win_version" ]]; then
+        log_status "DEBUG" "Could not extract Windows Ralph version — skipping divergence check"
         return 0
     fi
 
-    if [[ "$win_version" != "$RALPH_VERSION" ]]; then
-        log_status "WARN" "VERSION DIVERGENCE: WSL=$RALPH_VERSION, Windows=$win_version"
+    if [[ "$wsl_version" != "$win_version" ]]; then
+        log_status "WARN" "VERSION DIVERGENCE: WSL=$wsl_version, Windows=$win_version"
         log_status "WARN" "This can cause silent loop crashes. Sync with:"
         log_status "WARN" "  cp -r '${win_home}.ralph/'* ~/.ralph/ && find ~/.ralph/ -type f -name '*.sh' -exec sed -i 's/\\r\$//' {} +"
+    else
+        log_status "DEBUG" "Version check OK: WSL=$wsl_version, Windows=$win_version"
     fi
 
     # Also check for stale response_analyzer.sh (removed in v1.0.0)
     if [[ -f "$SCRIPT_DIR/lib/response_analyzer.sh" ]]; then
         log_status "WARN" "STALE FILE: lib/response_analyzer.sh exists but was removed in v1.0.0"
         log_status "WARN" "This Ralph install may be outdated. Response analysis is now handled by on-stop.sh hook."
+    fi
+}
+
+# =============================================================================
+# XPLAT-2: Cross-Platform Hook Environment Detection (Phase 13)
+# Validate hook scripts at startup and check platform-specific commands.
+# =============================================================================
+
+ralph_validate_hooks() {
+    local hooks_dir="$RALPH_DIR/hooks"
+    [[ -d "$hooks_dir" ]] || return 0
+
+    local hook
+    for hook in "$hooks_dir"/*.sh; do
+        [[ -f "$hook" ]] || continue
+        if [[ ! -x "$hook" ]]; then
+            log_status "WARN" "Hook not executable: $hook (run: chmod +x $hook)"
+        fi
+    done
+
+    # Check for bare 'powershell' references that will fail in WSL
+    # Exclude platform_detect.sh itself (it contains the helper function definition)
+    if grep -rl 'powershell[^.]' "$hooks_dir"/*.sh 2>/dev/null | grep -qv 'platform_detect.sh'; then
+        # Check if we're in WSL
+        if [[ -f /proc/sys/fs/binfmt_misc/WSLInterop ]] || grep -qi "microsoft" /proc/version 2>/dev/null; then
+            if ! command -v powershell &>/dev/null; then
+                log_status "WARN" "Hooks reference 'powershell' but it's not available in WSL. Use 'powershell.exe' instead."
+                log_status "INFO" "Source platform_detect.sh in your hooks for cross-platform compatibility"
+            fi
+        fi
     fi
 }
 
@@ -1620,6 +1747,58 @@ reset_session() {
     log_status "INFO" "Session reset: $reason"
 }
 
+# =============================================================================
+# CBDECAY-2: Session State Reinitialization After CB Reset (Phase 13)
+# Validates session file has a valid session_id. If empty (after CB trip),
+# reinitializes with timestamps so the next Claude invocation populates it.
+# =============================================================================
+
+ralph_validate_session() {
+    # Skip validation when session continuity is disabled — no session_id expected
+    if [[ "${CLAUDE_USE_CONTINUE:-true}" != "true" ]]; then
+        return 0
+    fi
+
+    if [[ ! -f "$RALPH_SESSION_FILE" ]]; then
+        log_status "INFO" "No session file — will initialize on first successful invocation"
+        return 1
+    fi
+
+    local session_id
+    session_id=$(jq -r '.session_id // ""' "$RALPH_SESSION_FILE" 2>/dev/null)
+
+    if [[ -z "$session_id" ]]; then
+        log_status "WARN" "Session file exists but session_id is empty — reinitializing"
+        ralph_initialize_session
+        return $?
+    fi
+
+    return 0
+}
+
+ralph_initialize_session() {
+    local now
+    now=$(get_iso_timestamp)
+
+    # Write new session with timestamps populated (session_id left empty for lazy init)
+    local tmpfile="${RALPH_SESSION_FILE}.tmp.$$"
+    jq -n \
+        --arg created "$now" \
+        --arg last_used "$now" \
+        --arg reset_reason "reinitialized" \
+        '{
+            session_id: "",
+            created_at: $created,
+            last_used: $last_used,
+            reset_at: $created,
+            reset_reason: $reset_reason
+        }' > "$tmpfile"
+    mv "$tmpfile" "$RALPH_SESSION_FILE"
+    rm -f "$tmpfile" 2>/dev/null  # WSL cleanup
+
+    log_status "INFO" "Session reinitialized at $now (awaiting session_id from next Claude invocation)"
+}
+
 # Log session state transitions to history file
 # Usage: log_session_transition from_state to_state reason loop_number
 # PERF: Reduced from 4 jq calls to 1 (construct + append + trim in single pipeline)
@@ -1855,6 +2034,237 @@ _count_files_changed_since_loop_start() {
     echo "${_files:-0}"
 }
 
+# =============================================================================
+# GUARD-1: Git Diff Baseline Snapshotting (Phase 13)
+# Capture working tree state before each invocation to detect only changes
+# made during the current iteration — not pre-existing uncommitted files.
+# =============================================================================
+
+# Baseline state variables (set by ralph_capture_baseline, read by ralph_has_real_changes)
+RALPH_BASELINE_TREEHASH=""
+RALPH_BASELINE_UNTRACKED_HASH=""
+
+# Capture a hash-based snapshot of the working tree before Claude invocation
+ralph_capture_baseline() {
+    if command -v git &>/dev/null && git rev-parse --git-dir &>/dev/null 2>&1; then
+        RALPH_BASELINE_TREEHASH=$(git diff 2>/dev/null | md5sum 2>/dev/null | cut -d' ' -f1 || echo "none")
+        RALPH_BASELINE_UNTRACKED_HASH=$(git ls-files --others --exclude-standard 2>/dev/null | sort | md5sum 2>/dev/null | cut -d' ' -f1 || echo "none")
+    else
+        RALPH_BASELINE_TREEHASH="none"
+        RALPH_BASELINE_UNTRACKED_HASH="none"
+    fi
+}
+
+# Compare current working tree against baseline to detect real changes
+# Returns 0 if real changes exist, 1 if no new changes
+ralph_has_real_changes() {
+    if [[ "$RALPH_BASELINE_TREEHASH" == "none" && "$RALPH_BASELINE_UNTRACKED_HASH" == "none" ]]; then
+        # No baseline captured (non-git project) — fall back to any-change detection
+        local fallback_files
+        fallback_files=$(_count_files_changed_since_loop_start)
+        [[ "$fallback_files" -gt 0 ]]
+        return $?
+    fi
+
+    local current_tree current_untracked
+    current_tree=$(git diff 2>/dev/null | md5sum 2>/dev/null | cut -d' ' -f1 || echo "none")
+    current_untracked=$(git ls-files --others --exclude-standard 2>/dev/null | sort | md5sum 2>/dev/null | cut -d' ' -f1 || echo "none")
+
+    if [[ "$current_tree" != "$RALPH_BASELINE_TREEHASH" ]] || \
+       [[ "$current_untracked" != "$RALPH_BASELINE_UNTRACKED_HASH" ]]; then
+        return 0  # Real changes exist
+    fi
+
+    # Also check for new commits since loop start
+    local _start_sha="" _current_sha=""
+    [[ -f "$RALPH_DIR/.loop_start_sha" ]] && read -r _start_sha < "$RALPH_DIR/.loop_start_sha" 2>/dev/null
+    _current_sha=$(git rev-parse HEAD 2>/dev/null || echo "")
+    if [[ -n "$_start_sha" && -n "$_current_sha" && "$_start_sha" != "$_current_sha" ]]; then
+        return 0  # New commits made
+    fi
+
+    return 1  # No new changes
+}
+
+# =============================================================================
+# DEPLOY-1: Container Freshness Check Before Integration Tests (Phase 13)
+# Detects stale Docker containers and warns/skips integration tests.
+# =============================================================================
+
+DEPLOY_COMMAND="${DEPLOY_COMMAND:-}"
+DEPLOY_HEALTH_TIMEOUT="${DEPLOY_HEALTH_TIMEOUT:-120}"
+DEPLOY_AUTO_REBUILD="${DEPLOY_AUTO_REBUILD:-false}"
+DEPLOY_SOURCE_DIRS="${DEPLOY_SOURCE_DIRS:-src/ lib/ app/}"
+
+ralph_check_container_freshness() {
+    local project_dir="${1:-.}"
+
+    # Skip if no docker-compose file exists
+    local compose_file=""
+    for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+        if [[ -f "$project_dir/$f" ]]; then
+            compose_file="$project_dir/$f"
+            break
+        fi
+    done
+    [[ -z "$compose_file" ]] && return 0  # Not a Docker project
+
+    # Check Docker is available
+    if ! command -v docker &>/dev/null; then
+        return 0
+    fi
+
+    # Get most recent code change timestamp
+    local last_code_change
+    last_code_change=$(cd "$project_dir" && git log -1 --format=%ct -- $DEPLOY_SOURCE_DIRS 2>/dev/null || echo "0")
+    [[ "$last_code_change" == "0" ]] && return 0  # No git history
+
+    # Get running containers
+    local container_names
+    container_names=$(cd "$project_dir" && docker compose ps --format '{{.Name}}' 2>/dev/null)
+    [[ -z "$container_names" ]] && return 0  # No running containers
+
+    local oldest_start=999999999999
+    while IFS= read -r container; do
+        [[ -z "$container" ]] && continue
+        local start_epoch
+        start_epoch=$(docker inspect --format='{{.State.StartedAt}}' "$container" 2>/dev/null \
+            | xargs -I{} date -d {} +%s 2>/dev/null || echo "0")
+        [[ "$start_epoch" -lt "$oldest_start" ]] && oldest_start=$start_epoch
+    done <<< "$container_names"
+
+    if [[ "$last_code_change" -gt "$oldest_start" ]]; then
+        local age_hours=$(( ($(date +%s) - oldest_start) / 3600 ))
+        log_status "WARN" "Docker containers are stale (started ${age_hours}h ago, code changed since)"
+        log_status "WARN" "Integration/e2e tests may not reflect current code"
+
+        if [[ "$DEPLOY_AUTO_REBUILD" == "true" && -n "$DEPLOY_COMMAND" ]]; then
+            log_status "INFO" "Running deploy command: $DEPLOY_COMMAND"
+            if (cd "$project_dir" && eval "$DEPLOY_COMMAND"); then
+                log_status "SUCCESS" "Containers rebuilt successfully"
+                sleep 5
+                return 0
+            else
+                log_status "ERROR" "Deploy command failed — skipping integration tests"
+                return 1
+            fi
+        elif [[ -n "$DEPLOY_COMMAND" ]]; then
+            log_status "WARN" "Set DEPLOY_AUTO_REBUILD=true in .ralphrc to auto-rebuild"
+            return 1
+        else
+            log_status "WARN" "No DEPLOY_COMMAND configured in .ralphrc — cannot auto-rebuild"
+            log_status "WARN" "Set DEPLOY_COMMAND='docker compose up --build -d' in .ralphrc"
+            return 1  # Signal that integration tests should be skipped
+        fi
+    fi
+
+    return 0  # Containers are fresh
+}
+
+# =============================================================================
+# UPKEEP-2: MCP Server Failure Suppression (Phase 13)
+# Log-once-per-session pattern for MCP failures to reduce noise.
+# =============================================================================
+
+MCP_FAILURE_FILE="${RALPH_DIR}/.mcp_failures_session"
+
+ralph_init_mcp_tracking() {
+    : > "$MCP_FAILURE_FILE" 2>/dev/null
+}
+
+ralph_record_mcp_failure() {
+    local server_name="$1"
+
+    # Check if already recorded this session
+    if grep -q "^${server_name}$" "$MCP_FAILURE_FILE" 2>/dev/null; then
+        log_status "DEBUG" "MCP server '$server_name' still failing (suppressed — logged at session start)"
+        return 0
+    fi
+
+    # First failure for this server this session
+    echo "$server_name" >> "$MCP_FAILURE_FILE"
+    log_status "WARN" "MCP server '$server_name' failed to connect — subsequent failures will be suppressed"
+}
+
+ralph_mcp_failure_summary() {
+    if [[ ! -f "$MCP_FAILURE_FILE" ]] || [[ ! -s "$MCP_FAILURE_FILE" ]]; then
+        return 0
+    fi
+
+    local count servers
+    count=$(wc -l < "$MCP_FAILURE_FILE" | tr -d '[:space:]')
+    servers=$(paste -sd',' "$MCP_FAILURE_FILE" 2>/dev/null)
+
+    log_status "WARN" "MCP servers failed this session ($count): $servers"
+    log_status "INFO" "Check MCP configuration: claude mcp list"
+}
+
+# =============================================================================
+# ADAPTIVE-1: Percentile-Based Adaptive Timeout (Phase 13)
+# Track completion times and compute P95-based adaptive timeout.
+# =============================================================================
+
+LATENCY_LOG="${RALPH_DIR}/.invocation_latencies"
+
+# Record a successful invocation's duration (in seconds)
+ralph_record_latency() {
+    local duration_seconds="$1"
+    echo "$duration_seconds" >> "$LATENCY_LOG"
+
+    # Keep only the last 50 samples to bound file size
+    if [[ -f "$LATENCY_LOG" ]]; then
+        local count
+        count=$(wc -l < "$LATENCY_LOG" 2>/dev/null | tr -d '[:space:]')
+        if [[ "$count" -gt 50 ]]; then
+            tail -50 "$LATENCY_LOG" > "${LATENCY_LOG}.tmp"
+            mv "${LATENCY_LOG}.tmp" "$LATENCY_LOG"
+            rm -f "${LATENCY_LOG}.tmp" 2>/dev/null
+        fi
+    fi
+}
+
+# Compute adaptive timeout based on P95 of historical completion times
+ralph_compute_adaptive_timeout() {
+    # If adaptive timeout is disabled, use static setting
+    if [[ "${ADAPTIVE_TIMEOUT_ENABLED:-true}" != "true" ]]; then
+        echo "${CLAUDE_TIMEOUT_MINUTES:-15}"
+        return
+    fi
+
+    # Need minimum samples before adapting
+    local sample_count
+    if [[ -f "$LATENCY_LOG" ]]; then
+        sample_count=$(wc -l < "$LATENCY_LOG" 2>/dev/null | tr -d '[:space:]')
+    else
+        sample_count=0
+    fi
+
+    if [[ "$sample_count" -lt "$ADAPTIVE_TIMEOUT_MIN_SAMPLES" ]]; then
+        log_status "DEBUG" "Adaptive timeout: only $sample_count samples (need $ADAPTIVE_TIMEOUT_MIN_SAMPLES) — using static ${CLAUDE_TIMEOUT_MINUTES:-15}m"
+        echo "${CLAUDE_TIMEOUT_MINUTES:-15}"
+        return
+    fi
+
+    # Compute P95
+    local p95_index p95_seconds timeout_seconds timeout_minutes
+    p95_index=$(( (sample_count * 95) / 100 ))
+    [[ "$p95_index" -lt 1 ]] && p95_index=1
+
+    p95_seconds=$(sort -n "$LATENCY_LOG" | sed -n "${p95_index}p")
+    [[ -z "$p95_seconds" ]] && { echo "${CLAUDE_TIMEOUT_MINUTES:-15}"; return; }
+
+    # Apply multiplier
+    timeout_seconds=$((p95_seconds * ADAPTIVE_TIMEOUT_MULTIPLIER))
+    timeout_minutes=$(( (timeout_seconds + 59) / 60 ))  # Round up
+
+    # Clamp to min/max
+    [[ "$timeout_minutes" -lt "$ADAPTIVE_TIMEOUT_MIN_MINUTES" ]] && timeout_minutes=$ADAPTIVE_TIMEOUT_MIN_MINUTES
+    [[ "$timeout_minutes" -gt "$ADAPTIVE_TIMEOUT_MAX_MINUTES" ]] && timeout_minutes=$ADAPTIVE_TIMEOUT_MAX_MINUTES
+
+    log_status "DEBUG" "Adaptive timeout: P95=${p95_seconds}s × ${ADAPTIVE_TIMEOUT_MULTIPLIER} = ${timeout_minutes}m (range: ${ADAPTIVE_TIMEOUT_MIN_MINUTES}-${ADAPTIVE_TIMEOUT_MAX_MINUTES}m, samples: $sample_count)"
+    echo "$timeout_minutes"
+}
+
 # Main execution function
 execute_claude_code() {
     local timestamp=$(date '+%Y-%m-%d_%H-%M-%S')
@@ -1871,9 +2281,23 @@ execute_claude_code() {
     fi
     echo "$loop_start_sha" > "$RALPH_DIR/.loop_start_sha"
 
+    # CBDECAY-2: Validate session before invocation (catches empty session_id after CB reset)
+    ralph_validate_session
+
+    # GUARD-1: Capture working tree baseline before Claude invocation
+    ralph_capture_baseline
+
     log_status "LOOP" "Executing Claude Code (Call $calls_made/$MAX_CALLS_PER_HOUR)"
-    local timeout_seconds=$((CLAUDE_TIMEOUT_MINUTES * 60))
-    log_status "INFO" "⏳ Starting Claude Code execution... (timeout: ${CLAUDE_TIMEOUT_MINUTES}m)"
+
+    # ADAPTIVE-1: Use adaptive timeout if enabled, otherwise static
+    local adaptive_timeout
+    adaptive_timeout=$(ralph_compute_adaptive_timeout)
+    local timeout_seconds=$((adaptive_timeout * 60))
+    log_status "INFO" "⏳ Starting Claude Code execution... (timeout: ${adaptive_timeout}m)"
+
+    # Track invocation start time for latency recording
+    local invocation_start_epoch
+    invocation_start_epoch=$(date +%s)
 
     # Build loop context (always, regardless of session mode)
     local loop_context=""
@@ -2196,7 +2620,7 @@ END {
 
         # Log timeout events explicitly (exit code 124 from portable_timeout)
         if [[ $exit_code -eq 124 ]]; then
-            log_status "WARN" "Claude Code execution timed out after ${CLAUDE_TIMEOUT_MINUTES} minutes"
+            log_status "WARN" "Claude Code execution timed out after ${adaptive_timeout:-$CLAUDE_TIMEOUT_MINUTES} minutes"
         fi
 
         # Log stderr if non-empty, clean up empty stderr files
@@ -2219,17 +2643,15 @@ END {
         echo ""
         echo -e "${PURPLE}━━━━━━━━━━━━━━━━ End of Output ━━━━━━━━━━━━━━━━━━━${NC}"
 
-        # Post-execution stats from stream output (logged for monitoring/ralph.log)
-        local _tool_count
-        _tool_count=$(grep -c '"type":"tool_use"' "$output_file" 2>/dev/null) || _tool_count=0
-        local _agent_count
-        _agent_count=$(grep -c '"subtype":"task_started"' "$output_file" 2>/dev/null) || _agent_count=0
-        local _error_count
-        _error_count=$(grep -c '"is_error":true' "$output_file" 2>/dev/null) || _error_count=0
-        if [[ $_error_count -gt 0 ]]; then
-            log_status "WARN" "Execution stats: Tools=$_tool_count Agents=$_agent_count Errors=$_error_count"
+        # CAPTURE-3: Post-execution stats — strip newlines/whitespace to ensure single-line output
+        local _tool_count _agent_count _error_count
+        _tool_count=$(grep -c '"type":"tool_use"' "$output_file" 2>/dev/null | tr -d '[:space:]') || _tool_count=0
+        _agent_count=$(grep -c '"subtype":"task_started"' "$output_file" 2>/dev/null | tr -d '[:space:]') || _agent_count=0
+        _error_count=$(grep -c '"is_error":true' "$output_file" 2>/dev/null | tr -d '[:space:]') || _error_count=0
+        if [[ ${_error_count:-0} -gt 0 ]]; then
+            log_status "WARN" "Execution stats: Tools=${_tool_count:-0} Agents=${_agent_count:-0} Errors=${_error_count:-0}"
         else
-            log_status "INFO" "Execution stats: Tools=$_tool_count Agents=$_agent_count Errors=$_error_count"
+            log_status "INFO" "Execution stats: Tools=${_tool_count:-0} Agents=${_agent_count:-0} Errors=${_error_count:-0}"
         fi
 
         # Extract session ID from stream-json output for session continuity
@@ -2293,11 +2715,15 @@ END {
         # BACKGROUND MODE: Original behavior with progress monitoring
         if [[ "$use_modern_cli" == "true" ]]; then
             # Modern execution with command array (shell-injection safe)
-            # Execute array directly without bash -c to prevent shell metacharacter interpretation
+            # CAPTURE-1: Use stdbuf -oL for line-buffered output to prevent data loss on SIGTERM
             # stdin must be redirected from /dev/null because newer Claude CLI versions
             # read from stdin even in -p (print) mode, causing SIGTTIN suspension
             # when the process is backgrounded
-            if portable_timeout ${timeout_seconds}s "${CLAUDE_CMD_ARGS[@]}" < /dev/null > "$output_file" 2>&1 &
+            local _stdbuf_prefix=""
+            if command -v stdbuf &>/dev/null; then
+                _stdbuf_prefix="stdbuf -oL"
+            fi
+            if $_stdbuf_prefix portable_timeout ${timeout_seconds}s "${CLAUDE_CMD_ARGS[@]}" < /dev/null > "$output_file" 2>&1 &
             then
                 :  # Continue to wait loop
             else
@@ -2484,6 +2910,17 @@ EOF
             return 3  # Special code for circuit breaker trip
         fi
 
+        # ADAPTIVE-1: Record latency for successful (non-timeout) completions
+        if [[ -n "${invocation_start_epoch:-}" ]]; then
+            local invocation_end_epoch duration_seconds
+            invocation_end_epoch=$(date +%s)
+            duration_seconds=$((invocation_end_epoch - invocation_start_epoch))
+            ralph_record_latency "$duration_seconds"
+        fi
+
+        # CBDECAY-1: Record success for sliding window
+        cb_record_success
+
         return 0
     else
         # Clear progress file on failure
@@ -2494,14 +2931,15 @@ EOF
         if [[ $exit_code -eq 124 ]]; then
             log_status "WARN" "⏱️ Claude Code execution timed out (not an API limit)"
 
-            # Check git for actual changes made during the timed-out execution
-            local timeout_files_changed
-            timeout_files_changed=$(_count_files_changed_since_loop_start)
-
-            if [[ $timeout_files_changed -gt 0 ]]; then
-                # Productive timeout — work was done despite the timeout
-                log_status "INFO" "⏱️ Timeout but $timeout_files_changed file(s) changed — treating iteration as productive"
+            # GUARD-1: Check baseline to detect only changes made during THIS iteration
+            if ralph_has_real_changes; then
+                # Productive timeout — real work was done during this iteration
+                local timeout_files_changed
+                timeout_files_changed=$(_count_files_changed_since_loop_start)
+                log_status "INFO" "⏱️ Timeout but $timeout_files_changed new file(s) changed during this iteration — treating as productive"
                 echo '{"status": "timed_out_productive", "files_changed": '$timeout_files_changed', "timestamp": "'$(date '+%Y-%m-%d %H:%M:%S')'"}' > "$PROGRESS_FILE"
+                # GUARD-2: Reset consecutive timeout counter on productive timeout
+                CONSECUTIVE_TIMEOUT_COUNT=0
 
                 ralph_prepare_claude_output_for_analysis "$output_file"
 
@@ -2527,8 +2965,38 @@ EOF
 
                 return 0
             else
-                # Idle timeout — no work detected
-                log_status "WARN" "⏱️ Timeout with no detectable progress"
+                # GUARD-2: Increment consecutive timeout counter for unproductive timeouts
+                CONSECUTIVE_TIMEOUT_COUNT=$((CONSECUTIVE_TIMEOUT_COUNT + 1))
+                log_status "WARN" "⏱️ Timeout with NO new file changes — iteration was unproductive ($CONSECUTIVE_TIMEOUT_COUNT/$MAX_CONSECUTIVE_TIMEOUTS)"
+
+                if [[ "$CONSECUTIVE_TIMEOUT_COUNT" -ge "$MAX_CONSECUTIVE_TIMEOUTS" ]]; then
+                    log_status "ERROR" "Hit $MAX_CONSECUTIVE_TIMEOUTS consecutive unproductive timeouts — opening circuit breaker"
+                    log_status "ERROR" "Remediation options:"
+                    log_status "ERROR" "  1. Increase timeout: CLAUDE_TIMEOUT_MINUTES=45 in .ralphrc"
+                    log_status "ERROR" "  2. Break down tasks: split large tasks in fix_plan.md"
+                    log_status "ERROR" "  3. Reset and retry: ralph --reset-circuit"
+                    log_status "ERROR" "  4. Check if Claude is stuck: review last claude_output_*.log"
+
+                    # Write halt reason to status.json
+                    echo '{"status": "HALTED", "reason": "consecutive_timeouts", "message": "'"$MAX_CONSECUTIVE_TIMEOUTS"' consecutive unproductive timeouts", "timestamp": "'$(date '+%Y-%m-%d %H:%M:%S')'"}' > "$STATUS_FILE"
+
+                    # Trip the circuit breaker
+                    local total_opens
+                    total_opens=$(jq -r '.total_opens // 0' "$CB_STATE_FILE" 2>/dev/null || echo "0")
+                    total_opens=$((total_opens + 1))
+                    cat > "$CB_STATE_FILE" << CBEOF
+{
+    "state": "$CB_STATE_OPEN",
+    "last_change": "$(get_iso_timestamp)",
+    "opened_at": "$(get_iso_timestamp)",
+    "consecutive_no_progress": $CONSECUTIVE_TIMEOUT_COUNT,
+    "total_opens": $total_opens,
+    "reason": "consecutive_timeouts: $MAX_CONSECUTIVE_TIMEOUTS unproductive timeouts"
+}
+CBEOF
+                    return 3
+                fi
+
                 return 1
             fi
         fi  # end timeout
@@ -2578,6 +3046,12 @@ cleanup() {
         wait "$RALPH_PIPELINE_PID" 2>/dev/null || true
     fi
 
+    # CAPTURE-1: Sync filesystem to flush buffered writes on SIGTERM
+    sync 2>/dev/null || true
+
+    # UPKEEP-2: Emit MCP failure summary at session end
+    ralph_mcp_failure_summary 2>/dev/null || true
+
     if [[ $loop_count -gt 0 ]]; then
         if [[ $trap_exit_code -eq 130 || $trap_exit_code -eq 143 ]]; then
             # SIGINT (130) / SIGTERM (143) — user-initiated stop, not a crash
@@ -2603,6 +3077,43 @@ cleanup() {
 # Set up signal handlers (EXIT fires on ANY exit — normal, crash, or signal)
 trap cleanup SIGINT SIGTERM EXIT
 
+# =============================================================================
+# LOCK-1: Flock-Based Instance Locking (Phase 13)
+# Prevents multiple Ralph instances from running on the same project.
+# Uses flock(2) kernel syscall — atomic, no TOCTOU race, auto-releases on exit.
+# =============================================================================
+
+LOCKFILE="${RALPH_DIR}/.ralph.lock"
+
+acquire_instance_lock() {
+    if ! command -v flock &>/dev/null; then
+        # Fallback for systems without flock (macOS without util-linux)
+        log_status "WARN" "flock not available — instance locking disabled"
+        log_status "WARN" "Install util-linux for concurrent instance prevention"
+        return 0
+    fi
+
+    # Open file descriptor 99 for the lock file (high FD avoids conflicts — BashFAQ/045)
+    exec 99>"$LOCKFILE"
+
+    if ! flock -n 99; then
+        local existing_pid
+        existing_pid=$(cat "$LOCKFILE" 2>/dev/null | head -1)
+        echo "[ERROR] Another Ralph instance is already running (PID: ${existing_pid:-unknown})" >&2
+        echo "[ERROR] Project: $(pwd)" >&2
+        echo "[ERROR] Lock: $LOCKFILE" >&2
+        echo "" >&2
+        echo "If the process is gone, the lock auto-releases. Otherwise:" >&2
+        echo "  kill ${existing_pid:-<pid>}    # Stop the other instance" >&2
+        echo "  ralph --status        # Check current state" >&2
+        exit 1
+    fi
+
+    # Write PID for informational display only (flock manages actual locking)
+    echo $$ > "$LOCKFILE"
+    log_status "INFO" "Acquired instance lock (PID: $$)"
+}
+
 # Global variable for loop count (needed by cleanup function)
 loop_count=0
 
@@ -2622,6 +3133,9 @@ main() {
         fi
     fi
 
+    # LOCK-1: Acquire instance lock (prevents concurrent Ralph instances on same project)
+    acquire_instance_lock
+
     # Validate Claude Code CLI is available before starting
     if ! validate_claude_command; then
         log_status "ERROR" "Claude Code CLI not found: $CLAUDE_CODE_CMD"
@@ -2637,6 +3151,12 @@ main() {
 
     # Setup agent teams if enabled (Phase 4 — Experimental)
     setup_teams
+
+    # UPKEEP-2: Initialize MCP failure tracking for this session
+    ralph_init_mcp_tracking
+
+    # XPLAT-2: Validate hooks at startup
+    ralph_validate_hooks
 
     log_status "SUCCESS" "🚀 Ralph loop starting with Claude Code"
     log_status "INFO" "Max calls per hour: $MAX_CALLS_PER_HOUR"
@@ -2909,6 +3429,8 @@ main() {
         
         if [ $exec_result -eq 0 ]; then
             update_status "$loop_count" "$(_read_call_count)" "completed" "success"
+            # GUARD-2: Reset consecutive timeout counter on successful completion
+            CONSECUTIVE_TIMEOUT_COUNT=0
 
             # Brief pause between successful executions (reduced from 5s in v1.8.5)
             sleep 2
@@ -3095,6 +3617,18 @@ while [[ $# -gt 0 ]]; do
                 cat "$STATUS_FILE" | jq . 2>/dev/null || cat "$STATUS_FILE"
             else
                 echo "No status file found. Ralph may not be running."
+            fi
+            # LOCK-1: Show instance lock status
+            if [[ -f "$LOCKFILE" ]]; then
+                local lock_pid
+                lock_pid=$(cat "$LOCKFILE" 2>/dev/null | head -1)
+                if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+                    echo "Instance: RUNNING (PID: $lock_pid)"
+                else
+                    echo "Instance: NOT RUNNING (stale lock — will auto-release)"
+                fi
+            else
+                echo "Instance: NOT RUNNING"
             fi
             exit 0
             ;;

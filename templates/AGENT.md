@@ -37,6 +37,19 @@ npm run build
 cargo build --release
 ```
 
+## Deploy (for QA)
+
+```bash
+# Rebuild and restart containers (if Docker project):
+docker compose up --build -d
+
+# Wait for health:
+docker compose ps
+
+# Check logs:
+docker compose logs --tail=20
+```
+
 ## Development Server
 ```bash
 # Start development server
