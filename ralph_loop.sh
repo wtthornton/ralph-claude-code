@@ -1985,10 +1985,11 @@ execute_claude_code() {
     if (line ~ /"text_delta"/) {
         txt = line
         sub(/.*"text":"/, "", txt)
-        sub(/"[}]*$/, "", txt)
+        gsub(/\\"/, "\001", txt)
+        sub(/".*/, "", txt)
+        gsub(/\001/, "\"", txt)
         gsub(/\\n/, "\n", txt)
         gsub(/\\t/, "\t", txt)
-        gsub(/\\"/, "\"", txt)
         gsub(/\\\\/, "\\", txt)
         printf "%s", txt
         fflush()
@@ -2010,8 +2011,9 @@ execute_claude_code() {
     if (it && line ~ /"input_json_delta"/) {
         pj = line
         sub(/.*"partial_json":"/, "", pj)
-        sub(/"[}]*$/, "", pj)
-        gsub(/\\"/, "\"", pj)
+        gsub(/\\"/, "\001", pj)
+        sub(/".*/, "", pj)
+        gsub(/\001/, "\"", pj)
         gsub(/\\\\/, "\\", pj)
         ti = ti pj
         next
