@@ -1225,7 +1225,7 @@ check_version_divergence() {
     if [[ "$win_version" != "$RALPH_VERSION" ]]; then
         log_status "WARN" "VERSION DIVERGENCE: WSL=$RALPH_VERSION, Windows=$win_version"
         log_status "WARN" "This can cause silent loop crashes. Sync with:"
-        log_status "WARN" "  cp '${win_script}' ~/.ralph/ralph_loop.sh && sed -i 's/\\r\$//' ~/.ralph/ralph_loop.sh"
+        log_status "WARN" "  cp -r '${win_home}.ralph/'* ~/.ralph/ && find ~/.ralph/ -type f -name '*.sh' -exec sed -i 's/\\r\$//' {} +"
     fi
 
     # Also check for stale response_analyzer.sh (removed in v1.0.0)
@@ -2551,7 +2551,11 @@ cleanup() {
     fi
 
     if [[ $loop_count -gt 0 ]]; then
-        if [[ $trap_exit_code -ne 0 ]]; then
+        if [[ $trap_exit_code -eq 130 || $trap_exit_code -eq 143 ]]; then
+            # SIGINT (130) / SIGTERM (143) — user-initiated stop, not a crash
+            log_status "INFO" "Ralph stopped by signal (exit code: $trap_exit_code)"
+            update_status "$loop_count" "$(_read_call_count)" "stopped" "signal" "exit_code_$trap_exit_code"
+        elif [[ $trap_exit_code -ne 0 ]]; then
             log_status "ERROR" "Ralph loop crashed (exit code: $trap_exit_code)"
             update_status "$loop_count" "$(_read_call_count)" "crashed" "error" "exit_code_$trap_exit_code"
             # Record crash for startup detection
@@ -2678,17 +2682,42 @@ main() {
     echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}' > "$EXIT_SIGNALS_FILE"
     log_status "INFO" "Reset exit signals for fresh start"
 
-    # Reset per-session circuit breaker counters (preserve OPEN/CLOSED state and thresholds)
+    # Reset circuit breaker for new session
     if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
-        if jq '.consecutive_no_progress = 0 |
-            .consecutive_same_error = 0 |
-            .consecutive_permission_denials = 0 |
-            .current_loop = 0 |
-            .last_progress_loop = 0' \
-            "$RALPH_DIR/.circuit_breaker_state" > "${RALPH_DIR}/.circuit_breaker_state.tmp" 2>/dev/null && \
-            mv "${RALPH_DIR}/.circuit_breaker_state.tmp" "$RALPH_DIR/.circuit_breaker_state"
-        then
-            log_status "INFO" "Reset circuit breaker counters for new session"
+        if [[ -f "$RALPH_DIR/.last_crash_code" ]]; then
+            # Genuine crash — preserve OPEN/CLOSED state, only reset counters
+            if jq '.consecutive_no_progress = 0 |
+                .consecutive_same_error = 0 |
+                .consecutive_permission_denials = 0 |
+                .current_loop = 0 |
+                .last_progress_loop = 0' \
+                "$RALPH_DIR/.circuit_breaker_state" > "${RALPH_DIR}/.circuit_breaker_state.tmp" 2>/dev/null && \
+                mv "${RALPH_DIR}/.circuit_breaker_state.tmp" "$RALPH_DIR/.circuit_breaker_state"
+            then
+                log_status "INFO" "Reset circuit breaker counters for new session (state preserved after crash)"
+            fi
+        else
+            # Clean restart (signal exit or normal exit) — reset to CLOSED
+            local prev_state
+            prev_state=$(jq -r '.state // "CLOSED"' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "CLOSED")
+            if jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%SZ)" \
+                '.state = "CLOSED" |
+                .consecutive_no_progress = 0 |
+                .consecutive_same_error = 0 |
+                .consecutive_permission_denials = 0 |
+                .current_loop = 0 |
+                .last_progress_loop = 0 |
+                .last_change = $ts |
+                .reason = "Fresh start (clean restart)"' \
+                "$RALPH_DIR/.circuit_breaker_state" > "${RALPH_DIR}/.circuit_breaker_state.tmp" 2>/dev/null && \
+                mv "${RALPH_DIR}/.circuit_breaker_state.tmp" "$RALPH_DIR/.circuit_breaker_state"
+            then
+                if [[ "$prev_state" != "CLOSED" ]]; then
+                    log_status "INFO" "Circuit breaker reset to CLOSED (was $prev_state, clean restart)"
+                else
+                    log_status "INFO" "Reset circuit breaker for new session"
+                fi
+            fi
         fi
     fi
 
