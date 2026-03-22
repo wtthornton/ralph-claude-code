@@ -1792,8 +1792,14 @@ build_claude_command() {
         fi
 
         # In agent mode: no --allowedTools (agent definition handles it),
-        # no --resume (agent memory replaces session continuity),
-        # no -p (agent definition IS the prompt)
+        # no --resume (agent memory replaces session continuity).
+        # Still need -p with prompt content — --output-format json implies
+        # --print mode which requires explicit input.
+        if [[ -f "$prompt_file" ]]; then
+            local prompt_content
+            prompt_content=$(cat "$prompt_file")
+            CLAUDE_CMD_ARGS+=("-p" "$prompt_content")
+        fi
         log_status "INFO" "Using agent mode: --agent ${RALPH_AGENT_NAME:-ralph}"
         return 0
     fi
