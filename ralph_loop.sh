@@ -16,8 +16,13 @@ source "$SCRIPT_DIR/lib/timeout_utils.sh" || { echo "FATAL: Failed to source lib
 source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source lib/circuit_breaker.sh" >&2; exit 1; }
 # file_protection.sh removed — file protection handled by PreToolUse hooks (protect-ralph-files.sh, validate-command.sh)
 
+# Optional library modules (Phase 8+) — fail-open if not present
+[[ -f "$SCRIPT_DIR/lib/metrics.sh" ]] && source "$SCRIPT_DIR/lib/metrics.sh"
+[[ -f "$SCRIPT_DIR/lib/notifications.sh" ]] && source "$SCRIPT_DIR/lib/notifications.sh"
+[[ -f "$SCRIPT_DIR/lib/backup.sh" ]] && source "$SCRIPT_DIR/lib/backup.sh"
+
 # Version
-RALPH_VERSION="1.2.0"
+RALPH_VERSION="1.8.1"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -105,9 +110,11 @@ MAX_CONSECUTIVE_TEST_LOOPS=3
 MAX_CONSECUTIVE_DONE_SIGNALS=2
 TEST_PERCENTAGE_THRESHOLD=30  # If more than 30% of recent loops are test-only, flag it
 
-# .ralphrc configuration file
+# Configuration files
 RALPHRC_FILE=".ralphrc"
 RALPHRC_LOADED=false
+JSON_CONFIG_FILE="ralph.config.json"
+JSON_CONFIG_LOADED=false
 
 # load_ralphrc - Load project-specific configuration from .ralphrc
 #
@@ -172,6 +179,204 @@ load_ralphrc() {
 
     RALPHRC_LOADED=true
     return 0
+}
+
+# load_json_config - Load JSON configuration from ralph.config.json
+#
+# JSON config takes precedence over .ralphrc when both exist.
+# Environment variables still override JSON config.
+# Requires jq for parsing.
+#
+load_json_config() {
+    if [[ ! -f "$JSON_CONFIG_FILE" ]]; then
+        return 0
+    fi
+
+    # Check jq availability
+    if ! command -v jq &>/dev/null; then
+        log_status "WARN" "ralph.config.json found but jq not installed — skipping JSON config"
+        return 0
+    fi
+
+    # Validate JSON
+    if ! jq empty "$JSON_CONFIG_FILE" 2>/dev/null; then
+        log_status "WARN" "ralph.config.json is invalid JSON — skipping"
+        return 0
+    fi
+
+    # Read values (JSON overrides .ralphrc)
+    local val
+
+    val=$(jq -r '.projectName // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && PROJECT_NAME="$val"
+
+    val=$(jq -r '.projectType // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && PROJECT_TYPE="$val"
+
+    val=$(jq -r '.maxCallsPerHour // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && MAX_CALLS_PER_HOUR="$val"
+
+    val=$(jq -r '.timeoutMinutes // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && CLAUDE_TIMEOUT_MINUTES="$val"
+
+    val=$(jq -r '.outputFormat // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && CLAUDE_OUTPUT_FORMAT="$val"
+
+    val=$(jq -r 'if .allowedTools then (.allowedTools | join(",")) else empty end' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && CLAUDE_ALLOWED_TOOLS="$val"
+
+    val=$(jq -r '.sessionContinuity // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && CLAUDE_USE_CONTINUE="$val"
+
+    val=$(jq -r '.sessionExpiryHours // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && CLAUDE_SESSION_EXPIRY_HOURS="$val"
+
+    val=$(jq -r '.cbNoProgressThreshold // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && CB_NO_PROGRESS_THRESHOLD="$val"
+
+    val=$(jq -r '.cbCooldownMinutes // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && CB_COOLDOWN_MINUTES="$val"
+
+    val=$(jq -r '.cbAutoReset // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && CB_AUTO_RESET="$val"
+
+    val=$(jq -r '.logMaxSizeMb // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && LOG_MAX_SIZE_MB="$val"
+
+    val=$(jq -r '.logMaxFiles // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && LOG_MAX_FILES="$val"
+
+    val=$(jq -r '.logMaxOutputFiles // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && LOG_MAX_OUTPUT_FILES="$val"
+
+    val=$(jq -r '.dryRun // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && DRY_RUN="$val"
+
+    val=$(jq -r '.claudeAutoUpdate // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && CLAUDE_AUTO_UPDATE="$val"
+
+    val=$(jq -r '.verbose // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && VERBOSE_PROGRESS="$val"
+
+    val=$(jq -r '.agentName // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_AGENT_NAME="$val"
+
+    val=$(jq -r '.useAgent // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_USE_AGENT="$val"
+
+    val=$(jq -r '.enableTeams // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_ENABLE_TEAMS="$val"
+
+    val=$(jq -r '.maxTeammates // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_MAX_TEAMMATES="$val"
+
+    # Notification settings (Phase 8)
+    val=$(jq -r '.notifications.webhookUrl // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_WEBHOOK_URL="$val"
+
+    val=$(jq -r '.notifications.sound // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_NOTIFY_SOUND="$val"
+
+    # GitHub settings (Phase 10)
+    val=$(jq -r '.github.autoCloseIssues // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_AUTO_CLOSE_ISSUES="$val"
+
+    val=$(jq -r '.github.taskLabel // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && GITHUB_TASK_LABEL="$val"
+
+    # Sandbox settings (Phase 11)
+    val=$(jq -r '.sandbox.required // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_SANDBOX_REQUIRED="$val"
+
+    val=$(jq -r '.sandbox.cpuLimit // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_SANDBOX_CPU_LIMIT="$val"
+
+    val=$(jq -r '.sandbox.memoryLimit // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_SANDBOX_MEMORY_LIMIT="$val"
+
+    # Backup settings (Phase 8)
+    val=$(jq -r '.backup.maxBackups // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
+    [[ -n "$val" ]] && RALPH_MAX_BACKUPS="$val"
+
+    # Restore env overrides (same pattern as load_ralphrc)
+    [[ -n "$_env_MAX_CALLS_PER_HOUR" ]] && MAX_CALLS_PER_HOUR="$_env_MAX_CALLS_PER_HOUR"
+    [[ -n "$_env_CLAUDE_TIMEOUT_MINUTES" ]] && CLAUDE_TIMEOUT_MINUTES="$_env_CLAUDE_TIMEOUT_MINUTES"
+    [[ -n "$_env_CLAUDE_OUTPUT_FORMAT" ]] && CLAUDE_OUTPUT_FORMAT="$_env_CLAUDE_OUTPUT_FORMAT"
+    [[ -n "$_env_CLAUDE_ALLOWED_TOOLS" ]] && CLAUDE_ALLOWED_TOOLS="$_env_CLAUDE_ALLOWED_TOOLS"
+    [[ -n "$_env_CLAUDE_USE_CONTINUE" ]] && CLAUDE_USE_CONTINUE="$_env_CLAUDE_USE_CONTINUE"
+    [[ -n "$_env_CLAUDE_SESSION_EXPIRY_HOURS" ]] && CLAUDE_SESSION_EXPIRY_HOURS="$_env_CLAUDE_SESSION_EXPIRY_HOURS"
+    [[ -n "$_env_VERBOSE_PROGRESS" ]] && VERBOSE_PROGRESS="$_env_VERBOSE_PROGRESS"
+    [[ -n "$_env_CB_COOLDOWN_MINUTES" ]] && CB_COOLDOWN_MINUTES="$_env_CB_COOLDOWN_MINUTES"
+    [[ -n "$_env_CB_AUTO_RESET" ]] && CB_AUTO_RESET="$_env_CB_AUTO_RESET"
+    [[ -n "$_env_CLAUDE_CODE_CMD" ]] && CLAUDE_CODE_CMD="$_env_CLAUDE_CODE_CMD"
+    [[ -n "$_env_CLAUDE_AUTO_UPDATE" ]] && CLAUDE_AUTO_UPDATE="$_env_CLAUDE_AUTO_UPDATE"
+    [[ -n "$_env_DRY_RUN" ]] && DRY_RUN="$_env_DRY_RUN"
+    [[ -n "$_env_LOG_MAX_SIZE_MB" ]] && LOG_MAX_SIZE_MB="$_env_LOG_MAX_SIZE_MB"
+    [[ -n "$_env_LOG_MAX_FILES" ]] && LOG_MAX_FILES="$_env_LOG_MAX_FILES"
+    [[ -n "$_env_LOG_MAX_OUTPUT_FILES" ]] && LOG_MAX_OUTPUT_FILES="$_env_LOG_MAX_OUTPUT_FILES"
+
+    JSON_CONFIG_LOADED=true
+    return 0
+}
+
+# ralph_export_config - Export current config as JSON
+#
+# Usage: ralph config --format json
+#
+ralph_export_config() {
+    local format="${1:-json}"
+    if [[ "$format" != "json" ]]; then
+        echo "Error: Only JSON format supported for config export"
+        return 1
+    fi
+
+    if ! command -v jq &>/dev/null; then
+        # Fallback without jq
+        cat << JSONEOF
+{
+  "projectName": "${PROJECT_NAME:-my-project}",
+  "maxCallsPerHour": ${MAX_CALLS_PER_HOUR:-100},
+  "timeoutMinutes": ${CLAUDE_TIMEOUT_MINUTES:-15},
+  "outputFormat": "${CLAUDE_OUTPUT_FORMAT:-json}",
+  "sessionContinuity": ${CLAUDE_USE_CONTINUE:-true},
+  "cbCooldownMinutes": ${CB_COOLDOWN_MINUTES:-30},
+  "cbAutoReset": ${CB_AUTO_RESET:-false},
+  "dryRun": ${DRY_RUN:-false},
+  "verbose": ${VERBOSE_PROGRESS:-false}
+}
+JSONEOF
+        return 0
+    fi
+
+    jq -n \
+        --arg pn "${PROJECT_NAME:-my-project}" \
+        --arg pt "${PROJECT_TYPE:-unknown}" \
+        --argjson mc "${MAX_CALLS_PER_HOUR:-100}" \
+        --argjson tm "${CLAUDE_TIMEOUT_MINUTES:-15}" \
+        --arg of "${CLAUDE_OUTPUT_FORMAT:-json}" \
+        --argjson sc "${CLAUDE_USE_CONTINUE:-true}" \
+        --argjson seh "${CLAUDE_SESSION_EXPIRY_HOURS:-24}" \
+        --argjson cbcm "${CB_COOLDOWN_MINUTES:-30}" \
+        --argjson cbar "${CB_AUTO_RESET:-false}" \
+        --argjson lms "${LOG_MAX_SIZE_MB:-10}" \
+        --argjson lmf "${LOG_MAX_FILES:-5}" \
+        --argjson dr "${DRY_RUN:-false}" \
+        --argjson v "${VERBOSE_PROGRESS:-false}" \
+        '{
+            projectName: $pn,
+            projectType: $pt,
+            maxCallsPerHour: $mc,
+            timeoutMinutes: $tm,
+            outputFormat: $of,
+            sessionContinuity: $sc,
+            sessionExpiryHours: $seh,
+            cbCooldownMinutes: $cbcm,
+            cbAutoReset: $cbar,
+            logMaxSizeMb: $lms,
+            logMaxFiles: $lmf,
+            dryRun: $dr,
+            verbose: $v
+        }'
 }
 
 # validate_claude_command - Verify the Claude Code CLI is available
@@ -2408,6 +2613,13 @@ main() {
         fi
     fi
 
+    # Load JSON configuration (takes precedence over .ralphrc)
+    if load_json_config; then
+        if [[ "$JSON_CONFIG_LOADED" == "true" ]]; then
+            log_status "INFO" "Loaded configuration from ralph.config.json"
+        fi
+    fi
+
     # Validate Claude Code CLI is available before starting
     if ! validate_claude_command; then
         log_status "ERROR" "Claude Code CLI not found: $CLAUDE_CODE_CMD"
@@ -2745,6 +2957,32 @@ Modern CLI Options (Phase 1.1):
     --log-max-size MB       Set max ralph.log size before rotation (default: $LOG_MAX_SIZE_MB)
     --log-max-files NUM     Set max rotated log files to keep (default: $LOG_MAX_FILES)
 
+SDK Mode (Phase 6 — v1.3.0):
+    --sdk                   Run in SDK mode (Python Agent SDK instead of bash loop)
+    --sdk-model MODEL       Set Claude model for SDK mode (default: claude-sonnet-4-20250514)
+    --sdk-max-turns NUM     Set max turns per iteration in SDK mode (default: 50)
+
+Observability (Phase 8 — v1.5.0):
+    --stats                 Show metrics summary and exit
+    --stats-json            Show metrics as JSON and exit
+    --stats-last PERIOD     Filter metrics by period (e.g., 7d, 30d, 24h)
+    --rollback              Restore latest backup with confirmation
+    --rollback-list         Show available backups
+
+GitHub Issues (Phase 10 — v1.7.0):
+    --issue NUM             Import GitHub issue into fix_plan.md
+    --issues                List open GitHub issues
+    --issue-label LABEL     Filter issues by label
+    --issue-assignee USER   Filter issues by assignee
+    --assess-only           Show issue assessment without importing
+    --batch                 Process multiple issues sequentially
+    --batch-issues NUMS     Comma-separated issue numbers for batch
+    --stop-on-failure       Stop batch processing on first failure
+
+Sandbox (Phase 11 — v1.8.0):
+    --sandbox               Run loop inside Docker container
+    --sandbox-required      Fail if Docker not available (instead of fallback)
+
 Files created:
     - $LOG_DIR/: All execution logs
     - $DOCS_DIR/: Generated documentation
@@ -2911,6 +3149,79 @@ while [[ $# -gt 0 ]]; do
             LOG_MAX_FILES="$2"
             shift 2
             ;;
+        --sdk)
+            RALPH_SDK_MODE=true
+            shift
+            ;;
+        --sdk-model)
+            RALPH_SDK_MODEL="$2"
+            shift 2
+            ;;
+        --sdk-max-turns)
+            RALPH_SDK_MAX_TURNS="$2"
+            shift 2
+            ;;
+        --stats)
+            ralph_show_stats
+            exit 0
+            ;;
+        --stats-json)
+            ralph_show_stats --json
+            exit 0
+            ;;
+        --stats-last)
+            ralph_show_stats --last "$2"
+            shift 2
+            exit 0
+            ;;
+        --rollback)
+            ralph_rollback
+            exit $?
+            ;;
+        --rollback-list)
+            ralph_rollback --list
+            exit 0
+            ;;
+        --issue)
+            RALPH_GITHUB_ISSUE="$2"
+            shift 2
+            ;;
+        --issues)
+            ralph_list_issues
+            exit 0
+            ;;
+        --issue-label)
+            RALPH_ISSUE_LABEL="$2"
+            shift 2
+            ;;
+        --issue-assignee)
+            RALPH_ISSUE_ASSIGNEE="$2"
+            shift 2
+            ;;
+        --assess-only)
+            RALPH_ASSESS_ONLY=true
+            shift
+            ;;
+        --batch)
+            RALPH_BATCH_MODE=true
+            shift
+            ;;
+        --batch-issues)
+            RALPH_BATCH_ISSUES="$2"
+            shift 2
+            ;;
+        --stop-on-failure)
+            RALPH_STOP_ON_FAILURE=true
+            shift
+            ;;
+        --sandbox)
+            RALPH_SANDBOX_MODE=true
+            shift
+            ;;
+        --sandbox-required)
+            RALPH_SANDBOX_REQUIRED=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
             show_help
@@ -2921,6 +3232,70 @@ done
 
 # Only execute when run directly, not when sourced
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # SDK mode dispatch (Phase 6 — v1.3.0)
+    if [[ "${RALPH_SDK_MODE:-false}" == "true" ]]; then
+        SDK_CMD="python -m ralph_sdk"
+        SDK_ARGS=("--project-dir" ".")
+
+        # Forward relevant flags
+        [[ "${DRY_RUN:-false}" == "true" ]] && SDK_ARGS+=("--dry-run")
+        [[ -n "${RALPH_SDK_MODEL:-}" ]] && SDK_ARGS+=("--model" "$RALPH_SDK_MODEL")
+        [[ -n "${RALPH_SDK_MAX_TURNS:-}" ]] && SDK_ARGS+=("--max-turns" "$RALPH_SDK_MAX_TURNS")
+        [[ "${VERBOSE_PROGRESS:-false}" == "true" ]] && SDK_ARGS+=("--verbose")
+        SDK_ARGS+=("--calls" "$MAX_CALLS_PER_HOUR")
+        SDK_ARGS+=("--timeout" "$CLAUDE_TIMEOUT_MINUTES")
+
+        # Check SDK availability
+        RALPH_SDK_DIR="$SCRIPT_DIR/sdk"
+        if [[ -d "$RALPH_SDK_DIR/.venv" ]]; then
+            # Use venv Python
+            if [[ -f "$RALPH_SDK_DIR/.venv/bin/python" ]]; then
+                SDK_CMD="$RALPH_SDK_DIR/.venv/bin/python -m ralph_sdk"
+            elif [[ -f "$RALPH_SDK_DIR/.venv/Scripts/python.exe" ]]; then
+                SDK_CMD="$RALPH_SDK_DIR/.venv/Scripts/python.exe -m ralph_sdk"
+            fi
+        fi
+
+        # Add SDK to PYTHONPATH
+        export PYTHONPATH="$RALPH_SDK_DIR:${PYTHONPATH:-}"
+
+        echo -e "${GREEN}╔══════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║  Ralph SDK Mode (Python Agent SDK)   ║${NC}"
+        echo -e "${GREEN}╚══════════════════════════════════════╝${NC}"
+
+        exec $SDK_CMD "${SDK_ARGS[@]}"
+    fi
+
+    # GitHub issue import (Phase 10 — v1.7.0)
+    if [[ -n "${RALPH_GITHUB_ISSUE:-}" ]]; then
+        source "$SCRIPT_DIR/lib/github_issues.sh" 2>/dev/null || {
+            echo "Error: GitHub issue integration not available. Install Ralph v1.7.0+"
+            exit 1
+        }
+        ralph_import_issue "$RALPH_GITHUB_ISSUE"
+        [[ "${RALPH_ASSESS_ONLY:-false}" == "true" ]] && exit 0
+    fi
+
+    # Batch mode (Phase 10 — v1.7.0)
+    if [[ "${RALPH_BATCH_MODE:-false}" == "true" ]]; then
+        source "$SCRIPT_DIR/lib/github_issues.sh" 2>/dev/null || {
+            echo "Error: GitHub issue integration not available. Install Ralph v1.7.0+"
+            exit 1
+        }
+        ralph_batch_process
+        exit $?
+    fi
+
+    # Sandbox mode (Phase 11 — v1.8.0)
+    if [[ "${RALPH_SANDBOX_MODE:-false}" == "true" ]]; then
+        source "$SCRIPT_DIR/lib/sandbox.sh" 2>/dev/null || {
+            echo "Error: Sandbox module not available. Install Ralph v1.8.0+"
+            exit 1
+        }
+        ralph_sandbox_run "$@"
+        exit $?
+    fi
+
     # If tmux mode requested, set it up
     if [[ "$USE_TMUX" == "true" ]]; then
         check_tmux_available

@@ -1,20 +1,31 @@
 # Ralph Claude Code — Epic & Story Index
 
-> **Generated:** 2026-03-21 | **Total Epics:** 9 | **Total Stories:** 42 (42 Done, 0 Open)
+> **Generated:** 2026-03-21 | **Updated:** 2026-03-21 | **Total Epics:** 15 | **Total Stories:** 66 (66 Done, 0 Open)
 
 ---
 
 ## Execution Plan Overview
 
 ```
+COMPLETED (v1.2.0)
 Phase 0 (DONE)     Phase 0.5 (DONE)    Phase 1 (DONE)       Phase 2 (DONE)       Phase 3 (DONE)       Phase 4 (DONE)       Phase 5 (DONE)
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
 │ RALPH-JSONL  │──▶│ RALPH-LOOP   │──▶│ RALPH-HOOKS  │───▶│RALPH-SUBAGENTS│──▶│ RALPH-SKILLS │──▶│ RALPH-TEAMS  │──▶│RALPH-STREAM  │
 │ 4/4 Done     │   │ 5/5 Done     │   │ 6/6 Done     │    │ 5/5 Done      │   │ 5/5 Done     │   │ 5/5 Done     │   │ 3/3 Done     │
-│              │   │              │   │              │    │               │   │              │   │              │   │              │
 │ RALPH-MULTI  │   │ Critical     │   │ Critical     │    │ Important     │   │ Important    │   │ Nice-to-have │   │ RALPH-WSL    │
 │ 6/6 Done     │   │ P0 Regrssion │   │ Foundation   │    │ Sub-agents    │   │ -1,368 lines │   │ Experimental │   │ 2/2 Done     │
 └──────────────┘   └──────────────┘   └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
+
+COMPLETED (v1.8.0)
+Phase 6 (DONE)     Phase 7 (DONE)      Phase 8 (DONE)       Phase 9 (DONE)       Phase 10 (DONE)      Phase 11 (DONE)
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│ RALPH-SDK    │──▶│ RALPH-CONFIG │   │RALPH-OBSERVE │    │ RALPH-TEST   │    │RALPH-GHISSUE │    │RALPH-SANDBOX │
+│ 4/4 Done     │   │ 3/3 Done     │   │ 3/3 Done     │    │ 7/7 Done     │    │ 5/5 Done     │    │ 2/2 Done     │
+│ High         │   │ Medium       │   │ Medium       │    │ Medium       │    │ Important    │    │ Medium       │
+│ SDK + Studio │   │ JSON + Docs  │   │ Metrics/Notif│    │ Full coverage│    │ GH Standalone│    │ Docker only  │
+└──────────────┘   └──────────────┘   └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
+       │                  │                                       ▲
+       └──────────────────┴───────────────────────────────────────┘ (Phase 9 depends on 6+7)
 ```
 
 ---
@@ -150,19 +161,142 @@ Phase 0 (DONE)     Phase 0.5 (DONE)    Phase 1 (DONE)       Phase 2 (DONE)      
 
 | Priority | Open | Done | Total |
 |----------|------|------|-------|
-| Critical | 0 | 11 | 11 |
-| High | 0 | 4 | 4 |
-| Important | 0 | 15 | 15 |
-| Medium | 0 | 7 | 7 |
+| Critical | 0 | 12 | 12 |
+| High | 0 | 6 | 6 |
+| Important | 0 | 16 | 16 |
+| Medium | 0 | 26 | 26 |
 | Nice-to-have | 0 | 2 | 2 |
-| Defensive/Low | 0 | 3 | 3 |
-| **Total** | **0** | **42** | **42** |
+| Defensive/Low | 0 | 4 | 4 |
+| **Total** | **0** | **66** | **66** |
 
 ## Critical Path
 
-All phases complete. v1.1.0 goals achieved. 42/42 stories done.
+All phases complete (v1.8.0). 66/66 stories done across 15 epics and 12 phases.
+
+### Product Strategy
+
+Ralph is a **standalone product** with full value on its own. TheStudio is the **premium upgrade** with Ralph embedded as Primary Agent.
+
+| Feature Area | Ralph Standalone | TheStudio Premium |
+|-------------|-----------------|-------------------|
+| GitHub Issues | Basic import + filter + lifecycle | Full pipeline: intake, intent, expert routing, QA |
+| Sandbox | Docker only | Docker + E2B + Daytona + Cloudflare + plugins |
+| Metrics | Local JSONL + CLI summary | OTel + NATS + dashboards + Reputation Engine |
+| Notifications | Terminal + webhook | SSE + Slack/email/Discord |
+| Quality Gates | Circuit breaker + exit gate | Verification Gate + QA Agent + expert review |
 
 ```
 Phase 0 ──▶ Phase 0.5 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 4 ──▶ Phase 5
   DONE         DONE          DONE        DONE        DONE        DONE        DONE
+
+Phase 6 ──────────▶ Phase 7 ──▶ Phase 9 (testing depends on 6+7)
+ RALPH-SDK            CONFIG       TEST
+  0/4 Open            0/3 Open     0/7 Open
+
+Phase 8 (independent)   Phase 10 (independent)   Phase 11 (independent)
+ RALPH-OBSERVE           RALPH-GHISSUE            RALPH-SANDBOX
+  0/3 Open               0/5 Open                 0/2 Open
 ```
+
+---
+
+## Phase 6 — Complete (Agent SDK Integration)
+
+### RALPH-SDK: Agent SDK Integration
+**Priority:** High | **Status:** Done | **Target:** v1.3.0 | **Dependencies:** None (foundational)
+**TheStudio:** SDK enables dual-mode — standalone CLI + embedded in TheStudio as Primary Agent
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [SDK-1](story-sdk-1-proof-of-concept.md) | Agent SDK Proof of Concept | High | Medium | **Done** |
+| 2 | [SDK-2](story-sdk-2-custom-tools.md) | Define Custom Tools for Agent SDK | High | Medium | **Done** |
+| 3 | [SDK-3](story-sdk-3-hybrid-architecture.md) | Implement Hybrid CLI/SDK Architecture | Critical | Large | **Done** |
+| 4 | [SDK-4](story-sdk-4-migration-strategy.md) | Document SDK Migration Strategy | Medium | Small | **Done** |
+
+---
+
+## Phase 7 — Complete (Configuration & Infrastructure)
+
+### RALPH-CONFIG: Configuration & Infrastructure
+**Priority:** Medium | **Status:** Done | **Target:** v1.4.0 | **Dependencies:** RALPH-SDK (Phase 6)
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [CONFIG-1](story-config-1-json-configuration.md) | JSON Configuration File Support | Medium | Medium | **Done** |
+| 2 | [CONFIG-2](story-config-2-sdk-installation.md) | Update Installation for SDK Support | Medium | Small | **Done** |
+| 3 | [CONFIG-3](story-config-3-cli-sdk-documentation.md) | Create CLI and SDK Documentation | Medium | Medium | **Done** |
+
+---
+
+## Phase 8 — Complete (Observability)
+
+### RALPH-OBSERVE: Metrics, Notifications & Recovery
+**Priority:** Medium | **Status:** Done | **Target:** v1.5.0 | **Dependencies:** None
+**TheStudio:** Lightweight standalone versions. TheStudio provides full OTel + dashboards + Reputation Engine
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [OBSERVE-1](story-observe-1-lightweight-metrics.md) | Lightweight Metrics and Analytics | Medium | Medium | **Done** |
+| 2 | [OBSERVE-2](story-observe-2-notifications.md) | Local Notification System | Medium | Small | **Done** |
+| 3 | [OBSERVE-3](story-observe-3-backup-rollback.md) | State Backup and Rollback | Low | Small | **Done** |
+
+---
+
+## Phase 9 — Complete (Validation Testing)
+
+### RALPH-TEST: Validation Testing
+**Priority:** Medium | **Status:** Done | **Target:** v1.6.0 | **Dependencies:** RALPH-SDK (Phase 6), RALPH-CONFIG (Phase 7)
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [TEST-1](story-test-1-tmux-integration.md) | Implement tmux Integration Tests | Medium | Medium | **Done** |
+| 2 | [TEST-2](story-test-2-monitor-dashboard.md) | Implement Monitor Dashboard Tests | Medium | Medium | **Done** |
+| 3 | [TEST-3](story-test-3-status-update.md) | Implement Status Update Tests | Medium | Small | **Done** |
+| 4 | [TEST-4](story-test-4-cli-enhancements.md) | Implement CLI Enhancement Tests | Medium | Medium | **Done** |
+| 5 | [TEST-5](story-test-5-sdk-integration.md) | Implement SDK Integration Tests | Medium | Large | **Done** |
+| 6 | [TEST-6](story-test-6-backward-compatibility.md) | Implement Backward Compatibility Tests | Medium | Medium | **Done** |
+| 7 | [TEST-7](story-test-7-e2e-full-loop.md) | Implement E2E Full Loop Tests | Medium | Large | **Done** |
+
+---
+
+## Phase 10 — Complete (GitHub Issue Integration — Standalone)
+
+### RALPH-GHISSUE: GitHub Issue Integration
+**Priority:** Important | **Status:** Done | **Target:** v1.7.0 | **Dependencies:** None
+**TheStudio:** Capped scope — lightweight standalone. TheStudio provides full intake pipeline, intent, expert routing
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [GHISSUE-1](story-ghissue-1-plan-import.md) | Plan Import from GitHub Issue | Important | Medium | **Done** |
+| 2 | [GHISSUE-2](story-ghissue-2-completeness-assessment.md) | Issue Completeness Assessment | Medium | Medium | **Done** |
+| 3 | [GHISSUE-3](story-ghissue-3-issue-filtering.md) | GitHub Issue Filtering | Medium | Small | **Done** |
+| 4 | [GHISSUE-4](story-ghissue-4-batch-processing.md) | Batch Processing and Issue Queue | Medium | Medium | **Done** |
+| 5 | [GHISSUE-5](story-ghissue-5-lifecycle-management.md) | Issue Lifecycle Management | Medium | Small | **Done** |
+
+---
+
+## Phase 11 — Complete (Docker Sandbox — Standalone)
+
+### RALPH-SANDBOX: Docker Sandbox Execution
+**Priority:** Medium | **Status:** Done | **Target:** v1.8.0 | **Dependencies:** None
+**TheStudio:** Docker-only standalone. TheStudio provides multi-provider (E2B, Daytona, Cloudflare) + plugin arch
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [SANDBOX-1](story-sandbox-1-sandbox-interface.md) | Sandbox Interface and Docker Integration | Medium | Large | **Done** |
+| 2 | [SANDBOX-2](story-sandbox-2-docker-execution.md) | Docker Sandbox Execution Runner | Medium | Medium | **Done** |
+
+---
+
+## TheStudio Premium — Dropped from Ralph Standalone
+
+The following capabilities are **TheStudio premium only** and will NOT be built into Ralph standalone:
+
+| Dropped Issue | Capability | TheStudio Handles Via |
+|---------------|------------|----------------------|
+| ~~#75~~ | E2B Cloud Sandbox | Execution planes + E2B adapter |
+| ~~#76~~ | Sandbox File Sync (advanced) | Bidirectional sync with conflict handling |
+| ~~#77~~ | Sandbox Security Policies (advanced) | Capability restrictions, audit logging |
+| ~~#78~~ | Generic Sandbox Plugin Architecture | Multi-provider plugin system |
+| ~~#79~~ | Daytona Sandbox | Execution planes + Daytona adapter |
+| ~~#80~~ | Cloudflare Sandbox | Execution planes + Cloudflare adapter |

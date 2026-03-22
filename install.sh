@@ -95,6 +95,24 @@ check_dependencies() {
         log "WARN" "tmux not found. Install for integrated monitoring: apt-get install tmux / brew install tmux"
     fi
 
+    # Check Python 3.12+ (optional, for SDK mode)
+    if command -v python3 &>/dev/null; then
+        local py_version
+        py_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)
+        if [[ -n "$py_version" ]]; then
+            local py_major py_minor
+            py_major=$(echo "$py_version" | cut -d. -f1)
+            py_minor=$(echo "$py_version" | cut -d. -f2)
+            if [[ "$py_major" -ge 3 ]] && [[ "$py_minor" -ge 12 ]]; then
+                log "INFO" "Python $py_version found (SDK mode available)"
+            else
+                log "WARN" "Python $py_version found — SDK mode requires 3.12+ (CLI mode unaffected)"
+            fi
+        fi
+    else
+        log "WARN" "Python 3 not found — SDK mode unavailable (CLI mode unaffected)"
+    fi
+
     log "SUCCESS" "Dependencies check completed"
 }
 
@@ -276,6 +294,124 @@ check_path() {
     fi
 }
 
+# Install SDK (optional, requires Python 3.12+)
+install_sdk() {
+    local sdk_src="$SCRIPT_DIR/sdk"
+    local sdk_dst="$RALPH_HOME/sdk"
+
+    if [[ ! -d "$sdk_src" ]]; then
+        log "INFO" "SDK source not found — skipping SDK installation"
+        return 0
+    fi
+
+    log "INFO" "Installing Ralph SDK..."
+
+    # Copy SDK source
+    mkdir -p "$sdk_dst"
+    cp -r "$sdk_src/ralph_sdk" "$sdk_dst/"
+    cp "$sdk_src/pyproject.toml" "$sdk_dst/" 2>/dev/null || true
+
+    # Create venv if Python 3.12+ is available
+    if command -v python3 &>/dev/null; then
+        local py_version
+        py_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)
+        local py_major py_minor
+        py_major=$(echo "$py_version" | cut -d. -f1)
+        py_minor=$(echo "$py_version" | cut -d. -f2)
+
+        if [[ "$py_major" -ge 3 ]] && [[ "$py_minor" -ge 12 ]]; then
+            if [[ ! -d "$sdk_dst/.venv" ]]; then
+                log "INFO" "Creating Python venv for SDK..."
+                python3 -m venv "$sdk_dst/.venv" 2>/dev/null || {
+                    log "WARN" "Failed to create venv — SDK mode may require manual setup"
+                    return 0
+                }
+            fi
+            log "SUCCESS" "SDK installed with Python venv"
+        else
+            log "INFO" "SDK source copied (Python $py_version — venv requires 3.12+)"
+        fi
+    else
+        log "INFO" "SDK source copied (Python not available — CLI mode only)"
+    fi
+
+    # Create ralph-sdk command wrapper
+    cat > "$INSTALL_DIR/ralph-sdk" << 'SDKEOF'
+#!/bin/bash
+# Ralph SDK - Python Agent SDK Mode
+RALPH_HOME="$HOME/.ralph"
+SDK_DIR="$RALPH_HOME/sdk"
+
+if [[ -f "$SDK_DIR/.venv/bin/python" ]]; then
+    PYTHONPATH="$SDK_DIR" exec "$SDK_DIR/.venv/bin/python" -m ralph_sdk "$@"
+elif [[ -f "$SDK_DIR/.venv/Scripts/python.exe" ]]; then
+    PYTHONPATH="$SDK_DIR" exec "$SDK_DIR/.venv/Scripts/python.exe" -m ralph_sdk "$@"
+elif command -v python3 &>/dev/null; then
+    PYTHONPATH="$SDK_DIR" exec python3 -m ralph_sdk "$@"
+else
+    echo "Error: Python 3.12+ required for SDK mode"
+    echo "Install Python or use CLI mode: ralph (without --sdk)"
+    exit 1
+fi
+SDKEOF
+    chmod +x "$INSTALL_DIR/ralph-sdk"
+
+    # Create ralph-doctor command
+    cat > "$INSTALL_DIR/ralph-doctor" << 'DOCTOREOF'
+#!/bin/bash
+# Ralph Doctor - Verify all dependencies
+echo "Ralph Doctor — Dependency Check"
+echo "================================"
+echo ""
+
+check() {
+    local name=$1
+    local cmd=$2
+    local required=$3
+    if eval "$cmd" &>/dev/null; then
+        local version
+        version=$(eval "$cmd" 2>/dev/null | head -1)
+        echo "  [OK] $name: $version"
+    elif [[ "$required" == "required" ]]; then
+        echo "  [FAIL] $name: NOT FOUND (required)"
+    else
+        echo "  [SKIP] $name: not found (optional)"
+    fi
+}
+
+echo "Core (required for CLI mode):"
+check "Node.js" "node --version" "required"
+check "jq" "jq --version" "required"
+check "git" "git --version" "required"
+check "Claude CLI" "claude --version" "required"
+echo ""
+
+echo "Optional (CLI enhancements):"
+check "tmux" "tmux -V" "optional"
+check "timeout" "timeout --version" "optional"
+echo ""
+
+echo "SDK mode (optional):"
+check "Python 3" "python3 --version" "optional"
+if [[ -d "$HOME/.ralph/sdk/.venv" ]]; then
+    echo "  [OK] SDK venv: $HOME/.ralph/sdk/.venv"
+else
+    echo "  [SKIP] SDK venv: not created"
+fi
+echo ""
+
+echo "Docker sandbox (optional):"
+check "Docker" "docker --version" "optional"
+echo ""
+
+echo "GitHub integration (optional):"
+check "gh CLI" "gh --version" "optional"
+DOCTOREOF
+    chmod +x "$INSTALL_DIR/ralph-doctor"
+
+    return 0
+}
+
 # Main installation
 main() {
     echo "🚀 Installing Ralph for Claude Code globally..."
@@ -286,6 +422,7 @@ main() {
     install_scripts
     install_ralph_loop
     install_setup
+    install_sdk
     check_path
     
     echo ""

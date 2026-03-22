@@ -57,3 +57,23 @@ target/
 
 # Ralph backup directories (created by migration)
 .ralph_backup_*
+
+# Ralph metrics (Phase 8)
+.ralph/metrics/
+
+# Ralph backups (Phase 8)
+.ralph/backups/
+
+# Ralph GitHub issue state (Phase 10)
+.ralph/.github_issue.json
+.ralph/.github_issue_assessment.json
+.ralph/batch_results.json
+
+# SDK virtual environment (Phase 6)
+sdk/.venv/
+sdk/*.egg-info/
+sdk/dist/
+sdk/build/
+
+# Python testing cache
+.pytest_cache/

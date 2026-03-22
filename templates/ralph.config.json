@@ -1,0 +1,69 @@
+{
+  "$schema": "https://raw.githubusercontent.com/frankbria/ralph-claude-code/main/schemas/ralph-config.schema.json",
+  "projectName": "my-project",
+  "projectType": "unknown",
+  "maxCallsPerHour": 100,
+  "timeoutMinutes": 15,
+  "outputFormat": "json",
+  "allowedTools": [
+    "Write", "Read", "Edit",
+    "Bash(git add *)", "Bash(git commit *)", "Bash(git diff *)",
+    "Bash(git log *)", "Bash(git status)", "Bash(git status *)",
+    "Bash(git push *)", "Bash(git pull *)", "Bash(git fetch *)",
+    "Bash(git checkout *)", "Bash(git branch *)", "Bash(git stash *)",
+    "Bash(git merge *)", "Bash(git tag *)", "Bash(git -C *)",
+    "Bash(grep *)", "Bash(find *)", "Bash(npm *)", "Bash(pytest)",
+    "Bash(xargs *)", "Bash(sort *)", "Bash(tee *)", "Bash(rm *)",
+    "Bash(touch *)", "Bash(sed *)", "Bash(awk *)", "Bash(tr *)",
+    "Bash(cut *)", "Bash(dirname *)", "Bash(basename *)",
+    "Bash(realpath *)", "Bash(test *)", "Bash(true)", "Bash(false)",
+    "Bash(sleep *)", "Bash(ls *)", "Bash(cat *)", "Bash(wc *)",
+    "Bash(head *)", "Bash(tail *)", "Bash(mkdir *)", "Bash(cp *)",
+    "Bash(mv *)"
+  ],
+  "sessionContinuity": true,
+  "sessionExpiryHours": 24,
+  "cbNoProgressThreshold": 3,
+  "cbSameErrorThreshold": 5,
+  "cbOutputDeclineThreshold": 70,
+  "cbCooldownMinutes": 30,
+  "cbAutoReset": false,
+  "logMaxSizeMb": 10,
+  "logMaxFiles": 5,
+  "logMaxOutputFiles": 20,
+  "dryRun": false,
+  "claudeAutoUpdate": true,
+  "verbose": false,
+  "agentName": "ralph",
+  "useAgent": true,
+  "enableTeams": false,
+  "maxTeammates": 3,
+  "bgTesting": false,
+  "teammateMode": "tmux",
+  "notifications": {
+    "enabled": false,
+    "os": true,
+    "sound": false,
+    "webhookUrl": ""
+  },
+  "metrics": {
+    "enabled": true,
+    "retentionDays": 90
+  },
+  "backup": {
+    "enabled": true,
+    "maxBackups": 10
+  },
+  "github": {
+    "autoCloseIssues": false,
+    "taskLabel": "ralph-task"
+  },
+  "sandbox": {
+    "enabled": false,
+    "required": false,
+    "cpuLimit": "2",
+    "memoryLimit": "4g",
+    "timeoutMinutes": 60,
+    "networkIsolation": false
+  }
+}

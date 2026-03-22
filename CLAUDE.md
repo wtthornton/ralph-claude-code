@@ -51,8 +51,25 @@ bats tests/unit/test_cli_parsing.bats
 | `wizard_utils.sh` | Interactive prompt utilities (confirm, select, text input) |
 | `date_utils.sh` | Cross-platform date/epoch utilities |
 | `timeout_utils.sh` | Cross-platform timeout command detection (`timeout` on Linux, `gtimeout` on macOS) |
+| `metrics.sh` | Lightweight metrics — monthly JSONL in `.ralph/metrics/`, `ralph --stats` summary (Phase 8) |
+| `notifications.sh` | Local notifications — terminal, OS native, webhook POST, sound (Phase 8) |
+| `backup.sh` | State backup/rollback — auto-snapshots, `ralph --rollback`, max 10 backups (Phase 8) |
+| `github_issues.sh` | GitHub Issue integration — import, assess, filter, batch, lifecycle (Phase 10) |
+| `sandbox.sh` | Docker sandbox — `ralph --sandbox`, container management, signal forwarding (Phase 11) |
 | ~~`response_analyzer.sh`~~ | Removed — response analysis handled by `on-stop.sh` hook → `status.json` |
 | ~~`file_protection.sh`~~ | Removed — file protection handled by PreToolUse hooks |
+
+### SDK (sdk/)
+
+Python Agent SDK for dual-mode operation (Phase 6):
+
+| Module | Purpose |
+|--------|---------|
+| `ralph_sdk/agent.py` | Core agent class — RalphAgent, RalphAgentInterface, TaskInput, TaskResult |
+| `ralph_sdk/config.py` | Configuration loader — .ralphrc, ralph.config.json, environment, with full precedence chain |
+| `ralph_sdk/tools.py` | Custom tools — ralph_status, ralph_rate_check, ralph_circuit_state, ralph_task_update |
+| `ralph_sdk/status.py` | Status management — RalphStatus, CircuitBreakerState (compatible with bash status.json) |
+| `ralph_sdk/__main__.py` | CLI entry point — `ralph --sdk` or `python -m ralph_sdk` |
 
 ### Key Design Patterns
 

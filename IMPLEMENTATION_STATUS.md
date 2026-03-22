@@ -1,10 +1,10 @@
 # Implementation Status Summary
 
 **Last Updated**: 2026-03-21
-**Version**: v1.2.0
-**Overall Status**: All 42 epic stories complete across 9 epics (Phases 0-5). v1.2.0 completes Phase 5 stream parsing and WSL reliability polish.
+**Version**: v1.8.0
+**Overall Status**: All 66 epic stories complete across 15 epics (Phases 0-11). v1.8.0 completes all planned phases including SDK, config, observability, testing, GitHub issues, and Docker sandbox.
 
-> **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count (736+ tests).
+> **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count.
 
 ---
 
@@ -86,6 +86,73 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 
 ---
 
+## Completed: Docker Sandbox (March 2026)
+
+**Epic:** [RALPH-SANDBOX: Docker Sandbox Execution](docs/specs/EPIC-STORY-INDEX.md) (Phase 11) — **Done**
+
+- [x] **SANDBOX-1:** Created `lib/sandbox.sh` module with sandbox_create/status/logs/stop/cleanup/available functions
+- [x] **SANDBOX-2:** `ralph --sandbox` runs loop inside Docker container with signal forwarding, host streaming, graceful fallback
+- [x] Created `Dockerfile.sandbox` (Ubuntu 24.04, Node.js, Python 3, Claude CLI, non-root user)
+
+---
+
+## Completed: GitHub Issue Integration (March 2026)
+
+**Epic:** [RALPH-GHISSUE: GitHub Issue Integration](docs/specs/EPIC-STORY-INDEX.md) (Phase 10) — **Done**
+
+- [x] **GHISSUE-1:** `ralph --issue 42` imports GitHub issue into fix_plan.md (gh CLI or GITHUB_TOKEN)
+- [x] **GHISSUE-2:** Issue completeness assessment on 4 dimensions (problem clarity, repro steps, expected behavior, scope)
+- [x] **GHISSUE-3:** `ralph --issues` with --issue-label and --issue-assignee filters
+- [x] **GHISSUE-4:** `ralph --batch` processes multiple issues sequentially with per-issue results
+- [x] **GHISSUE-5:** Lifecycle management: completion comments, agent:completed/agent:failed labels, optional auto-close
+
+---
+
+## Completed: Validation Testing (March 2026)
+
+**Epic:** [RALPH-TEST: Validation Testing](docs/specs/EPIC-STORY-INDEX.md) (Phase 9) — **Done**
+
+- [x] **TEST-1:** tmux integration tests (session creation, graceful degradation)
+- [x] **TEST-2:** Monitor dashboard tests (loop count, API calls, CB state display)
+- [x] **TEST-3:** Status update tests (field validation, JSON output, staleness, atomic writes)
+- [x] **TEST-4:** CLI enhancement tests (all modern flags: --sdk, --stats, --issue, --sandbox)
+- [x] **TEST-5:** SDK integration tests (Python pytest suite for agent, config, tools, status)
+- [x] **TEST-6:** Backward compatibility tests (.ralphrc versions, status.json, fix_plan format, hooks)
+- [x] **TEST-7:** E2E full loop tests (dry-run, mock CLI, state round-trips)
+
+---
+
+## Completed: Observability (March 2026)
+
+**Epic:** [RALPH-OBSERVE: Metrics, Notifications & Recovery](docs/specs/EPIC-STORY-INDEX.md) (Phase 8) — **Done**
+
+- [x] **OBSERVE-1:** Lightweight metrics — monthly JSONL in `.ralph/metrics/`, `ralph --stats` summary, `--stats-json` for machine-readable
+- [x] **OBSERVE-2:** Notification system — terminal, OS native (notify-send/osascript), webhook POST, terminal bell sound
+- [x] **OBSERVE-3:** State backup/rollback — auto-snapshots before each loop, `ralph --rollback`, max 10 backups
+
+---
+
+## Completed: Configuration & Infrastructure (March 2026)
+
+**Epic:** [RALPH-CONFIG: Configuration & Infrastructure](docs/specs/EPIC-STORY-INDEX.md) (Phase 7) — **Done**
+
+- [x] **CONFIG-1:** `ralph.config.json` support — JSON alternative to .ralphrc, jq parsing in bash, native in SDK, `ralph_export_config()`
+- [x] **CONFIG-2:** SDK installation in `install.sh` — Python 3.12+ detection, venv creation, `ralph-sdk` and `ralph-doctor` commands
+- [x] **CONFIG-3:** CLI reference (`docs/cli-reference.md`) and SDK guide (`docs/sdk-guide.md`)
+
+---
+
+## Completed: Agent SDK Integration (March 2026)
+
+**Epic:** [RALPH-SDK: Agent SDK Integration](docs/specs/EPIC-STORY-INDEX.md) (Phase 6) — **Done**
+
+- [x] **SDK-1:** Python SDK agent replicating core loop (sdk/ralph_sdk/agent.py) — read PROMPT.md → invoke Claude → parse response → check exit → repeat
+- [x] **SDK-2:** Custom tools: ralph_status, ralph_rate_check, ralph_circuit_state, ralph_task_update (sdk/ralph_sdk/tools.py)
+- [x] **SDK-3:** Hybrid architecture — RalphAgentInterface protocol, TaskInput union type, TaskResult/Signal output, `ralph --sdk` dispatch, TheStudio adapter
+- [x] **SDK-4:** Migration strategy document (`docs/sdk-migration-strategy.md`) — CLI/SDK/TheStudio modes, decision matrix, migration paths
+
+---
+
 ## Completed: Stream Parser v2 & WSL Polish (March 2026)
 
 **Epic:** [RALPH-STREAM: Stream Parser v2](docs/specs/epic-stream-parser-v2.md) (Phase 5) — **Done**
@@ -148,53 +215,53 @@ Note: #51 (session expiration) was implemented as part of the session management
 Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (default 24h),
 `get_session_file_age_hours()`, and `init_claude_session()` in ralph_loop.sh.
 
-### Phase 2: Agent SDK Integration (0% Complete)
+### Phase 2: Agent SDK Integration (100% Complete)
 
-- [ ] #32 - Create Agent SDK proof of concept (P2)
-- [ ] #33 - Define custom tools for Agent SDK (P2)
-- [ ] #34 - Implement hybrid CLI/SDK architecture (P2)
-- [ ] #35 - Document SDK migration strategy (P2)
+- [x] #32 - Create Agent SDK proof of concept (P2) — sdk/ralph_sdk/agent.py
+- [x] #33 - Define custom tools for Agent SDK (P2) — sdk/ralph_sdk/tools.py
+- [x] #34 - Implement hybrid CLI/SDK architecture (P2) — RalphAgentInterface, TaskInput/TaskResult, --sdk flag
+- [x] #35 - Document SDK migration strategy (P2) — docs/sdk-migration-strategy.md
 
-### Phase 3: Configuration & Infrastructure (33% Complete)
+### Phase 3: Configuration & Infrastructure (100% Complete)
 
-- [ ] #36 - Add JSON configuration file support (P2)
-- [ ] #37 - Update installation for SDK support (P2)
+- [x] #36 - Add JSON configuration file support (P2) — ralph.config.json, load_json_config(), ralph_export_config()
+- [x] #37 - Update installation for SDK support (P2) — install.sh SDK detection, ralph-sdk and ralph-doctor commands
 - [x] #18 - Implement log rotation feature (P2) — rotate_ralph_log(), cleanup_old_output_logs(), --log-max-size/--log-max-files flags
 - [x] #19 - Implement dry-run mode feature (P2) — --dry-run flag, DRY_RUN .ralphrc config, dry_run_simulate()
 - [x] #20 - Implement config file support (.ralphrc) (P2) — .ralphrc sourced at startup, env overrides, load_ralphrc()
-- [ ] #38 - Create CLI and SDK documentation (P3)
-- [ ] #21 - Implement metrics and analytics (P3)
-- [ ] #22 - Implement notification system (P3)
-- [ ] #23 - Implement backup and rollback system (P3)
+- [x] #38 - Create CLI and SDK documentation (P3) — docs/cli-reference.md, docs/sdk-guide.md
+- [x] #21 - Implement metrics and analytics (P3) — lib/metrics.sh, --stats, monthly JSONL
+- [x] #22 - Implement notification system (P3) — lib/notifications.sh, terminal/OS/webhook/sound
+- [x] #23 - Implement backup and rollback system (P3) — lib/backup.sh, --rollback, auto-snapshots
 
-### Phase 4: Validation Testing (0% Complete)
+### Phase 4: Validation Testing (100% Complete)
 
-- [ ] #14 - Implement tmux integration tests (P2)
-- [ ] #15 - Implement monitor dashboard tests (P2)
-- [ ] #16 - Implement status update tests (P2)
-- [ ] #39 - Implement CLI enhancement tests (P3)
-- [ ] #40 - Implement SDK integration tests (P3)
-- [ ] #41 - Implement backward compatibility tests (P3)
-- [ ] #17 - Implement E2E full loop tests (P3)
+- [x] #14 - Implement tmux integration tests (P2) — tests/unit/test_tmux_integration.bats
+- [x] #15 - Implement monitor dashboard tests (P2) — tests/unit/test_monitor_dashboard.bats
+- [x] #16 - Implement status update tests (P2) — tests/unit/test_status_update.bats
+- [x] #39 - Implement CLI enhancement tests (P3) — tests/unit/test_cli_modern_flags.bats
+- [x] #40 - Implement SDK integration tests (P3) — sdk/tests/test_agent.py, test_config.py, test_tools.py, test_status.py
+- [x] #41 - Implement backward compatibility tests (P3) — tests/unit/test_backward_compat.bats
+- [x] #17 - Implement E2E full loop tests (P3) — tests/integration/test_e2e_loop.bats
 
-### Phase 5: GitHub Issue Integration (0% Complete)
+### Phase 5: GitHub Issue Integration (100% Complete)
 
-- [ ] #69 - Allow plan import from GitHub Issue (P4)
-- [ ] #70 - Assess issue completeness and generate implementation plan (P4)
-- [ ] #71 - Filter and select GitHub issues by metadata (P4)
-- [ ] #72 - Batch processing and issue queue management (P4)
-- [ ] #73 - Issue lifecycle management and completion workflows (P4)
+- [x] #69 - Allow plan import from GitHub Issue (P4) — ralph --issue NUM, lib/github_issues.sh
+- [x] #70 - Assess issue completeness and generate implementation plan (P4) — ralph_assess_issue(), 4-dimension scoring
+- [x] #71 - Filter and select GitHub issues by metadata (P4) — ralph --issues, --issue-label, --issue-assignee
+- [x] #72 - Batch processing and issue queue management (P4) — ralph --batch, --batch-issues, --stop-on-failure
+- [x] #73 - Issue lifecycle management and completion workflows (P4) — ralph_complete_issue(), labels, auto-close
 
-### Phase 6: Sandbox Execution Environments (0% Complete)
+### Phase 6: Sandbox Execution Environments (100% Complete — Docker only)
 
-- [ ] #49 - Sandbox execution environments (umbrella) (P4)
-- [ ] #74 - Local Docker Sandbox Execution (P4)
-- [ ] #75 - E2B Cloud Sandbox Integration (P4)
-- [ ] #76 - Sandbox File Synchronization (P4)
-- [ ] #77 - Sandbox Security and Resource Policies (P4)
-- [ ] #78 - Generic Sandbox Interface and Plugin Architecture (P4)
-- [ ] #79 - Daytona Sandbox Integration (P4)
-- [ ] #80 - Cloudflare Sandbox Integration (P4)
+- [x] #49 - Sandbox execution environments (umbrella) (P4) — lib/sandbox.sh module
+- [x] #74 - Local Docker Sandbox Execution (P4) — ralph --sandbox, Dockerfile.sandbox
+- ~~#75~~ - E2B Cloud Sandbox Integration → TheStudio Premium
+- ~~#76~~ - Sandbox File Synchronization → TheStudio Premium
+- ~~#77~~ - Sandbox Security and Resource Policies → TheStudio Premium
+- ~~#78~~ - Generic Sandbox Interface and Plugin Architecture → TheStudio Premium
+- ~~#79~~ - Daytona Sandbox Integration → TheStudio Premium
+- ~~#80~~ - Cloudflare Sandbox Integration → TheStudio Premium
 
 ---
 
@@ -340,7 +407,7 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 
 ---
 
-**Status**: ✅ 42/42 stories complete (100%). All 9 epics and 5 phases delivered. v1.2.0 released.
+**Status**: ✅ 66/66 stories complete (100%). All 15 epics and 12 phases delivered. v1.8.0 released.
 **Removed** (cumulative): `lib/response_analyzer.sh` (-1042 lines), `lib/file_protection.sh` (-58 lines), simplified `lib/circuit_breaker.sh` (-285 lines). Total: ~1,385 lines of bash removed.
-**Added**: 4 sub-agent definitions, 2 skills, hook-based analysis, session functions inlined.
-**v1.2.0**: Phase 5 complete — stream parser v2 (JSONL as primary path, subagent result filtering, RALPH_STATUS unescaping) + WSL reliability polish (temp file cleanup, child process cleanup).
+**Added** (cumulative): 4 sub-agent definitions, 2 skills, hook-based analysis, Python SDK (4 modules + tests), 4 lib modules (metrics, notifications, backup, github_issues, sandbox), Dockerfile.sandbox, 3 documentation files, JSON config template, 7 new BATS test files.
+**v1.8.0**: All phases complete — SDK integration (Phase 6), JSON config + SDK install + docs (Phase 7), metrics/notifications/backup (Phase 8), comprehensive validation tests (Phase 9), GitHub issue integration (Phase 10), Docker sandbox (Phase 11).

@@ -1,0 +1,52 @@
+# Dockerfile.sandbox — Ralph Docker Sandbox (Phase 11)
+#
+# Provides isolated execution environment for Ralph's autonomous loop.
+# Based on Ubuntu 24.04 with all required dependencies.
+#
+# Build: docker build -t ralph-sandbox -f Dockerfile.sandbox .
+# Run:   ralph --sandbox (or docker run -v $(pwd):/workspace ralph-sandbox)
+
+FROM ubuntu:24.04
+
+LABEL maintainer="Ralph Contributors"
+LABEL description="Ralph autonomous development loop — Docker sandbox"
+LABEL ralph.mcp="true"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV RALPH_IN_SANDBOX=true
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
+    git \
+    jq \
+    tmux \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 22 LTS
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
+# Create non-root user for security
+RUN useradd -m -s /bin/bash ralph
+USER ralph
+
+# Working directory (project mounted here)
+WORKDIR /workspace
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD test -f /workspace/.ralph/status.json || exit 1
+
+# Default: run Ralph loop
+ENTRYPOINT ["bash"]
+CMD ["-c", "if [ -f ralph_loop.sh ]; then bash ralph_loop.sh --live; else ralph --live; fi"]

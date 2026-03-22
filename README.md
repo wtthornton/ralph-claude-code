@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml"><img src="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/version-1.2.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.8.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-736%20passing-green" alt="Tests">
   <a href="https://github.com/frankbria/ralph-claude-code/issues"><img src="https://img.shields.io/github/issues/frankbria/ralph-claude-code" alt="GitHub Issues"></a>
   <a href="https://github.com/hesreallyhim/awesome-claude-code"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome Claude Code"></a>
@@ -276,6 +276,20 @@ my-project/
 | **Git** | Version control |
 | **tmux** | Monitoring dashboard (recommended) |
 | **GNU coreutils** | `timeout` command (macOS: `brew install coreutils`) |
+
+### Windows Users
+
+Ralph is a bash script and requires a Unix shell. On Windows, run Ralph through **WSL** (Windows Subsystem for Linux):
+
+```powershell
+wsl ralph --version          # Check installed version
+wsl ralph --live             # Run with live streaming
+wsl ralph --monitor          # Run with tmux dashboard
+```
+
+> **Note:** Running `ralph` directly from PowerShell or CMD will trigger a "Select an app to open" dialog because the script has no `.exe`/`.cmd` extension. Always use the `wsl ralph` prefix, or use the provided `ralph.cmd` wrapper (see below).
+
+**Optional: Native wrapper** — Copy `ralph.cmd` from the repo root to a directory on your Windows PATH. This lets you run `ralph --live` directly from PowerShell/CMD without the `wsl` prefix.
 
 ## Testing
 
