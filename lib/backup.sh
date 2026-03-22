@@ -2,8 +2,8 @@
 
 # lib/backup.sh — State backup and rollback (Phase 8, OBSERVE-3)
 #
-# Automatic snapshots of .ralph/ state before each loop run.
-# Manual rollback via ralph --rollback.
+# Automatic snapshots of .ralph/ state at epic boundaries (section completions).
+# Mid-epic loops skip backup for performance. Manual rollback via ralph --rollback.
 
 RALPH_MAX_BACKUPS="${RALPH_MAX_BACKUPS:-10}"
 BACKUP_DIR="${RALPH_DIR:-.ralph}/backups"

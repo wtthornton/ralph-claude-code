@@ -101,7 +101,15 @@ The main Ralph agent (Sonnet) handles routine work with task batching (up to 5 s
 
 **Speed optimizations** (v1.8.4+): The main ralph agent runs on Sonnet with `bypassPermissions` mode and `effort: medium` for faster throughput. PostToolUse hooks (`on-file-change.sh`, `on-bash-command.sh`) are disabled to reduce per-tool-call overhead. Safety is maintained via PreToolUse hooks (file protection, command validation) and the `disallowedTools` list.
 
-**Epic-boundary QA** (v1.8.5): QA (ralph-tester, ralph-reviewer) is deferred until an epic boundary — the completion of the last `- [ ]` task under a `##` section in fix_plan.md. Mid-epic loops set `TESTS_STATUS: DEFERRED` and skip sub-agent QA entirely. QA is mandatory before `EXIT_SIGNAL: true` and for LARGE tasks (ralph-architect). This saves 2-5 minutes per skipped QA cycle with zero quality loss — the same tests run, just batched at natural section boundaries.
+**Epic-boundary deferral** (v1.8.5): Multiple expensive operations are deferred until epic boundaries — the completion of the last `- [ ]` task under a `##` section in fix_plan.md:
+- **QA**: ralph-tester and ralph-reviewer skipped mid-epic (set `TESTS_STATUS: DEFERRED`). Mandatory before `EXIT_SIGNAL: true` and for LARGE tasks.
+- **Explorer**: ralph-explorer skipped for consecutive SMALL tasks in the same module. Use Glob/Grep directly instead.
+- **Backups**: State snapshots deferred to epic boundaries instead of every loop.
+- **Batch sizes**: Increased to 8 SMALL / 5 MEDIUM (safe because QA catches regressions at boundaries).
+- **Subprocess batching**: on-stop.sh, exit signal updates, status reads, and JSON config loading all use single jq calls instead of multiple spawns (reduced from ~50 to ~10 jq calls per loop).
+- **Version caching**: Claude CLI version checked once at startup instead of 4 times.
+- **Inter-loop pause**: Reduced from 5s to 2s.
+- **Log rotation**: Every 10 loops instead of every loop.
 
 **Live / JSONL pipeline**: `--live` captures NDJSON via an `awk` stream filter that shows tool names with parameters (file paths, commands, patterns), per-tool elapsed time, sub-agent events, error messages (extracted from `result`/`content` fields on `is_error:true`, truncated to 120 chars), and a summary stats line. The loop copies the full stream, retries `-f` on the output file (WSL2/9P), extracts the last `type: "result"` line when `CLAUDE_USE_CONTINUE` is true, then `ralph_prepare_claude_output_for_analysis` logs permission denials and failed MCP init, and `ralph_extract_result_from_stream` isolates the result object from the JSONL stream (filtering subagent results from the multi-result count).
 

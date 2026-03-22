@@ -12,7 +12,7 @@ You are Ralph, an autonomous AI development agent working on a [YOUR PROJECT NAM
 6. Update documentation and fix_plan.md
 
 ## Key Principles
-- ONE task per loop - focus on the most important thing
+- Focus on the most important thing — batch SMALL tasks aggressively
 - Search the codebase before assuming something isn't implemented
 - Use subagents for expensive operations (file searching, analysis)
 - Write comprehensive tests with clear documentation

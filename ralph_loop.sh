@@ -22,7 +22,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/backup.sh" ]] && source "$SCRIPT_DIR/lib/backup.sh"
 
 # Version
-RALPH_VERSION="1.8.5"
+RALPH_VERSION="1.8.6"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -204,99 +204,78 @@ load_json_config() {
         return 0
     fi
 
-    # Read values (JSON overrides .ralphrc)
+    # PERF: Read ALL config values in a single jq call (was: 28 separate jq spawns)
+    local _config_json
+    _config_json=$(jq -r '{
+      projectName: (.projectName // ""),
+      projectType: (.projectType // ""),
+      maxCallsPerHour: (.maxCallsPerHour // "" | tostring),
+      timeoutMinutes: (.timeoutMinutes // "" | tostring),
+      outputFormat: (.outputFormat // ""),
+      allowedTools: (if .allowedTools then (.allowedTools | join(",")) else "" end),
+      sessionContinuity: (.sessionContinuity // "" | tostring),
+      sessionExpiryHours: (.sessionExpiryHours // "" | tostring),
+      cbNoProgressThreshold: (.cbNoProgressThreshold // "" | tostring),
+      cbCooldownMinutes: (.cbCooldownMinutes // "" | tostring),
+      cbAutoReset: (.cbAutoReset // "" | tostring),
+      logMaxSizeMb: (.logMaxSizeMb // "" | tostring),
+      logMaxFiles: (.logMaxFiles // "" | tostring),
+      logMaxOutputFiles: (.logMaxOutputFiles // "" | tostring),
+      dryRun: (.dryRun // "" | tostring),
+      claudeAutoUpdate: (.claudeAutoUpdate // "" | tostring),
+      verbose: (.verbose // "" | tostring),
+      agentName: (.agentName // ""),
+      useAgent: (.useAgent // "" | tostring),
+      enableTeams: (.enableTeams // "" | tostring),
+      maxTeammates: (.maxTeammates // "" | tostring),
+      webhookUrl: (.notifications.webhookUrl // ""),
+      notifySound: (.notifications.sound // "" | tostring),
+      autoCloseIssues: (.github.autoCloseIssues // "" | tostring),
+      taskLabel: (.github.taskLabel // ""),
+      sandboxRequired: (.sandbox.required // "" | tostring),
+      sandboxCpuLimit: (.sandbox.cpuLimit // ""),
+      sandboxMemoryLimit: (.sandbox.memoryLimit // ""),
+      maxBackups: (.backup.maxBackups // "" | tostring)
+    }' "$JSON_CONFIG_FILE" 2>/dev/null)
+
+    if [[ -z "$_config_json" ]]; then
+        log_status "WARN" "Failed to parse ralph.config.json"
+        return 0
+    fi
+
+    # Apply values (helper to avoid repetition)
+    _jc() { echo "$_config_json" | jq -r ".$1 // empty" 2>/dev/null; }
+
     local val
-
-    val=$(jq -r '.projectName // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && PROJECT_NAME="$val"
-
-    val=$(jq -r '.projectType // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && PROJECT_TYPE="$val"
-
-    val=$(jq -r '.maxCallsPerHour // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && MAX_CALLS_PER_HOUR="$val"
-
-    val=$(jq -r '.timeoutMinutes // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && CLAUDE_TIMEOUT_MINUTES="$val"
-
-    val=$(jq -r '.outputFormat // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && CLAUDE_OUTPUT_FORMAT="$val"
-
-    val=$(jq -r 'if .allowedTools then (.allowedTools | join(",")) else empty end' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && CLAUDE_ALLOWED_TOOLS="$val"
-
-    val=$(jq -r '.sessionContinuity // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && CLAUDE_USE_CONTINUE="$val"
-
-    val=$(jq -r '.sessionExpiryHours // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && CLAUDE_SESSION_EXPIRY_HOURS="$val"
-
-    val=$(jq -r '.cbNoProgressThreshold // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && CB_NO_PROGRESS_THRESHOLD="$val"
-
-    val=$(jq -r '.cbCooldownMinutes // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && CB_COOLDOWN_MINUTES="$val"
-
-    val=$(jq -r '.cbAutoReset // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && CB_AUTO_RESET="$val"
-
-    val=$(jq -r '.logMaxSizeMb // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && LOG_MAX_SIZE_MB="$val"
-
-    val=$(jq -r '.logMaxFiles // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && LOG_MAX_FILES="$val"
-
-    val=$(jq -r '.logMaxOutputFiles // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && LOG_MAX_OUTPUT_FILES="$val"
-
-    val=$(jq -r '.dryRun // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && DRY_RUN="$val"
-
-    val=$(jq -r '.claudeAutoUpdate // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && CLAUDE_AUTO_UPDATE="$val"
-
-    val=$(jq -r '.verbose // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && VERBOSE_PROGRESS="$val"
-
-    val=$(jq -r '.agentName // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_AGENT_NAME="$val"
-
-    val=$(jq -r '.useAgent // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_USE_AGENT="$val"
-
-    val=$(jq -r '.enableTeams // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_ENABLE_TEAMS="$val"
-
-    val=$(jq -r '.maxTeammates // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_MAX_TEAMMATES="$val"
-
-    # Notification settings (Phase 8)
-    val=$(jq -r '.notifications.webhookUrl // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_WEBHOOK_URL="$val"
-
-    val=$(jq -r '.notifications.sound // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_NOTIFY_SOUND="$val"
-
-    # GitHub settings (Phase 10)
-    val=$(jq -r '.github.autoCloseIssues // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_AUTO_CLOSE_ISSUES="$val"
-
-    val=$(jq -r '.github.taskLabel // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && GITHUB_TASK_LABEL="$val"
-
-    # Sandbox settings (Phase 11)
-    val=$(jq -r '.sandbox.required // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_SANDBOX_REQUIRED="$val"
-
-    val=$(jq -r '.sandbox.cpuLimit // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_SANDBOX_CPU_LIMIT="$val"
-
-    val=$(jq -r '.sandbox.memoryLimit // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_SANDBOX_MEMORY_LIMIT="$val"
-
-    # Backup settings (Phase 8)
-    val=$(jq -r '.backup.maxBackups // empty' "$JSON_CONFIG_FILE" 2>/dev/null)
-    [[ -n "$val" ]] && RALPH_MAX_BACKUPS="$val"
+    val=$(_jc projectName);        [[ -n "$val" ]] && PROJECT_NAME="$val"
+    val=$(_jc projectType);        [[ -n "$val" ]] && PROJECT_TYPE="$val"
+    val=$(_jc maxCallsPerHour);    [[ -n "$val" ]] && MAX_CALLS_PER_HOUR="$val"
+    val=$(_jc timeoutMinutes);     [[ -n "$val" ]] && CLAUDE_TIMEOUT_MINUTES="$val"
+    val=$(_jc outputFormat);       [[ -n "$val" ]] && CLAUDE_OUTPUT_FORMAT="$val"
+    val=$(_jc allowedTools);       [[ -n "$val" ]] && CLAUDE_ALLOWED_TOOLS="$val"
+    val=$(_jc sessionContinuity);  [[ -n "$val" ]] && CLAUDE_USE_CONTINUE="$val"
+    val=$(_jc sessionExpiryHours); [[ -n "$val" ]] && CLAUDE_SESSION_EXPIRY_HOURS="$val"
+    val=$(_jc cbNoProgressThreshold); [[ -n "$val" ]] && CB_NO_PROGRESS_THRESHOLD="$val"
+    val=$(_jc cbCooldownMinutes);  [[ -n "$val" ]] && CB_COOLDOWN_MINUTES="$val"
+    val=$(_jc cbAutoReset);        [[ -n "$val" ]] && CB_AUTO_RESET="$val"
+    val=$(_jc logMaxSizeMb);       [[ -n "$val" ]] && LOG_MAX_SIZE_MB="$val"
+    val=$(_jc logMaxFiles);        [[ -n "$val" ]] && LOG_MAX_FILES="$val"
+    val=$(_jc logMaxOutputFiles);  [[ -n "$val" ]] && LOG_MAX_OUTPUT_FILES="$val"
+    val=$(_jc dryRun);             [[ -n "$val" ]] && DRY_RUN="$val"
+    val=$(_jc claudeAutoUpdate);   [[ -n "$val" ]] && CLAUDE_AUTO_UPDATE="$val"
+    val=$(_jc verbose);            [[ -n "$val" ]] && VERBOSE_PROGRESS="$val"
+    val=$(_jc agentName);          [[ -n "$val" ]] && RALPH_AGENT_NAME="$val"
+    val=$(_jc useAgent);           [[ -n "$val" ]] && RALPH_USE_AGENT="$val"
+    val=$(_jc enableTeams);        [[ -n "$val" ]] && RALPH_ENABLE_TEAMS="$val"
+    val=$(_jc maxTeammates);       [[ -n "$val" ]] && RALPH_MAX_TEAMMATES="$val"
+    val=$(_jc webhookUrl);         [[ -n "$val" ]] && RALPH_WEBHOOK_URL="$val"
+    val=$(_jc notifySound);        [[ -n "$val" ]] && RALPH_NOTIFY_SOUND="$val"
+    val=$(_jc autoCloseIssues);    [[ -n "$val" ]] && RALPH_AUTO_CLOSE_ISSUES="$val"
+    val=$(_jc taskLabel);          [[ -n "$val" ]] && GITHUB_TASK_LABEL="$val"
+    val=$(_jc sandboxRequired);    [[ -n "$val" ]] && RALPH_SANDBOX_REQUIRED="$val"
+    val=$(_jc sandboxCpuLimit);    [[ -n "$val" ]] && RALPH_SANDBOX_CPU_LIMIT="$val"
+    val=$(_jc sandboxMemoryLimit); [[ -n "$val" ]] && RALPH_SANDBOX_MEMORY_LIMIT="$val"
+    val=$(_jc maxBackups);         [[ -n "$val" ]] && RALPH_MAX_BACKUPS="$val"
 
     # Restore env overrides (same pattern as load_ralphrc)
     [[ -n "$_env_MAX_CALLS_PER_HOUR" ]] && MAX_CALLS_PER_HOUR="$_env_MAX_CALLS_PER_HOUR"
@@ -820,14 +799,18 @@ update_exit_signals_from_status() {
         return 1
     fi
 
-    # Read status.json fields (written by on-stop.sh hook)
+    # PERF: Read ALL status.json fields in single jq call (was: 6 separate jq spawns)
     local exit_signal status tasks_completed files_modified work_type loop_number
-    exit_signal=$(jq -r '.exit_signal // "false"' "$status_file" 2>/dev/null || echo "false")
-    status=$(jq -r '.status // "UNKNOWN"' "$status_file" 2>/dev/null || echo "UNKNOWN")
-    tasks_completed=$(jq -r '.tasks_completed // 0' "$status_file" 2>/dev/null || echo "0")
-    files_modified=$(jq -r '.files_modified // 0' "$status_file" 2>/dev/null || echo "0")
-    work_type=$(jq -r '.work_type // "UNKNOWN"' "$status_file" 2>/dev/null || echo "UNKNOWN")
-    loop_number=$(jq -r '.loop_count // 0' "$status_file" 2>/dev/null || echo "0")
+    local _status_tsv
+    _status_tsv=$(jq -r '[
+      (.exit_signal // "false"),
+      (.status // "UNKNOWN"),
+      (.tasks_completed // 0 | tostring),
+      (.files_modified // 0 | tostring),
+      (.work_type // "UNKNOWN"),
+      (.loop_count // 0 | tostring)
+    ] | @tsv' "$status_file" 2>/dev/null || echo "false	UNKNOWN	0	0	UNKNOWN	0")
+    IFS=$'\t' read -r exit_signal status tasks_completed files_modified work_type loop_number <<< "$_status_tsv"
 
     # Determine derived flags
     local is_test_only="false"
@@ -839,29 +822,23 @@ update_exit_signals_from_status() {
     local has_progress="false"
     [[ "$files_modified" -gt 0 || "$tasks_completed" -gt 0 ]] && has_progress="true"
 
-    # Read current exit signals
+    # PERF: Read, update, and write exit signals in a single jq call (was: 5 separate jq spawns)
     local signals
-    signals=$(cat "$exit_signals_file" 2>/dev/null || echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}')
-
-    # Update test_only_loops
-    if [[ "$is_test_only" == "true" ]]; then
-        signals=$(echo "$signals" | jq ".test_only_loops += [$loop_number]")
-    elif [[ "$has_progress" == "true" ]]; then
-        signals=$(echo "$signals" | jq '.test_only_loops = []')
-    fi
-
-    # Update done_signals
-    if [[ "$has_completion_signal" == "true" ]]; then
-        signals=$(echo "$signals" | jq ".done_signals += [$loop_number]")
-    fi
-
-    # Update completion_indicators (only when Claude explicitly signals exit)
-    if [[ "$exit_signal" == "true" ]]; then
-        signals=$(echo "$signals" | jq ".completion_indicators += [$loop_number]")
-    fi
-
-    # Keep only last 5 signals (rolling window)
-    signals=$(echo "$signals" | jq '.test_only_loops = .test_only_loops[-5:] | .done_signals = .done_signals[-5:] | .completion_indicators = .completion_indicators[-5:]')
+    signals=$(jq \
+        --argjson loop "$loop_number" \
+        --arg test_only "$is_test_only" \
+        --arg complete "$has_completion_signal" \
+        --arg exit_sig "$exit_signal" \
+        --arg progress "$has_progress" '
+      (if $test_only == "true" then .test_only_loops += [$loop]
+       elif $progress == "true" then .test_only_loops = []
+       else . end) |
+      (if $complete == "true" then .done_signals += [$loop] else . end) |
+      (if $exit_sig == "true" then .completion_indicators += [$loop] else . end) |
+      .test_only_loops = .test_only_loops[-5:] |
+      .done_signals = .done_signals[-5:] |
+      .completion_indicators = .completion_indicators[-5:]
+    ' "$exit_signals_file" 2>/dev/null || echo '{"test_only_loops":[],"done_signals":[],"completion_indicators":[]}')
 
     echo "$signals" > "$exit_signals_file"
     return 0
@@ -872,12 +849,17 @@ log_status_summary() {
     local status_file="${RALPH_DIR}/status.json"
     [[ -f "$status_file" ]] || return 1
 
+    # PERF: Read ALL fields in single jq call (was: 5 separate jq spawns)
     local loop exit_sig files_modified work_type recommendation
-    loop=$(jq -r '.loop_count' "$status_file" 2>/dev/null || echo "?")
-    exit_sig=$(jq -r '.exit_signal' "$status_file" 2>/dev/null || echo "false")
-    files_modified=$(jq -r '.files_modified' "$status_file" 2>/dev/null || echo "0")
-    work_type=$(jq -r '.work_type' "$status_file" 2>/dev/null || echo "UNKNOWN")
-    recommendation=$(jq -r '.recommendation' "$status_file" 2>/dev/null || echo "")
+    local _summary_tsv
+    _summary_tsv=$(jq -r '[
+      (.loop_count // "?" | tostring),
+      (.exit_signal // "false"),
+      (.files_modified // 0 | tostring),
+      (.work_type // "UNKNOWN"),
+      (.recommendation // "")
+    ] | @tsv' "$status_file" 2>/dev/null || echo "?	false	0	UNKNOWN	")
+    IFS=$'\t' read -r loop exit_sig files_modified work_type recommendation <<< "$_summary_tsv"
 
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║           Response Analysis - Loop #$loop                 ║${NC}"
@@ -974,16 +956,18 @@ should_exit_gracefully() {
         return 1  # Don't exit, file doesn't exist
     fi
     
-    local signals=$(cat "$EXIT_SIGNALS_FILE")
-    
-    # Count recent signals (last 5 loops) - with error handling
-    local recent_test_loops
-    local recent_done_signals  
-    local recent_completion_indicators
-    
-    recent_test_loops=$(echo "$signals" | jq '.test_only_loops | length' 2>/dev/null || echo "0")
-    recent_done_signals=$(echo "$signals" | jq '.done_signals | length' 2>/dev/null || echo "0")
-    recent_completion_indicators=$(echo "$signals" | jq '.completion_indicators | length' 2>/dev/null || echo "0")
+    local signals
+    read -r signals < "$EXIT_SIGNALS_FILE" 2>/dev/null || signals='{"test_only_loops":[],"done_signals":[],"completion_indicators":[]}'
+
+    # PERF: Count ALL signal lengths in single jq call (was: 3 separate jq spawns)
+    local recent_test_loops recent_done_signals recent_completion_indicators
+    local _sig_tsv
+    _sig_tsv=$(echo "$signals" | jq -r '[
+      (.test_only_loops | length),
+      (.done_signals | length),
+      (.completion_indicators | length)
+    ] | @tsv' 2>/dev/null || echo "0	0	0")
+    IFS=$'\t' read -r recent_test_loops recent_done_signals recent_completion_indicators <<< "$_sig_tsv"
 
     # Diagnostic logging for exit signal check (Issue #194)
     [[ "${VERBOSE_PROGRESS:-}" == "true" ]] && log_status "DEBUG" "Exit check: test_loops=$recent_test_loops done_signals=$recent_done_signals completion_indicators=$recent_completion_indicators"
@@ -1066,6 +1050,15 @@ should_exit_gracefully() {
 # MODERN CLI HELPER FUNCTIONS (Phase 1.1)
 # =============================================================================
 
+# PERF: Cached Claude CLI version — avoids repeated Node.js launches (was: 4 separate --version calls)
+_CACHED_CLAUDE_VERSION=""
+get_cached_claude_version() {
+    if [[ -z "$_CACHED_CLAUDE_VERSION" ]]; then
+        _CACHED_CLAUDE_VERSION=$($CLAUDE_CODE_CMD --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    fi
+    echo "$_CACHED_CLAUDE_VERSION"
+}
+
 # Compare two semver strings: returns 0 if ver1 >= ver2, 1 if ver1 < ver2
 # Uses sequential major→minor→patch comparison (safe for any patch number)
 compare_semver() {
@@ -1090,7 +1083,7 @@ compare_semver() {
 # Check Claude CLI version for compatibility with modern flags
 check_claude_version() {
     local version
-    version=$($CLAUDE_CODE_CMD --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    version=$(get_cached_claude_version)
 
     if [[ -z "$version" ]]; then
         log_status "WARN" "Cannot detect Claude CLI version, assuming compatible"
@@ -1114,7 +1107,7 @@ check_claude_updates() {
     fi
 
     local installed_version
-    installed_version=$($CLAUDE_CODE_CMD --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    installed_version=$(get_cached_claude_version)
     if [[ -z "$installed_version" ]]; then
         return 0
     fi
@@ -1157,7 +1150,7 @@ check_claude_updates() {
 # Check if the installed Claude CLI supports agent teams (requires v2.1.32+)
 check_teams_support() {
     local version
-    version=$($CLAUDE_CODE_CMD --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    version=$(get_cached_claude_version)
 
     if [[ -z "$version" ]]; then
         return 1
@@ -1410,18 +1403,25 @@ build_loop_context() {
         context+="Remaining tasks: ${incomplete_tasks}. "
     fi
 
-    # Add circuit breaker state
-    if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
-        local cb_state=$(jq -r '.state // "UNKNOWN"' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null)
+    # PERF: Read circuit breaker state and previous summary in single jq call (was: 2 separate jq spawns)
+    if [[ -f "$RALPH_DIR/.circuit_breaker_state" && -f "$RALPH_DIR/status.json" ]]; then
+        local cb_state prev_summary
+        cb_state=$(jq -r '.state // "CLOSED"' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "CLOSED")
+        prev_summary=$(jq -r '.recommendation // "" | .[0:200]' "$RALPH_DIR/status.json" 2>/dev/null || echo "")
         if [[ "$cb_state" != "CLOSED" && "$cb_state" != "null" && -n "$cb_state" ]]; then
             context+="Circuit breaker: ${cb_state}. "
         fi
-    fi
-
-    # Add previous loop summary from status.json (written by on-stop.sh hook)
-    if [[ -f "$RALPH_DIR/status.json" ]]; then
+        if [[ -n "$prev_summary" && "$prev_summary" != "null" ]]; then
+            context+="Previous: ${prev_summary} "
+        fi
+    elif [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
+        local cb_state=$(jq -r '.state // "CLOSED"' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "CLOSED")
+        if [[ "$cb_state" != "CLOSED" && "$cb_state" != "null" && -n "$cb_state" ]]; then
+            context+="Circuit breaker: ${cb_state}. "
+        fi
+    elif [[ -f "$RALPH_DIR/status.json" ]]; then
         local prev_summary
-        prev_summary=$(jq -r '.recommendation // ""' "$RALPH_DIR/status.json" 2>/dev/null | head -c 200)
+        prev_summary=$(jq -r '.recommendation // "" | .[0:200]' "$RALPH_DIR/status.json" 2>/dev/null || echo "")
         if [[ -n "$prev_summary" && "$prev_summary" != "null" ]]; then
             context+="Previous: ${prev_summary} "
         fi
@@ -1755,7 +1755,7 @@ declare -a CLAUDE_CMD_ARGS=()
 # Check if Claude Code CLI supports --agent flag (requires v2.1+)
 check_agent_support() {
     local version
-    version=$($CLAUDE_CODE_CMD --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    version=$(get_cached_claude_version | grep -oE '[0-9]+\.[0-9]+' | head -1)
 
     if [[ -z "$version" ]]; then
         return 1
@@ -2872,8 +2872,10 @@ main() {
             break
         fi
         
-        # Rotate logs periodically (every loop iteration)
-        rotate_ralph_log
+        # Rotate logs periodically (every 10 iterations to reduce stat overhead)
+        if (( loop_count % 10 == 0 )); then
+            rotate_ralph_log
+        fi
 
         # Update status
         local calls_made=$(cat "$CALL_COUNT_FILE" 2>/dev/null || echo "0")
@@ -2893,8 +2895,8 @@ main() {
         if [ $exec_result -eq 0 ]; then
             update_status "$loop_count" "$(cat "$CALL_COUNT_FILE")" "completed" "success"
 
-            # Brief pause between successful executions
-            sleep 5
+            # Brief pause between successful executions (reduced from 5s in v1.8.5)
+            sleep 2
         elif [ $exec_result -eq 3 ]; then
             # Circuit breaker opened
             reset_session "circuit_breaker_trip"
