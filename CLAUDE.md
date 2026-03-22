@@ -91,7 +91,15 @@ Python Agent SDK for dual-mode operation (Phase 6):
 
 **WSL/Windows version divergence detection**: `check_version_divergence()` runs at startup in WSL environments. Compares `RALPH_VERSION` between `~/.ralph/ralph_loop.sh` (WSL) and `/mnt/c/Users/*/.ralph/ralph_loop.sh` (Windows). Warns if versions differ and detects stale `response_analyzer.sh` files.
 
-**Sub-agents**: Three specialized agents (ralph-explorer, ralph-tester, ralph-reviewer) keep search, testing, and review output out of the main context. The main Ralph agent spawns them via `Agent(ralph-explorer, ralph-tester, ralph-reviewer)` allowlist.
+**Sub-agents**: Four specialized agents keep search, testing, review, and complex architecture work out of the main context:
+- **ralph-explorer** (Haiku) — fast codebase search
+- **ralph-tester** (Sonnet, worktree-isolated) — test runner
+- **ralph-reviewer** (Sonnet, read-only) — code review
+- **ralph-architect** (Opus) — complex/architectural tasks with mandatory code review
+
+The main Ralph agent (Sonnet) handles routine work with task batching (up to 5 small / 3 medium tasks per invocation) and delegates LARGE tasks to ralph-architect.
+
+**Speed optimizations** (v1.8.4): The main ralph agent runs on Sonnet with `bypassPermissions` mode and `effort: medium` for faster throughput. PostToolUse hooks (`on-file-change.sh`, `on-bash-command.sh`) are disabled to reduce per-tool-call overhead. Safety is maintained via PreToolUse hooks (file protection, command validation) and the `disallowedTools` list.
 
 **Live / JSONL pipeline**: `--live` captures NDJSON via an `awk` stream filter that shows tool names with parameters (file paths, commands, patterns), per-tool elapsed time, sub-agent events, error messages (extracted from `result`/`content` fields on `is_error:true`, truncated to 120 chars), and a summary stats line. The loop copies the full stream, retries `-f` on the output file (WSL2/9P), extracts the last `type: "result"` line when `CLAUDE_USE_CONTINUE` is true, then `ralph_prepare_claude_output_for_analysis` logs permission denials and failed MCP init, and `ralph_extract_result_from_stream` isolates the result object from the JSONL stream (filtering subagent results from the multi-result count).
 
