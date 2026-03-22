@@ -91,6 +91,8 @@ Python Agent SDK for dual-mode operation (Phase 6):
 
 **WSL/Windows version divergence detection**: `check_version_divergence()` runs at startup in WSL environments. Compares `RALPH_VERSION` between `~/.ralph/ralph_loop.sh` (WSL) and `/mnt/c/Users/*/.ralph/ralph_loop.sh` (Windows). Warns if versions differ and detects stale `response_analyzer.sh` files.
 
+**WSL PowerShell auto-patching (XPLAT-2b)**: `ralph_validate_hooks()` now also inspects the target project's `.claude/settings.json` for hooks calling bare `powershell` (which is unavailable in WSL — requires `powershell.exe`). When detected, Ralph auto-patches the settings file in-place via `sed`, skipping lines that already use `powershell.exe`. This prevents session-start hook errors when running Ralph against Windows-native projects from WSL.
+
 **Sub-agents**: Four specialized agents keep search, testing, review, and complex architecture work out of the main context:
 - **ralph-explorer** (Haiku) — fast codebase search
 - **ralph-tester** (Sonnet, worktree-isolated) — test runner

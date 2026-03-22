@@ -29,15 +29,17 @@ You are a test runner validating Ralph's changes. Your job:
 
 ## Files to Read Before Testing
 
-1. **AGENT.md** — Build, run, and deploy commands for this project
-2. **fix_plan.md** — Current task context (what was changed)
+1. **.ralph/AGENT.md** — Build, run, and deploy commands for this project
+2. **.ralph/fix_plan.md** — Current task context (what was changed)
 3. **pyproject.toml** / **package.json** — Test framework configuration
+
+**Path note:** In worktrees, always use `.ralph/AGENT.md` and `.ralph/fix_plan.md` (not bare `AGENT.md`). These files live in the `.ralph/` directory at the project root.
 
 ## Pre-Test Environment Check
 
 Before running integration or e2e tests, verify the test environment:
 
-1. **Read AGENT.md** for build/deploy/run commands
+1. **Read .ralph/AGENT.md** for build/deploy/run commands
 2. **Check for Docker Compose**: If `docker-compose.yml` or `compose.yml` exists:
    - Run `docker compose ps` to check container status
    - If containers are not running: attempt `docker compose up -d`
@@ -54,7 +56,7 @@ You may receive a DEADLINE_EPOCH in your prompt. If present:
 
 1. **Check remaining time** before each major operation:
    - If < 5 minutes remain: Skip full test suites. Run only `pytest --collect-only` to verify imports.
-   - If < 10 minutes remain: Run unit tests only with `--timeout=30` per test.
+   - If < 10 minutes remain: Run unit tests only. Use `timeout 30 pytest <test>` (shell timeout) instead of `--timeout=30` (requires pytest-timeout plugin).
    - If < 15 minutes remain: Run unit tests with standard timeout.
    - If >= 15 minutes remain: Run full test suite including integration.
 

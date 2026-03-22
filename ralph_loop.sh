@@ -20,6 +20,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/metrics.sh" ]] && source "$SCRIPT_DIR/lib/metrics.sh"
 [[ -f "$SCRIPT_DIR/lib/notifications.sh" ]] && source "$SCRIPT_DIR/lib/notifications.sh"
 [[ -f "$SCRIPT_DIR/lib/backup.sh" ]] && source "$SCRIPT_DIR/lib/backup.sh"
+[[ -f "$SCRIPT_DIR/lib/audit.sh" ]] && source "$SCRIPT_DIR/lib/audit.sh"
 
 # Version
 RALPH_VERSION="1.9.0"
@@ -599,6 +600,21 @@ init_call_tracking() {
     # Initialize circuit breaker
     init_circuit_breaker
 
+}
+
+# FAILSPEC-3: Check for killswitch file sentinel at each loop iteration.
+# Headless/fleet operators can create .ralph/.killswitch to halt the loop.
+# File content (if any) is logged as the stop reason.
+ralph_check_killswitch() {
+    if [[ -f "${RALPH_DIR}/.killswitch" ]]; then
+        local reason
+        reason=$(cat "${RALPH_DIR}/.killswitch" 2>/dev/null || echo "no reason given")
+        reason="${reason:-no reason given}"
+        log_status "CRITICAL" "KILLSWITCH activated: $reason"
+        rm -f "${RALPH_DIR}/.killswitch"
+        return 1
+    fi
+    return 0
 }
 
 # Log function with timestamps and colors
@@ -1355,6 +1371,25 @@ ralph_validate_hooks() {
             if ! command -v powershell &>/dev/null; then
                 log_status "WARN" "Hooks reference 'powershell' but it's not available in WSL. Use 'powershell.exe' instead."
                 log_status "INFO" "Source platform_detect.sh in your hooks for cross-platform compatibility"
+            fi
+        fi
+    fi
+
+    # XPLAT-2b: Check project's .claude/settings.json for bare 'powershell' hook commands
+    # These hooks run at session start and cause errors if powershell isn't on PATH in WSL
+    local project_settings=".claude/settings.json"
+    if [[ -f "$project_settings" ]]; then
+        if [[ -f /proc/sys/fs/binfmt_misc/WSLInterop ]] || grep -qi "microsoft" /proc/version 2>/dev/null; then
+            if ! command -v powershell &>/dev/null; then
+                # Look for "command": "powershell ..." (bare powershell, not powershell.exe)
+                # sed only replaces '"powershell -' so it won't double-patch existing .exe entries
+                if grep -q '"powershell -' "$project_settings" 2>/dev/null; then
+                    log_status "WARN" "Project .claude/settings.json has hooks calling bare 'powershell' which is unavailable in WSL"
+                    log_status "INFO" "Auto-patching: replacing 'powershell' with 'powershell.exe' in $project_settings"
+                    # Only patch bare 'powershell' — skip lines already using 'powershell.exe'
+                    sed -i '/powershell\.exe/!s/"powershell -/"powershell.exe -/g' "$project_settings"
+                    log_status "SUCCESS" "Patched powershell → powershell.exe in project settings"
+                fi
             fi
         fi
     fi
@@ -2941,6 +2976,17 @@ EOF
                 # GUARD-2: Reset consecutive timeout counter on productive timeout
                 CONSECUTIVE_TIMEOUT_COUNT=0
 
+                # ADAPTIVE-1: Record timeout duration as latency sample for productive timeouts
+                # Prevents "coordinated omission" bias where only fast loops are recorded
+                # and slow QA/epic-boundary loops time out without being counted
+                if [[ -n "${invocation_start_epoch:-}" ]]; then
+                    local timeout_end_epoch timeout_duration
+                    timeout_end_epoch=$(date +%s)
+                    timeout_duration=$((timeout_end_epoch - invocation_start_epoch))
+                    ralph_record_latency "$timeout_duration"
+                    log_status "DEBUG" "Recorded productive timeout latency: ${timeout_duration}s (will push adaptive timeout higher)"
+                fi
+
                 ralph_prepare_claude_output_for_analysis "$output_file"
 
                 # Save session ID (fallback already populated by Step 1 if stream was truncated)
@@ -3313,6 +3359,7 @@ main() {
     # Perform initial log rotation at startup
     rotate_ralph_log
     cleanup_old_output_logs
+    ralph_rotate_audit_log 2>/dev/null
 
     # WSL-1: Clean stale temp files from previous runs (cross-fs orphans)
     find "$RALPH_DIR" -name "status.json.*" -mmin +60 -delete 2>/dev/null || true
@@ -3336,11 +3383,23 @@ main() {
         init_call_tracking
 
         log_status "LOOP" "=== Starting Loop #$loop_count (total: #$persistent_loops) ==="
-        
+
+        # FAILSPEC-4: Audit log — loop iteration start
+        ralph_audit "loop_start" "ralph_loop" "begin_iteration" "loop_count=$loop_count,total=$persistent_loops" "started" 2>/dev/null
+
         # File integrity validation removed — PreToolUse hooks handle file protection in real-time
+
+        # FAILSPEC-3: Check killswitch file sentinel before proceeding
+        if ! ralph_check_killswitch; then
+            ralph_audit "killswitch" "operator" "emergency_halt" "killswitch_file_detected" "halted" 2>/dev/null
+            update_status "$loop_count" "$(_read_call_count)" "killswitch" "halted" "killswitch_activated"
+            log_status "ERROR" "KILLSWITCH file detected - emergency halt"
+            break
+        fi
 
         # Check circuit breaker before attempting execution
         if should_halt_execution; then
+            ralph_audit "circuit_breaker" "circuit_breaker" "halt_execution" "state=OPEN,loop_count=$loop_count" "halted" 2>/dev/null
             reset_session "circuit_breaker_open"
             update_status "$loop_count" "$(_read_call_count)" "circuit_breaker_open" "halted" "stagnation_detected"
             log_status "ERROR" "🛑 Circuit breaker has opened - execution halted"
@@ -3395,6 +3454,7 @@ main() {
                 break
             fi
 
+            ralph_audit "exit_decision" "exit_gate" "graceful_exit" "reason=$exit_reason,loop_count=$loop_count" "completed" 2>/dev/null
             log_status "SUCCESS" "🏁 Graceful exit triggered: $exit_reason"
             reset_session "project_complete"
             update_status "$loop_count" "$(_read_call_count)" "graceful_exit" "completed" "$exit_reason"
