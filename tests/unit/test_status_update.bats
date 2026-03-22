@@ -40,7 +40,7 @@ EOF
     [ "$status" -eq 0 ]
     run jq -e '.PROGRESS_SUMMARY' "$RALPH_DIR/status.json"
     [ "$status" -eq 0 ]
-    run jq -e '.EXIT_SIGNAL' "$RALPH_DIR/status.json"
+    run jq -e 'has("EXIT_SIGNAL")' "$RALPH_DIR/status.json"
     [ "$status" -eq 0 ]
     run jq -e '.timestamp' "$RALPH_DIR/status.json"
     [ "$status" -eq 0 ]
@@ -55,7 +55,7 @@ EOF
 @test "status.json EXIT_SIGNAL is boolean" {
     echo '{"EXIT_SIGNAL": true}' > "$RALPH_DIR/status.json"
     local val
-    val=$(jq -r 'type_of(.EXIT_SIGNAL) // (.EXIT_SIGNAL | type)' "$RALPH_DIR/status.json" 2>/dev/null)
+    val=$(jq -r '.EXIT_SIGNAL | type' "$RALPH_DIR/status.json" 2>/dev/null)
     [ "$val" = "boolean" ]
 }
 

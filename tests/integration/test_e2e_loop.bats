@@ -122,9 +122,8 @@ MOCKEOF
 }
 
 @test "E2E: exit signals file initializes correctly" {
-    local valid
-    valid=$(jq -e '.' "$RALPH_DIR/.exit_signals" 2>/dev/null && echo "yes" || echo "no")
-    [ "$valid" = "yes" ]
+    run jq -e '.' "$RALPH_DIR/.exit_signals"
+    [ "$status" -eq 0 ]
 }
 
 @test "E2E: log directory is writable" {

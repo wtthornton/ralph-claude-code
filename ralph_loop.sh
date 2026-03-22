@@ -22,7 +22,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/backup.sh" ]] && source "$SCRIPT_DIR/lib/backup.sh"
 
 # Version
-RALPH_VERSION="1.8.2"
+RALPH_VERSION="1.8.3"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -2113,7 +2113,27 @@ execute_claude_code() {
     # --- Error in result ---
     if (line ~ /"is_error"[[:space:]]*:[[:space:]]*true/) {
         ec++
-        printf "  ❌ Error detected in response\n"
+        # Extract error message from "result" or "content" fields
+        emsg = line
+        if (emsg ~ /"result"[[:space:]]*:[[:space:]]*"/) {
+            sub(/.*"result"[[:space:]]*:[[:space:]]*"/, "", emsg)
+            sub(/".*/, "", emsg)
+        } else if (emsg ~ /"content"[[:space:]]*:[[:space:]]*"/) {
+            sub(/.*"content"[[:space:]]*:[[:space:]]*"/, "", emsg)
+            sub(/".*/, "", emsg)
+        } else {
+            emsg = ""
+        }
+        # Unescape common JSON escapes
+        gsub(/\\n/, " ", emsg)
+        gsub(/\\"/, "\"", emsg)
+        gsub(/\\\\/, "\\", emsg)
+        if (length(emsg) > 120) emsg = substr(emsg, 1, 117) "..."
+        if (emsg != "") {
+            printf "  ❌ Error: %s\n", emsg
+        } else {
+            printf "  ❌ Error detected in response\n"
+        }
         fflush()
         next
     }
