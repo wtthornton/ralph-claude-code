@@ -1,6 +1,6 @@
 # Ralph SDK Migration Strategy
 
-**Version**: v1.3.0 | **Status**: Active
+**Version**: v2.0.0 | **Status**: Active
 
 ## Overview
 
@@ -20,9 +20,9 @@ ralph --monitor          # With tmux dashboard
 
 **Best for**: Individual developers, simple projects, quick setup, CI/CD pipelines.
 
-### Mode 2: Standalone SDK (v1.3.0+)
+### Mode 2: Standalone SDK (v2.0.0+)
 
-Python-native agent using the Claude Agent SDK. Same loop logic, structured tool calls.
+Python-native async agent using Pydantic v2 models, pluggable state backend, and structured tool calls.
 
 ```bash
 ralph --sdk              # SDK mode via bash wrapper

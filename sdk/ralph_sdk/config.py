@@ -5,14 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field, field_validator
 
-@dataclass
-class RalphConfig:
+
+class RalphConfig(BaseModel):
     """Configuration for Ralph SDK agent.
 
     Precedence (highest to lowest):
@@ -27,12 +26,12 @@ class RalphConfig:
     project_type: str = "unknown"
 
     # Loop settings
-    max_calls_per_hour: int = 100
-    timeout_minutes: int = 15
+    max_calls_per_hour: int = Field(default=100, ge=1, le=10000)
+    timeout_minutes: int = Field(default=15, ge=1, le=1440)
     output_format: str = "json"
 
     # Tool permissions
-    allowed_tools: list[str] = field(default_factory=lambda: [
+    allowed_tools: list[str] = Field(default_factory=lambda: [
         "Write", "Read", "Edit", "Bash(git add *)", "Bash(git commit *)",
         "Bash(git diff *)", "Bash(git log *)", "Bash(git status)",
         "Bash(git status *)", "Bash(git push *)", "Bash(git pull *)",
@@ -50,19 +49,19 @@ class RalphConfig:
 
     # Session management
     session_continuity: bool = True
-    session_expiry_hours: int = 24
+    session_expiry_hours: int = Field(default=24, ge=1, le=168)
 
     # Circuit breaker
-    cb_no_progress_threshold: int = 3
-    cb_same_error_threshold: int = 5
-    cb_output_decline_threshold: int = 70
-    cb_cooldown_minutes: int = 30
+    cb_no_progress_threshold: int = Field(default=3, ge=1, le=50)
+    cb_same_error_threshold: int = Field(default=5, ge=1, le=100)
+    cb_output_decline_threshold: int = Field(default=70, ge=0, le=100)
+    cb_cooldown_minutes: int = Field(default=30, ge=1, le=1440)
     cb_auto_reset: bool = False
 
     # Log rotation
-    log_max_size_mb: int = 10
-    log_max_files: int = 5
-    log_max_output_files: int = 20
+    log_max_size_mb: int = Field(default=10, ge=1, le=1000)
+    log_max_files: int = Field(default=5, ge=1, le=100)
+    log_max_output_files: int = Field(default=20, ge=1, le=1000)
 
     # Dry run
     dry_run: bool = False
@@ -79,7 +78,7 @@ class RalphConfig:
 
     # Teams (experimental)
     enable_teams: bool = False
-    max_teammates: int = 3
+    max_teammates: int = Field(default=3, ge=1, le=10)
     bg_testing: bool = False
     teammate_mode: str = "tmux"
 
@@ -88,53 +87,102 @@ class RalphConfig:
 
     # SDK-specific
     model: str = "claude-sonnet-4-20250514"
-    max_turns: int = 50
+    max_turns: int = Field(default=50, ge=1, le=200)
+
+    @field_validator("output_format")
+    @classmethod
+    def validate_output_format(cls, v: str) -> str:
+        if v not in ("json", "text"):
+            raise ValueError("output_format must be 'json' or 'text'")
+        return v
+
+    @field_validator("teammate_mode")
+    @classmethod
+    def validate_teammate_mode(cls, v: str) -> str:
+        if v not in ("tmux", "background"):
+            raise ValueError("teammate_mode must be 'tmux' or 'background'")
+        return v
 
     @classmethod
     def load(cls, project_dir: str | Path = ".") -> RalphConfig:
         """Load configuration with full precedence chain."""
         project_dir = Path(project_dir)
-        config = cls()
+        overrides: dict[str, Any] = {}
 
         # Layer 1: .ralphrc (bash config)
         ralphrc_path = project_dir / ".ralphrc"
         if ralphrc_path.exists():
-            config._load_ralphrc(ralphrc_path)
+            overrides.update(cls._parse_ralphrc(ralphrc_path))
 
         # Layer 2: ralph.config.json
         json_config_path = project_dir / "ralph.config.json"
         if json_config_path.exists():
-            config._load_json_config(json_config_path)
+            overrides.update(cls._parse_json_config(json_config_path))
 
         # Layer 3: Environment variables (highest precedence)
-        config._load_env()
+        overrides.update(cls._parse_env())
 
-        return config
+        return cls(**overrides)
 
-    def _load_ralphrc(self, path: Path) -> None:
-        """Parse .ralphrc bash config file."""
+    @staticmethod
+    def _parse_ralphrc(path: Path) -> dict[str, Any]:
+        """Parse .ralphrc bash config file into config overrides."""
+        mapping = {
+            "PROJECT_NAME": ("project_name", str),
+            "PROJECT_TYPE": ("project_type", str),
+            "MAX_CALLS_PER_HOUR": ("max_calls_per_hour", int),
+            "CLAUDE_TIMEOUT_MINUTES": ("timeout_minutes", int),
+            "CLAUDE_OUTPUT_FORMAT": ("output_format", str),
+            "ALLOWED_TOOLS": ("allowed_tools", lambda v: v.split(",")),
+            "SESSION_CONTINUITY": ("session_continuity", lambda v: v.lower() == "true"),
+            "SESSION_EXPIRY_HOURS": ("session_expiry_hours", int),
+            "CB_NO_PROGRESS_THRESHOLD": ("cb_no_progress_threshold", int),
+            "CB_SAME_ERROR_THRESHOLD": ("cb_same_error_threshold", int),
+            "CB_OUTPUT_DECLINE_THRESHOLD": ("cb_output_decline_threshold", int),
+            "CB_COOLDOWN_MINUTES": ("cb_cooldown_minutes", int),
+            "CB_AUTO_RESET": ("cb_auto_reset", lambda v: v.lower() == "true"),
+            "LOG_MAX_SIZE_MB": ("log_max_size_mb", int),
+            "LOG_MAX_FILES": ("log_max_files", int),
+            "LOG_MAX_OUTPUT_FILES": ("log_max_output_files", int),
+            "DRY_RUN": ("dry_run", lambda v: v.lower() == "true"),
+            "CLAUDE_CODE_CMD": ("claude_code_cmd", str),
+            "CLAUDE_AUTO_UPDATE": ("claude_auto_update", lambda v: v.lower() == "true"),
+            "RALPH_VERBOSE": ("verbose", lambda v: v.lower() == "true"),
+            "RALPH_USE_AGENT": ("use_agent", lambda v: v.lower() == "true"),
+            "RALPH_AGENT_NAME": ("agent_name", str),
+            "RALPH_ENABLE_TEAMS": ("enable_teams", lambda v: v.lower() == "true"),
+            "RALPH_MAX_TEAMMATES": ("max_teammates", int),
+            "RALPH_BG_TESTING": ("bg_testing", lambda v: v.lower() == "true"),
+            "RALPH_TEAMMATE_MODE": ("teammate_mode", str),
+        }
+
+        overrides: dict[str, Any] = {}
         content = path.read_text(encoding="utf-8")
         for line in content.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            # Match VAR=value or VAR="value" patterns
             match = re.match(r'^([A-Z_]+)=(.*)$', line)
             if not match:
                 continue
             key, value = match.group(1), match.group(2)
-            # Strip surrounding quotes
             value = value.strip('"').strip("'")
-            # Remove ${VAR:-default} shell patterns — take the default
             value = re.sub(r'\$\{[A-Z_]+:-([^}]*)\}', r'\1', value)
-            self._set_from_key(key, value)
+            if key in mapping:
+                attr_name, converter = mapping[key]
+                try:
+                    overrides[attr_name] = converter(value)
+                except (ValueError, TypeError):
+                    pass
+        return overrides
 
-    def _load_json_config(self, path: Path) -> None:
-        """Load ralph.config.json configuration."""
+    @staticmethod
+    def _parse_json_config(path: Path) -> dict[str, Any]:
+        """Load ralph.config.json configuration into config overrides."""
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            return
+            return {}
 
         key_map = {
             "projectName": "project_name",
@@ -168,11 +216,14 @@ class RalphConfig:
             "maxTurns": "max_turns",
         }
 
+        overrides: dict[str, Any] = {}
         for json_key, attr_name in key_map.items():
             if json_key in data:
-                setattr(self, attr_name, data[json_key])
+                overrides[attr_name] = data[json_key]
+        return overrides
 
-    def _load_env(self) -> None:
+    @staticmethod
+    def _parse_env() -> dict[str, Any]:
         """Load from environment variables (highest precedence)."""
         env_map = {
             "MAX_CALLS_PER_HOUR": ("max_calls_per_hour", int),
@@ -203,51 +254,15 @@ class RalphConfig:
             "PROJECT_TYPE": ("project_type", str),
         }
 
+        overrides: dict[str, Any] = {}
         for env_key, (attr_name, converter) in env_map.items():
             value = os.environ.get(env_key)
             if value is not None:
                 try:
-                    setattr(self, attr_name, converter(value))
+                    overrides[attr_name] = converter(value)
                 except (ValueError, TypeError):
-                    pass  # Skip invalid env values
-
-    def _set_from_key(self, key: str, value: str) -> None:
-        """Set a config attribute from a .ralphrc key=value pair."""
-        mapping = {
-            "PROJECT_NAME": ("project_name", str),
-            "PROJECT_TYPE": ("project_type", str),
-            "MAX_CALLS_PER_HOUR": ("max_calls_per_hour", int),
-            "CLAUDE_TIMEOUT_MINUTES": ("timeout_minutes", int),
-            "CLAUDE_OUTPUT_FORMAT": ("output_format", str),
-            "ALLOWED_TOOLS": ("allowed_tools", lambda v: v.split(",")),
-            "SESSION_CONTINUITY": ("session_continuity", lambda v: v.lower() == "true"),
-            "SESSION_EXPIRY_HOURS": ("session_expiry_hours", int),
-            "CB_NO_PROGRESS_THRESHOLD": ("cb_no_progress_threshold", int),
-            "CB_SAME_ERROR_THRESHOLD": ("cb_same_error_threshold", int),
-            "CB_OUTPUT_DECLINE_THRESHOLD": ("cb_output_decline_threshold", int),
-            "CB_COOLDOWN_MINUTES": ("cb_cooldown_minutes", int),
-            "CB_AUTO_RESET": ("cb_auto_reset", lambda v: v.lower() == "true"),
-            "LOG_MAX_SIZE_MB": ("log_max_size_mb", int),
-            "LOG_MAX_FILES": ("log_max_files", int),
-            "LOG_MAX_OUTPUT_FILES": ("log_max_output_files", int),
-            "DRY_RUN": ("dry_run", lambda v: v.lower() == "true"),
-            "CLAUDE_CODE_CMD": ("claude_code_cmd", str),
-            "CLAUDE_AUTO_UPDATE": ("claude_auto_update", lambda v: v.lower() == "true"),
-            "RALPH_VERBOSE": ("verbose", lambda v: v.lower() == "true"),
-            "RALPH_USE_AGENT": ("use_agent", lambda v: v.lower() == "true"),
-            "RALPH_AGENT_NAME": ("agent_name", str),
-            "RALPH_ENABLE_TEAMS": ("enable_teams", lambda v: v.lower() == "true"),
-            "RALPH_MAX_TEAMMATES": ("max_teammates", int),
-            "RALPH_BG_TESTING": ("bg_testing", lambda v: v.lower() == "true"),
-            "RALPH_TEAMMATE_MODE": ("teammate_mode", str),
-        }
-
-        if key in mapping:
-            attr_name, converter = mapping[key]
-            try:
-                setattr(self, attr_name, converter(value))
-            except (ValueError, TypeError):
-                pass
+                    pass
+        return overrides
 
     def to_dict(self) -> dict[str, Any]:
         """Export configuration as dictionary."""

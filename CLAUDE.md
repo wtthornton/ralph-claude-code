@@ -56,20 +56,28 @@ bats tests/unit/test_cli_parsing.bats
 | `backup.sh` | State backup/rollback — auto-snapshots, `ralph --rollback`, max 10 backups (Phase 8) |
 | `github_issues.sh` | GitHub Issue integration — import, assess, filter, batch, lifecycle (Phase 10) |
 | `sandbox.sh` | Docker sandbox — `ralph --sandbox`, container management, signal forwarding (Phase 11) |
+| `tracing.sh` | OpenTelemetry traces — GenAI Semantic Conventions, JSONL OTLP format, secret sanitization (Phase 14) |
+| `complexity.sh` | Task complexity classifier — 5-level (TRIVIAL→ARCHITECTURAL), dynamic model routing (Phase 14) |
+| `memory.sh` | Cross-session memory — episodic (what worked/failed), semantic (project index), decay/pruning (Phase 14) |
 | ~~`response_analyzer.sh`~~ | Removed — response analysis handled by `on-stop.sh` hook → `status.json` |
 | ~~`file_protection.sh`~~ | Removed — file protection handled by PreToolUse hooks |
 
-### SDK (sdk/)
+### SDK (sdk/) — v2.0.0
 
-Python Agent SDK for dual-mode operation (Phase 6):
+Python Agent SDK for dual-mode operation. All models are **Pydantic v2 BaseModels**. The agent loop is **fully async** with a `run_sync()` wrapper for CLI. State I/O goes through a **pluggable state backend** (`FileStateBackend` default, `NullStateBackend` for testing/embedding).
 
 | Module | Purpose |
 |--------|---------|
-| `ralph_sdk/agent.py` | Core agent class — RalphAgent, RalphAgentInterface, TaskInput, TaskResult |
-| `ralph_sdk/config.py` | Configuration loader — .ralphrc, ralph.config.json, environment, with full precedence chain |
+| `ralph_sdk/agent.py` | Async agent class — RalphAgent, TaskInput (frozen), TaskResult, run_sync() wrapper |
+| `ralph_sdk/config.py` | Pydantic configuration — validation ranges, .ralphrc/.json/env precedence chain |
+| `ralph_sdk/status.py` | Pydantic status models — RalphStatus, CircuitBreakerState, WorkType/RalphLoopStatus enums |
+| `ralph_sdk/state.py` | Pluggable state backend — RalphStateBackend Protocol, FileStateBackend (async aiofiles), NullStateBackend (in-memory) |
+| `ralph_sdk/parsing.py` | 3-strategy response parser — JSON fenced block → JSONL result → text fallback |
+| `ralph_sdk/circuit_breaker.py` | Active circuit breaker — sliding window failure detection, no-progress tracking, cooldown recovery |
+| `ralph_sdk/converters.py` | TaskPacket conversion — TaskPacketInput/IntentSpecInput mirror models, complexity→max_turns, trust→permissions |
+| `ralph_sdk/evidence.py` | EvidenceBundle output — test/lint extraction (pytest/jest/BATS/ruff/eslint), JSON round-trip |
 | `ralph_sdk/tools.py` | Custom tools — ralph_status, ralph_rate_check, ralph_circuit_state, ralph_task_update |
-| `ralph_sdk/status.py` | Status management — RalphStatus, CircuitBreakerState (compatible with bash status.json) |
-| `ralph_sdk/__main__.py` | CLI entry point — `ralph --sdk` or `python -m ralph_sdk` |
+| `ralph_sdk/__main__.py` | CLI entry point — `ralph --sdk` or `python -m ralph_sdk` (uses run_sync()) |
 
 ### Key Design Patterns
 

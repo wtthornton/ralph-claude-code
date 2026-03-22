@@ -114,9 +114,9 @@ def main(argv: list[str] | None = None) -> int:
         print("Circuit breaker reset to CLOSED")
         return 0
 
-    # Run the agent
+    # Run the agent (sync wrapper around async loop)
     agent = RalphAgent(config=config, project_dir=args.project_dir)
-    result = agent.run()
+    result = agent.run_sync()
 
     if result.error:
         logging.getLogger("ralph.sdk").error("Loop ended with error: %s", result.error)

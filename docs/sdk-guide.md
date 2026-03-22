@@ -1,10 +1,10 @@
 # Ralph SDK Guide
 
-**Version**: v1.3.0 | **Requirements**: Python 3.12+
+**Version**: v2.0.0 | **Requirements**: Python 3.12+, pydantic>=2.0, aiofiles>=24.0
 
 ## Overview
 
-The Ralph SDK provides a Python-native interface to Ralph's autonomous development loop. It replicates the bash CLI's core loop while adding structured tool calls and TheStudio embedding support.
+The Ralph SDK provides a Python-native async interface to Ralph's autonomous development loop. Built on Pydantic v2 models with a pluggable state backend, it supports structured tool calls, active circuit breaking, correlation ID threading, TaskPacket conversion, and EvidenceBundle output for TheStudio embedding.
 
 ## Installation
 

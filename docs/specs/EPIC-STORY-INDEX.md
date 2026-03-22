@@ -1,6 +1,6 @@
 # Ralph Claude Code — Epic & Story Index
 
-> **Generated:** 2026-03-21 | **Updated:** 2026-03-22 | **Total Epics:** 33 | **Total Stories:** 117 (97 Done, 20 Open)
+> **Generated:** 2026-03-21 | **Updated:** 2026-03-22 | **Total Epics:** 33 | **Total Stories:** 117 (104 Done, 13 Open)
 
 ---
 
@@ -476,24 +476,24 @@ Phase 14 (OPEN)
 | 4 | [FAILSPEC-4](story-failspec-4-audit-logging.md) | Structured Audit Log for Compliance | High | Medium | **Done** |
 
 ### RALPH-OTEL: OpenTelemetry & Observability v2
-**Priority:** High | **Status:** Open | **Target:** v2.1.0 | **Dependencies:** None
+**Priority:** High | **Status:** Done | **Target:** v2.1.0 | **Dependencies:** None
 **Upgrade:** Extends Phase 8 RALPH-OBSERVE with OTel GenAI Semantic Conventions
 
 | # | ID | Story | Priority | Effort | Status |
 |---|-----|-------|----------|--------|--------|
-| 1 | [OTEL-1](story-otel-1-trace-generation.md) | OTel Trace Generation with GenAI Semantic Conventions | High | Medium | **Open** |
-| 2 | [OTEL-2](story-otel-2-trace-propagation.md) | Trace ID Propagation Across Sub-Agents and Hooks | High | Small | **Open** |
+| 1 | [OTEL-1](story-otel-1-trace-generation.md) | OTel Trace Generation with GenAI Semantic Conventions | High | Medium | **Done** |
+| 2 | [OTEL-2](story-otel-2-trace-propagation.md) | Trace ID Propagation Across Sub-Agents and Hooks | High | Small | **Done** |
 | 3 | [OTEL-3](story-otel-3-cost-attribution.md) | Per-Trace Cost Attribution and Budget Alerts | Medium | Small | **Open** |
 | 4 | [OTEL-4](story-otel-4-otlp-exporter.md) | OTLP Exporter for External Backends | Medium | Medium | **Open** |
 
 ### RALPH-COSTROUTE: Cost-Aware Model Routing
-**Priority:** High | **Status:** Open | **Target:** v2.1.0 | **Dependencies:** None
+**Priority:** High | **Status:** Done | **Target:** v2.1.0 | **Dependencies:** None
 **Impact:** 30-70% cost reduction via dynamic model selection + prompt caching
 
 | # | ID | Story | Priority | Effort | Status |
 |---|-----|-------|----------|--------|--------|
-| 1 | [COSTROUTE-1](story-costroute-1-complexity-classifier.md) | Task Complexity Classifier | High | Medium | **Open** |
-| 2 | [COSTROUTE-2](story-costroute-2-dynamic-model-selection.md) | Dynamic Model Selection Based on Complexity | High | Medium | **Open** |
+| 1 | [COSTROUTE-1](story-costroute-1-complexity-classifier.md) | Task Complexity Classifier | High | Medium | **Done** |
+| 2 | [COSTROUTE-2](story-costroute-2-dynamic-model-selection.md) | Dynamic Model Selection Based on Complexity | High | Medium | **Done** |
 | 3 | [COSTROUTE-3](story-costroute-3-prompt-cache-optimization.md) | Prompt Structure Optimization for Cache Hits | High | Small | **Open** |
 | 4 | [COSTROUTE-4](story-costroute-4-token-budget.md) | Token Budget and Cost Dashboard | Medium | Small | **Open** |
 
@@ -508,14 +508,14 @@ Phase 14 (OPEN)
 | 3 | [CTXMGMT-3](story-ctxmgmt-3-continue-as-new.md) | Continue-As-New Pattern for Long Sessions | Medium | Medium | **Open** |
 
 ### RALPH-AGENTMEM: Cross-Session Agent Memory
-**Priority:** Medium | **Status:** Open | **Target:** v2.2.0 | **Dependencies:** RALPH-OTEL
+**Priority:** Medium | **Status:** Done | **Target:** v2.2.0 | **Dependencies:** RALPH-OTEL
 **Research:** 4 memory types (working, episodic, semantic, procedural) — adding episodic + semantic
 
 | # | ID | Story | Priority | Effort | Status |
 |---|-----|-------|----------|--------|--------|
-| 1 | [AGENTMEM-1](story-agentmem-1-episodic-memory.md) | Episodic Memory Store (What Worked/Failed) | Medium | Medium | **Open** |
-| 2 | [AGENTMEM-2](story-agentmem-2-semantic-memory.md) | Codebase Pattern Memory (Semantic) | Medium | Medium | **Open** |
-| 3 | [AGENTMEM-3](story-agentmem-3-memory-decay.md) | Memory Decay and Relevance Scoring | Medium | Small | **Open** |
+| 1 | [AGENTMEM-1](story-agentmem-1-episodic-memory.md) | Episodic Memory Store (What Worked/Failed) | Medium | Medium | **Done** |
+| 2 | [AGENTMEM-2](story-agentmem-2-semantic-memory.md) | Codebase Pattern Memory (Semantic) | Medium | Medium | **Done** |
+| 3 | [AGENTMEM-3](story-agentmem-3-memory-decay.md) | Memory Decay and Relevance Scoring | Medium | Small | **Done** |
 
 ### RALPH-SANDBOXV2: Sandbox Hardening
 **Priority:** Medium | **Status:** Open | **Target:** v2.2.0 | **Dependencies:** RALPH-SANDBOX (Phase 11)

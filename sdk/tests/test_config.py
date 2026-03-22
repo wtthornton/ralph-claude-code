@@ -1,9 +1,10 @@
-"""Tests for Ralph SDK configuration loading."""
+"""Tests for Ralph SDK configuration loading (Pydantic v2 model)."""
 
 import json
 import os
 import pytest
 from pathlib import Path
+from pydantic import ValidationError
 
 from ralph_sdk.config import RalphConfig
 
@@ -116,3 +117,22 @@ def test_missing_config_files(tmp_project):
     config = RalphConfig.load(tmp_project)
     assert config.project_name == "my-project"
     assert config.max_calls_per_hour == 100
+
+
+def test_validation_ranges():
+    """Pydantic validation rejects out-of-range values."""
+    with pytest.raises(ValidationError):
+        RalphConfig(max_calls_per_hour=0)
+    with pytest.raises(ValidationError):
+        RalphConfig(timeout_minutes=-1)
+    with pytest.raises(ValidationError):
+        RalphConfig(max_turns=0)
+    with pytest.raises(ValidationError):
+        RalphConfig(max_turns=201)
+
+
+def test_model_json_schema():
+    """Pydantic model_json_schema() works."""
+    schema = RalphConfig.model_json_schema()
+    assert "properties" in schema
+    assert "max_calls_per_hour" in schema["properties"]

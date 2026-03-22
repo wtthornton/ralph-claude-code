@@ -5,40 +5,72 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import asdict, dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
 
-@dataclass
-class RalphStatus:
-    """Structured status compatible with on-stop.sh → status.json format."""
 
-    work_type: str = "UNKNOWN"
+class RalphLoopStatus(str, Enum):
+    """Status of the Ralph loop iteration."""
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    ERROR = "ERROR"
+    TIMEOUT = "TIMEOUT"
+    DRY_RUN = "DRY_RUN"
+
+
+class WorkType(str, Enum):
+    """Type of work performed in a loop iteration."""
+    UNKNOWN = "UNKNOWN"
+    IMPLEMENTATION = "IMPLEMENTATION"
+    TESTING = "TESTING"
+    ANALYSIS = "ANALYSIS"
+    PLANNING = "PLANNING"
+    DEBUGGING = "DEBUGGING"
+    DRY_RUN = "DRY_RUN"
+
+
+class CircuitBreakerStateEnum(str, Enum):
+    """Circuit breaker state values."""
+    CLOSED = "CLOSED"
+    HALF_OPEN = "HALF_OPEN"
+    OPEN = "OPEN"
+
+
+class RalphStatus(BaseModel):
+    """Structured status compatible with on-stop.sh -> status.json format."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    work_type: WorkType = WorkType.UNKNOWN
     completed_task: str = ""
     next_task: str = ""
     progress_summary: str = ""
     exit_signal: bool = False
-    status: str = "IN_PROGRESS"
+    status: RalphLoopStatus = RalphLoopStatus.IN_PROGRESS
     timestamp: str = ""
     loop_count: int = 0
     session_id: str = ""
     circuit_breaker_state: str = "CLOSED"
+    correlation_id: str = ""
     error: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Export as dictionary matching status.json schema."""
         return {
-            "WORK_TYPE": self.work_type,
+            "WORK_TYPE": self.work_type.value,
             "COMPLETED_TASK": self.completed_task,
             "NEXT_TASK": self.next_task,
             "PROGRESS_SUMMARY": self.progress_summary,
             "EXIT_SIGNAL": self.exit_signal,
-            "status": self.status,
+            "status": self.status.value,
             "timestamp": self.timestamp or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "loop_count": self.loop_count,
             "session_id": self.session_id,
             "circuit_breaker_state": self.circuit_breaker_state,
+            "correlation_id": self.correlation_id,
             "error": self.error,
         }
 
@@ -56,12 +88,17 @@ class RalphStatus:
             loop_count=data.get("loop_count", 0),
             session_id=data.get("session_id", ""),
             circuit_breaker_state=data.get("circuit_breaker_state", "CLOSED"),
+            correlation_id=data.get("correlation_id", ""),
             error=data.get("error", ""),
         )
 
     @classmethod
-    def load(cls, ralph_dir: str | Path = ".ralph") -> RalphStatus:
-        """Load status from .ralph/status.json."""
+    def load(cls, ralph_dir: str | Path = ".ralph", *, backend: Any | None = None) -> RalphStatus:
+        """Load status from .ralph/status.json or via state backend."""
+        if backend is not None:
+            data = backend.read_status()
+            return cls.from_dict(data) if data else cls()
+
         status_file = Path(ralph_dir) / "status.json"
         if not status_file.exists():
             return cls()
@@ -71,8 +108,12 @@ class RalphStatus:
         except (json.JSONDecodeError, OSError):
             return cls()
 
-    def save(self, ralph_dir: str | Path = ".ralph") -> None:
-        """Write status atomically to .ralph/status.json (matching bash atomic write pattern)."""
+    def save(self, ralph_dir: str | Path = ".ralph", *, backend: Any | None = None) -> None:
+        """Write status atomically to .ralph/status.json or via state backend."""
+        if backend is not None:
+            backend.write_status(self.to_dict())
+            return
+
         ralph_dir = Path(ralph_dir)
         ralph_dir.mkdir(parents=True, exist_ok=True)
         status_file = ralph_dir / "status.json"
@@ -88,52 +129,70 @@ class RalphStatus:
             tmp_file.unlink(missing_ok=True)
 
 
-@dataclass
-class CircuitBreakerState:
+class CircuitBreakerState(BaseModel):
     """Circuit breaker state compatible with .circuit_breaker_state JSON."""
 
-    state: str = "CLOSED"  # CLOSED, HALF_OPEN, OPEN
+    model_config = ConfigDict(validate_assignment=True)
+
+    state: CircuitBreakerStateEnum = CircuitBreakerStateEnum.CLOSED
     no_progress_count: int = 0
     same_error_count: int = 0
     last_error: str = ""
     opened_at: str = ""
     last_transition: str = ""
 
+    def _to_state_dict(self) -> dict[str, Any]:
+        """Export as dictionary for state backend."""
+        return {
+            "state": self.state.value,
+            "no_progress_count": self.no_progress_count,
+            "same_error_count": self.same_error_count,
+            "last_error": self.last_error,
+            "opened_at": self.opened_at,
+            "last_transition": self.last_transition,
+        }
+
     @classmethod
-    def load(cls, ralph_dir: str | Path = ".ralph") -> CircuitBreakerState:
-        """Load from .ralph/.circuit_breaker_state."""
+    def _from_state_dict(cls, data: dict[str, Any]) -> CircuitBreakerState:
+        """Create from state dict."""
+        return cls(
+            state=data.get("state", "CLOSED"),
+            no_progress_count=data.get("no_progress_count", 0),
+            same_error_count=data.get("same_error_count", 0),
+            last_error=data.get("last_error", ""),
+            opened_at=data.get("opened_at", ""),
+            last_transition=data.get("last_transition", ""),
+        )
+
+    @classmethod
+    def load(cls, ralph_dir: str | Path = ".ralph", *, backend: Any | None = None) -> CircuitBreakerState:
+        """Load from .ralph/.circuit_breaker_state or via state backend."""
+        if backend is not None:
+            data = backend.read_circuit_breaker()
+            return cls._from_state_dict(data) if data else cls()
+
         cb_file = Path(ralph_dir) / ".circuit_breaker_state"
         if not cb_file.exists():
             return cls()
         try:
             data = json.loads(cb_file.read_text(encoding="utf-8"))
-            return cls(
-                state=data.get("state", "CLOSED"),
-                no_progress_count=data.get("no_progress_count", 0),
-                same_error_count=data.get("same_error_count", 0),
-                last_error=data.get("last_error", ""),
-                opened_at=data.get("opened_at", ""),
-                last_transition=data.get("last_transition", ""),
-            )
+            return cls._from_state_dict(data)
         except (json.JSONDecodeError, OSError):
             return cls()
 
-    def save(self, ralph_dir: str | Path = ".ralph") -> None:
-        """Write circuit breaker state atomically."""
+    def save(self, ralph_dir: str | Path = ".ralph", *, backend: Any | None = None) -> None:
+        """Write circuit breaker state atomically or via state backend."""
+        if backend is not None:
+            backend.write_circuit_breaker(self._to_state_dict())
+            return
+
         ralph_dir = Path(ralph_dir)
         ralph_dir.mkdir(parents=True, exist_ok=True)
         cb_file = ralph_dir / ".circuit_breaker_state"
         tmp_file = cb_file.with_suffix(f".{os.getpid()}.tmp")
         try:
             tmp_file.write_text(
-                json.dumps({
-                    "state": self.state,
-                    "no_progress_count": self.no_progress_count,
-                    "same_error_count": self.same_error_count,
-                    "last_error": self.last_error,
-                    "opened_at": self.opened_at,
-                    "last_transition": self.last_transition,
-                }, indent=2) + "\n",
+                json.dumps(self._to_state_dict(), indent=2) + "\n",
                 encoding="utf-8",
             )
             tmp_file.replace(cb_file)
@@ -142,19 +201,19 @@ class CircuitBreakerState:
 
     def trip(self, reason: str = "") -> None:
         """Transition to OPEN state."""
-        self.state = "OPEN"
+        self.state = CircuitBreakerStateEnum.OPEN
         self.opened_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         self.last_error = reason
         self.last_transition = f"OPEN: {reason}"
 
     def half_open(self) -> None:
         """Transition to HALF_OPEN (cooldown expired)."""
-        self.state = "HALF_OPEN"
+        self.state = CircuitBreakerStateEnum.HALF_OPEN
         self.last_transition = "HALF_OPEN: cooldown expired"
 
     def close(self) -> None:
         """Transition to CLOSED (recovery successful)."""
-        self.state = "CLOSED"
+        self.state = CircuitBreakerStateEnum.CLOSED
         self.no_progress_count = 0
         self.same_error_count = 0
         self.last_error = ""
@@ -163,7 +222,7 @@ class CircuitBreakerState:
 
     def reset(self, reason: str = "manual") -> None:
         """Reset to initial state."""
-        self.state = "CLOSED"
+        self.state = CircuitBreakerStateEnum.CLOSED
         self.no_progress_count = 0
         self.same_error_count = 0
         self.last_error = ""

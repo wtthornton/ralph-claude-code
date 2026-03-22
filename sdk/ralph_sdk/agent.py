@@ -1,22 +1,26 @@
 """Ralph SDK Agent — Agent SDK proof of concept replicating ralph_loop.sh core loop.
 
 Dual-mode: standalone CLI + TheStudio embedded.
+All agent methods are async. Use run_sync() for CLI synchronous execution.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
-import subprocess
-import sys
 import time
-from dataclasses import dataclass, field
+import uuid
 from pathlib import Path
 from typing import Any, Protocol
 
+from pydantic import BaseModel, Field, field_validator
+
 from ralph_sdk.config import RalphConfig
+from ralph_sdk.parsing import parse_ralph_status
+from ralph_sdk.state import FileStateBackend, RalphStateBackend
 from ralph_sdk.status import CircuitBreakerState, RalphStatus
 from ralph_sdk.tools import (
     RALPH_TOOLS,
@@ -36,7 +40,7 @@ logger = logging.getLogger("ralph.sdk")
 class RalphAgentInterface(Protocol):
     """Abstract interface for Ralph agent implementations (CLI and SDK)."""
 
-    def run_iteration(self, prompt: str, context: dict[str, Any]) -> RalphStatus:
+    async def run_iteration(self, prompt: str, context: dict[str, Any]) -> RalphStatus:
         """Execute a single loop iteration."""
         ...
 
@@ -44,11 +48,11 @@ class RalphAgentInterface(Protocol):
         """Evaluate exit conditions (dual-condition gate)."""
         ...
 
-    def check_rate_limit(self) -> bool:
+    async def check_rate_limit(self) -> bool:
         """Check if within rate limits. Returns True if OK to proceed."""
         ...
 
-    def check_circuit_breaker(self) -> bool:
+    async def check_circuit_breaker(self) -> bool:
         """Check circuit breaker state. Returns True if OK to proceed."""
         ...
 
@@ -57,8 +61,7 @@ class RalphAgentInterface(Protocol):
 # Task Input/Output (SDK-3: TheStudio compatibility)
 # =============================================================================
 
-@dataclass
-class TaskInput:
+class TaskInput(BaseModel, frozen=True):
     """Union type for task input — handles fix_plan.md and TheStudio TaskPackets.
 
     In standalone mode: reads from fix_plan.md + PROMPT.md
@@ -70,7 +73,19 @@ class TaskInput:
     # TheStudio fields (populated when embedded)
     task_packet_id: str = ""
     task_packet_type: str = ""
-    task_packet_payload: dict[str, Any] = field(default_factory=dict)
+    task_packet_payload: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, v: str) -> str:
+        """Prompt must be non-empty when provided for execution (validated at use site)."""
+        return v
+
+    @field_validator("task_packet_payload")
+    @classmethod
+    def validate_payload(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Payload must be a dict."""
+        return v
 
     @classmethod
     def from_ralph_dir(cls, ralph_dir: str | Path = ".ralph") -> TaskInput:
@@ -111,10 +126,9 @@ class TaskInput:
         )
 
 
-@dataclass
-class TaskResult:
+class TaskResult(BaseModel):
     """Output compatible with status.json and TheStudio signals."""
-    status: RalphStatus = field(default_factory=RalphStatus)
+    status: RalphStatus = Field(default_factory=RalphStatus)
     exit_code: int = 0
     output: str = ""
     error: str = ""
@@ -141,8 +155,10 @@ class TaskResult:
 class RalphAgent:
     """Ralph Agent SDK implementation — replicates ralph_loop.sh core loop in Python.
 
-    Core loop: Read PROMPT.md + fix_plan.md → invoke Claude → parse response →
-    check exit conditions → repeat.
+    Core loop: Read PROMPT.md + fix_plan.md -> invoke Claude -> parse response ->
+    check exit conditions -> repeat.
+
+    All loop methods are async. Use run_sync() for synchronous CLI execution.
 
     Supports three operational modes:
     - Standalone CLI: `ralph` (bash loop, unchanged)
@@ -154,6 +170,9 @@ class RalphAgent:
         self,
         config: RalphConfig | None = None,
         project_dir: str | Path = ".",
+        state_backend: RalphStateBackend | None = None,
+        correlation_id: str | None = None,
+        tracer: Any | None = None,
     ) -> None:
         self.config = config or RalphConfig.load(project_dir)
         self.project_dir = Path(project_dir).resolve()
@@ -164,36 +183,54 @@ class RalphAgent:
         self._completion_indicators = 0
         self._running = False
 
+        # Correlation ID — auto-generated UUID if not provided
+        self.correlation_id = correlation_id or str(uuid.uuid4())
+
+        # Optional OpenTelemetry tracer (guarded import)
+        self.tracer = tracer
+
+        # State backend — FileStateBackend by default
+        self.state_backend: RalphStateBackend = state_backend or FileStateBackend(self.ralph_dir)
+
         # Ensure .ralph directory exists
         self.ralph_dir.mkdir(parents=True, exist_ok=True)
         (self.ralph_dir / "logs").mkdir(exist_ok=True)
 
     # -------------------------------------------------------------------------
-    # Core Loop (replicates ralph_loop.sh main())
+    # Sync wrapper for CLI mode
     # -------------------------------------------------------------------------
 
-    def run(self) -> TaskResult:
-        """Execute the autonomous loop until exit conditions are met.
+    def run_sync(self) -> TaskResult:
+        """Synchronous wrapper around async run() for CLI mode.
 
-        Replicates ralph_loop.sh main() function:
-        1. Load config
-        2. Validate prerequisites
-        3. Loop: invoke → parse → check exit → repeat
+        Uses asyncio.run() to execute the async loop. This is the entry point
+        for `ralph --sdk` and `python -m ralph_sdk`.
         """
+        return asyncio.run(self.run())
+
+    # -------------------------------------------------------------------------
+    # Core Loop (async, replicates ralph_loop.sh main())
+    # -------------------------------------------------------------------------
+
+    async def run(self) -> TaskResult:
+        """Execute the autonomous loop until exit conditions are met."""
         self.start_time = time.time()
         self._running = True
 
-        logger.info("Ralph SDK starting (v%s)", self.config.model)
-        logger.info("Project: %s (%s)", self.config.project_name, self.config.project_type)
+        logger.info("Ralph SDK starting (v%s) [%s]", self.config.model, self.correlation_id,
+                     extra={"correlation_id": self.correlation_id})
+        logger.info("Project: %s (%s)", self.config.project_name, self.config.project_type,
+                     extra={"correlation_id": self.correlation_id})
 
         # Load session
-        self._load_session()
+        await self._load_session()
 
         # Reset circuit breaker counters (matching bash behavior)
-        cb = CircuitBreakerState.load(str(self.ralph_dir))
+        cb_data = await self.state_backend.read_circuit_breaker()
+        cb = CircuitBreakerState._from_state_dict(cb_data) if cb_data else CircuitBreakerState()
         cb.no_progress_count = 0
         cb.same_error_count = 0
-        cb.save(str(self.ralph_dir))
+        await self.state_backend.write_circuit_breaker(cb._to_state_dict())
 
         result = TaskResult()
 
@@ -203,13 +240,13 @@ class RalphAgent:
                 logger.info("Loop iteration %d", self.loop_count)
 
                 # Rate limit check
-                if not self.check_rate_limit():
+                if not await self.check_rate_limit():
                     logger.warning("Rate limit reached, waiting for reset")
                     result.error = "Rate limit reached"
                     break
 
                 # Circuit breaker check
-                if not self.check_circuit_breaker():
+                if not await self.check_circuit_breaker():
                     logger.warning("Circuit breaker OPEN, stopping")
                     result.error = "Circuit breaker open"
                     break
@@ -221,8 +258,9 @@ class RalphAgent:
                         status="DRY_RUN",
                         work_type="DRY_RUN",
                         loop_count=self.loop_count,
+                        correlation_id=self.correlation_id,
                     )
-                    status.save(str(self.ralph_dir))
+                    await self.state_backend.write_status(status.to_dict())
                     result.status = status
                     break
 
@@ -234,7 +272,7 @@ class RalphAgent:
                     break
 
                 # Execute one iteration
-                iteration_status = self.run_iteration(task_input)
+                iteration_status = await self.run_iteration(task_input)
 
                 # Check exit conditions (dual-condition gate)
                 if self.should_exit(iteration_status, self.loop_count):
@@ -243,7 +281,7 @@ class RalphAgent:
                     break
 
                 # Brief pause between iterations
-                time.sleep(2)
+                await asyncio.sleep(2)
 
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
@@ -258,11 +296,10 @@ class RalphAgent:
 
         return result
 
-    def run_iteration(self, task_input: TaskInput | None = None) -> RalphStatus:
+    async def run_iteration(self, task_input: TaskInput | None = None) -> RalphStatus:
         """Execute a single loop iteration via Claude Code CLI.
 
-        Matches ralph_loop.sh behavior: builds command, invokes CLI,
-        parses JSONL response, extracts status.
+        Uses asyncio.create_subprocess_exec() with asyncio.wait_for() timeout.
         """
         if task_input is None:
             task_input = TaskInput.from_ralph_dir(str(self.ralph_dir))
@@ -275,31 +312,40 @@ class RalphAgent:
 
         logger.debug("Invoking: %s", " ".join(cmd[:5]) + "...")
 
-        # Execute Claude CLI
+        # Execute Claude CLI asynchronously
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.config.timeout_minutes * 60,
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.project_dir),
             )
 
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=self.config.timeout_minutes * 60,
+            )
+
+            stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+            returncode = proc.returncode or 0
+
             # Increment call count
-            self._increment_call_count()
+            await self._increment_call_count()
 
             # Parse response
-            status = self._parse_response(result.stdout, result.returncode)
+            status = self._parse_response(stdout, returncode)
             status.loop_count = self.loop_count
             status.session_id = self.session_id
-            status.save(str(self.ralph_dir))
+            status.correlation_id = self.correlation_id
+            await self.state_backend.write_status(status.to_dict())
 
             # Log output
-            self._log_output(result.stdout, result.stderr, self.loop_count)
+            self._log_output(stdout, stderr, self.loop_count)
 
             return status
 
-        except subprocess.TimeoutExpired:
+        except asyncio.TimeoutError:
             logger.warning("Claude CLI timed out after %d minutes", self.config.timeout_minutes)
             status = RalphStatus(
                 status="TIMEOUT",
@@ -307,7 +353,7 @@ class RalphAgent:
                 error=f"Timeout after {self.config.timeout_minutes} minutes",
                 loop_count=self.loop_count,
             )
-            status.save(str(self.ralph_dir))
+            await self.state_backend.write_status(status.to_dict())
             return status
 
         except FileNotFoundError:
@@ -343,18 +389,23 @@ class RalphAgent:
         # Dual condition: need both indicators and explicit exit signal
         return self._completion_indicators >= 2 and status.exit_signal
 
-    def check_rate_limit(self) -> bool:
-        """Check if within rate limits."""
-        result = ralph_rate_check_tool(
-            ralph_dir=str(self.ralph_dir),
-            max_calls_per_hour=self.config.max_calls_per_hour,
-        )
-        return not result["rate_limited"]
+    async def check_rate_limit(self) -> bool:
+        """Check if within rate limits via state backend."""
+        call_count = await self.state_backend.read_call_count()
+        last_reset = await self.state_backend.read_last_reset()
+        now = int(time.time())
+        elapsed = now - last_reset if last_reset > 0 else 3600
+        remaining = max(0, self.config.max_calls_per_hour - call_count)
+        # If the hour has elapsed, we're not rate limited
+        if elapsed >= 3600:
+            return True
+        return remaining > 0
 
-    def check_circuit_breaker(self) -> bool:
-        """Check circuit breaker — returns True if OK to proceed."""
-        result = ralph_circuit_state_tool(ralph_dir=str(self.ralph_dir))
-        return result["can_proceed"]
+    async def check_circuit_breaker(self) -> bool:
+        """Check circuit breaker via state backend — returns True if OK to proceed."""
+        cb_data = await self.state_backend.read_circuit_breaker()
+        state = cb_data.get("state", "CLOSED")
+        return state in ("CLOSED", "HALF_OPEN")
 
     # -------------------------------------------------------------------------
     # Private helpers
@@ -399,9 +450,10 @@ class RalphAgent:
         return cmd
 
     def _parse_response(self, stdout: str, return_code: int) -> RalphStatus:
-        """Parse Claude CLI response (JSONL or text).
+        """Parse Claude CLI response using 3-strategy chain (JSON block -> JSONL -> text).
 
-        Mirrors ralph_extract_result_from_stream + on-stop.sh RALPH_STATUS extraction.
+        Delegates to ralph_sdk.parsing.parse_ralph_status for the actual parsing,
+        with session_id extraction handled here.
         """
         status = RalphStatus()
 
@@ -410,129 +462,48 @@ class RalphAgent:
             status.error = f"Claude CLI exited with code {return_code}"
             return status
 
-        # Try JSONL parsing first (primary path since v1.2.0)
+        # Extract session_id from JSONL before parsing status
+        self._extract_session_id(stdout)
+
+        # Use the 3-strategy parse chain
+        return parse_ralph_status(stdout)
+
+    def _extract_session_id(self, stdout: str) -> None:
+        """Extract session_id from JSONL result objects."""
         for line in reversed(stdout.strip().splitlines()):
             line = line.strip()
             if not line:
                 continue
             try:
                 obj = json.loads(line)
-                if obj.get("type") == "result":
-                    return self._parse_result_object(obj)
+                if obj.get("type") == "result" and "session_id" in obj:
+                    self.session_id = obj["session_id"]
+                    # Note: session save is fire-and-forget in sync context
+                    return
             except json.JSONDecodeError:
                 continue
 
-        # Fallback: extract RALPH_STATUS from text
-        return self._parse_text_status(stdout)
+    async def _load_session(self) -> None:
+        """Load session ID via state backend."""
+        self.session_id = await self.state_backend.read_session_id()
 
-    def _parse_result_object(self, obj: dict[str, Any]) -> RalphStatus:
-        """Parse a JSONL result object into RalphStatus."""
-        status = RalphStatus()
+    async def _save_session(self) -> None:
+        """Save session ID via state backend."""
+        await self.state_backend.write_session_id(self.session_id)
 
-        # Extract result text
-        result_text = ""
-        if "result" in obj:
-            result_text = obj["result"]
-        elif "content" in obj:
-            # Content may be a list of blocks
-            content = obj["content"]
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        result_text += block.get("text", "")
-            elif isinstance(content, str):
-                result_text = content
-
-        # Extract session ID
-        if "session_id" in obj:
-            self.session_id = obj["session_id"]
-            self._save_session()
-
-        # Extract RALPH_STATUS fields from result text
-        return self._extract_ralph_status(result_text, status)
-
-    def _extract_ralph_status(self, text: str, status: RalphStatus) -> RalphStatus:
-        """Extract RALPH_STATUS fields from response text.
-
-        Matches on-stop.sh field extraction with auto-unescape.
-        """
-        # Auto-unescape JSON-encoded \n (matching STREAM-3)
-        text = text.replace("\\n", "\n")
-
-        field_patterns = {
-            "WORK_TYPE": r"WORK_TYPE:\s*(.+?)(?:\n|$)",
-            "COMPLETED_TASK": r"COMPLETED_TASK:\s*(.+?)(?:\n|$)",
-            "NEXT_TASK": r"NEXT_TASK:\s*(.+?)(?:\n|$)",
-            "PROGRESS_SUMMARY": r"PROGRESS_SUMMARY:\s*(.+?)(?:\n|$)",
-            "EXIT_SIGNAL": r"EXIT_SIGNAL:\s*(.+?)(?:\n|$)",
-        }
-
-        for field_name, pattern in field_patterns.items():
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                value = match.group(1).strip()
-                if field_name == "WORK_TYPE":
-                    status.work_type = value
-                elif field_name == "COMPLETED_TASK":
-                    status.completed_task = value
-                elif field_name == "NEXT_TASK":
-                    status.next_task = value
-                elif field_name == "PROGRESS_SUMMARY":
-                    status.progress_summary = value
-                elif field_name == "EXIT_SIGNAL":
-                    status.exit_signal = value.lower() in ("true", "yes", "1")
-
-        return status
-
-    def _parse_text_status(self, text: str) -> RalphStatus:
-        """Fallback text parsing when JSONL not available."""
-        status = RalphStatus()
-        return self._extract_ralph_status(text, status)
-
-    def _load_session(self) -> None:
-        """Load session ID from .ralph/.claude_session_id."""
-        session_file = self.ralph_dir / ".claude_session_id"
-        if session_file.exists():
-            try:
-                self.session_id = session_file.read_text().strip()
-            except OSError:
-                pass
-
-    def _save_session(self) -> None:
-        """Save session ID to .ralph/.claude_session_id."""
-        session_file = self.ralph_dir / ".claude_session_id"
-        try:
-            session_file.write_text(self.session_id + "\n")
-        except OSError:
-            pass
-
-    def _increment_call_count(self) -> None:
-        """Increment API call counter (matching bash rate limiting)."""
-        call_count_file = self.ralph_dir / ".call_count"
-        last_reset_file = self.ralph_dir / ".last_reset"
-
-        # Check if hour has elapsed
+    async def _increment_call_count(self) -> None:
+        """Increment API call counter via state backend (matching bash rate limiting)."""
         now = int(time.time())
-        last_reset = 0
-        if last_reset_file.exists():
-            try:
-                last_reset = int(last_reset_file.read_text().strip())
-            except (ValueError, OSError):
-                pass
+        last_reset = await self.state_backend.read_last_reset()
 
         if now - last_reset >= 3600:
             # Reset counter
-            call_count_file.write_text("1\n")
-            last_reset_file.write_text(f"{now}\n")
+            await self.state_backend.write_call_count(1)
+            await self.state_backend.write_last_reset(now)
         else:
             # Increment
-            count = 0
-            if call_count_file.exists():
-                try:
-                    count = int(call_count_file.read_text().strip())
-                except (ValueError, OSError):
-                    pass
-            call_count_file.write_text(f"{count + 1}\n")
+            count = await self.state_backend.read_call_count()
+            await self.state_backend.write_call_count(count + 1)
 
     def _log_output(self, stdout: str, stderr: str, loop_count: int) -> None:
         """Log Claude output to .ralph/logs/."""
@@ -553,13 +524,13 @@ class RalphAgent:
     # TheStudio Adapter (SDK-3)
     # -------------------------------------------------------------------------
 
-    def process_task_packet(self, packet: dict[str, Any]) -> dict[str, Any]:
+    async def process_task_packet(self, packet: dict[str, Any]) -> dict[str, Any]:
         """Process a TheStudio TaskPacket and return a Signal.
 
-        Converts TaskPacket → TaskInput, runs iteration, returns TaskResult as Signal.
+        Converts TaskPacket -> TaskInput, runs iteration, returns TaskResult as Signal.
         """
         task_input = TaskInput.from_task_packet(packet)
-        status = self.run_iteration(task_input)
+        status = await self.run_iteration(task_input)
         result = TaskResult(
             status=status,
             loop_count=self.loop_count,
@@ -572,7 +543,7 @@ class RalphAgent:
     # -------------------------------------------------------------------------
 
     def handle_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-        """Dispatch tool calls to appropriate handlers."""
+        """Dispatch tool calls to appropriate handlers (sync — tools use direct file I/O)."""
         handlers = {
             "ralph_status": lambda inp: ralph_status_tool(
                 ralph_dir=str(self.ralph_dir), **inp
