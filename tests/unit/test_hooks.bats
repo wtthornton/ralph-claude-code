@@ -128,6 +128,22 @@ teardown() {
     echo "$stderr_output" | grep -q "1/3 complete"
     echo "$stderr_output" | grep -q "2 remaining"
     echo "$stderr_output" | grep -q "CLOSED"
+    echo "$stderr_output" | grep -q "Only run tests at epic boundaries"
+}
+
+@test "HOOKS-3: on-session-start.sh short-circuits when 0 tasks remaining" {
+    echo '{"loop_count": 10}' > .ralph/status.json
+    printf -- '- [x] task 1\n- [x] task 2\n- [x] task 3\n' > .ralph/fix_plan.md
+    echo '{"state": "CLOSED"}' > .ralph/.circuit_breaker_state
+
+    local stderr_output
+    stderr_output=$(echo '{}' | CLAUDE_PROJECT_DIR="$TEST_DIR" bash "$PROJECT_ROOT/templates/hooks/on-session-start.sh" 2>&1 >/dev/null)
+
+    echo "$stderr_output" | grep -q "ALL TASKS COMPLETE"
+    echo "$stderr_output" | grep -q "Do NOT run tests"
+    echo "$stderr_output" | grep -q "EXIT_SIGNAL: true"
+    # Should NOT contain the "read fix_plan" instruction
+    ! echo "$stderr_output" | grep -q "FIRST unchecked item"
 }
 
 @test "HOOKS-3: on-session-start.sh clears per-loop file tracking" {

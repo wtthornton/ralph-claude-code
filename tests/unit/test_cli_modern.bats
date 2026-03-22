@@ -111,7 +111,8 @@ setup() {
         context="Loop #${loop_count}. "
 
         if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
-            local incomplete_tasks=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null || echo "0")
+            local incomplete_tasks
+            incomplete_tasks=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || incomplete_tasks=0
             context+="Remaining tasks: ${incomplete_tasks}. "
         fi
 

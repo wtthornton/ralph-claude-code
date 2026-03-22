@@ -38,11 +38,11 @@ When performing cleanup, refactoring, or restructuring tasks:
 
 ## 🧪 Testing Guidelines (CRITICAL — Epic-Boundary QA)
 - **Do NOT run tests after every task.** Defer QA to epic boundaries.
+- **NEVER run `npm test`, `bats`, `pytest`, or any test/lint command mid-epic.** Set `TESTS_STATUS: DEFERRED` and STOP.
 - An **epic boundary** = completing the last `- [ ]` task under a `##` section in fix_plan.md.
 - At epic boundary: run full QA (lint/type/test) for all changes in that section.
 - Before EXIT_SIGNAL: true: mandatory full QA — never exit without passing tests.
 - For LARGE tasks (cross-module): run QA for that task's scope only.
-- Set `TESTS_STATUS: DEFERRED` when QA is intentionally skipped (mid-epic).
 - Only write tests for NEW functionality you implement.
 - Do NOT refactor existing tests unless broken.
 - Do NOT add "additional test coverage" as busy work.

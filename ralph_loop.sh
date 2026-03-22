@@ -667,9 +667,7 @@ ralph_extract_result_from_stream() {
     # STREAM-2: Count only top-level result objects — subagent results contain a
     # subagent or parent_tool_use_id field and should not trigger multi-task warnings
     local _result_count _toplevel_count
-    _result_count=$(grep -c -E '"type"[[:space:]]*:[[:space:]]*"result"' "$output_file" 2>/dev/null || echo "0")
-    _result_count=$(echo "$_result_count" | tr -d '[:space:]')
-    _result_count=$((_result_count + 0))
+    _result_count=$(grep -c -E '"type"[[:space:]]*:[[:space:]]*"result"' "$output_file" 2>/dev/null) || _result_count=0
     _toplevel_count=$(jq -c 'select(.type == "result") | select(.subagent == null and .parent_tool_use_id == null)' "$output_file" 2>/dev/null | wc -l || echo "$_result_count")
     _toplevel_count=$(echo "$_toplevel_count" | tr -d '[:space:]')
     _toplevel_count=$((_toplevel_count + 0))
@@ -1038,8 +1036,10 @@ should_exit_gracefully() {
     # Fix #144: Only match valid markdown checkboxes, not date entries like [2026-01-29]
     # Valid patterns: "- [ ]" (uncompleted) and "- [x]" or "- [X]" (completed)
     if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
-        local uncompleted_items=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null || echo "0")
-        local completed_items=$(grep -cE "^[[:space:]]*- \[[xX]\]" "$RALPH_DIR/fix_plan.md" 2>/dev/null || echo "0")
+        local uncompleted_items
+        uncompleted_items=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || uncompleted_items=0
+        local completed_items
+        completed_items=$(grep -cE "^[[:space:]]*- \[[xX]\]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || completed_items=0
         local total_items=$((uncompleted_items + completed_items))
 
         if [[ $total_items -gt 0 ]] && [[ $completed_items -eq $total_items ]]; then
@@ -1321,9 +1321,9 @@ dry_run_simulate() {
 
     if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local task_count
-        task_count=$(grep -c '^\- \[ \]' "$RALPH_DIR/fix_plan.md" 2>/dev/null || echo "0")
+        task_count=$(grep -c '^\- \[ \]' "$RALPH_DIR/fix_plan.md" 2>/dev/null) || task_count=0
         local done_count
-        done_count=$(grep -c '^\- \[x\]' "$RALPH_DIR/fix_plan.md" 2>/dev/null || echo "0")
+        done_count=$(grep -c '^\- \[x\]' "$RALPH_DIR/fix_plan.md" 2>/dev/null) || done_count=0
         log_status "INFO" "[DRY-RUN]   Tasks: $task_count open, $done_count done"
     fi
 
@@ -1405,7 +1405,8 @@ build_loop_context() {
     # Extract incomplete tasks from fix_plan.md
     # Bug #3 Fix: Support indented markdown checkboxes with [[:space:]]* pattern
     if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
-        local incomplete_tasks=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null || echo "0")
+        local incomplete_tasks
+        incomplete_tasks=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || incomplete_tasks=0
         context+="Remaining tasks: ${incomplete_tasks}. "
     fi
 
@@ -2705,8 +2706,25 @@ main() {
     # Reset exit signals to prevent stale state from prior run causing premature exit (Issue #194)
     # This is unconditional: regardless of how the previous run ended (crash, SIGKILL, API limit exit),
     # every new ralph invocation starts with a clean exit-signal slate.
-    echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}' > "$EXIT_SIGNALS_FILE"
-    log_status "INFO" "Reset exit signals for fresh start"
+    # However, if fix_plan is already 100% complete, pre-seed completion_indicators with 1
+    # so only 1 more EXIT_SIGNAL: true loop is needed (avoids zombie verification loops).
+    local _pre_uncompleted=1
+    if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
+        _pre_uncompleted=$(grep -cE '^\s*- \[ \]' "$RALPH_DIR/fix_plan.md" 2>/dev/null) || _pre_uncompleted=0
+        local _pre_completed
+        _pre_completed=$(grep -cE '^\s*- \[[xX]\]' "$RALPH_DIR/fix_plan.md" 2>/dev/null) || _pre_completed=0
+        if [[ $_pre_completed -eq 0 ]]; then
+            _pre_uncompleted=1  # No tasks at all — treat as incomplete
+        fi
+    fi
+
+    if [[ $_pre_uncompleted -eq 0 ]]; then
+        echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": [0]}' > "$EXIT_SIGNALS_FILE"
+        log_status "INFO" "Reset exit signals for fresh start (pre-seeded: fix_plan 100% complete)"
+    else
+        echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}' > "$EXIT_SIGNALS_FILE"
+        log_status "INFO" "Reset exit signals for fresh start"
+    fi
 
     # Reset circuit breaker for new session
     if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then

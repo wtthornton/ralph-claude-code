@@ -167,7 +167,7 @@ _ralph_prune_backups() {
     local backups
     backups=$(ls -1d "$backup_dir"/[0-9]* 2>/dev/null | sort -r)
     local count
-    count=$(echo "$backups" | grep -c . 2>/dev/null || echo "0")
+    count=$(echo "$backups" | grep -c . 2>/dev/null) || count=0
 
     if [[ "$count" -gt "$max" ]]; then
         echo "$backups" | tail -n +"$((max + 1))" | while IFS= read -r old_backup; do
