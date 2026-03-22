@@ -8,6 +8,7 @@
 **Related specs:** [RFC-001 §4 HIGH-1](../../TheStudio/docs/architecture/RFC-001-ralph-sdk-integration.md), `epic-sdk-pydantic-models.md`, `epic-sdk-async.md`
 **Depends on:** Epic 1 (Pydantic Models), Epic 4 (Async SDK)
 **Target Version:** v1.5.0
+**Status:** Done
 
 ---
 
@@ -38,12 +39,12 @@ TheStudio uses OpenTelemetry for distributed tracing. Ralph supports it optional
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SDK-CORR-1](story-sdk-corr-1-constructor.md) | Add correlation_id and tracer to RalphAgent.__init__() | Critical | Small | Pending |
-| [RALPH-SDK-CORR-2](story-sdk-corr-2-models.md) | Add correlation_id field to TaskResult and RalphStatusBlock | High | Small | Pending |
-| [RALPH-SDK-CORR-3](story-sdk-corr-3-logging.md) | Thread correlation_id through all log messages | High | Small | Pending |
-| [RALPH-SDK-CORR-4](story-sdk-corr-4-state.md) | Include correlation_id in status.json and circuit breaker events | Medium | Small | Pending |
-| [RALPH-SDK-CORR-5](story-sdk-corr-5-otel.md) | Optional OpenTelemetry span attributes | Medium | Small | Pending |
-| [RALPH-SDK-CORR-6](story-sdk-corr-6-optional-dep.md) | Add opentelemetry-api as optional dependency | Medium | Trivial | Pending |
+| [RALPH-SDK-CORR-1](story-sdk-corr-1-constructor.md) | Add correlation_id and tracer to RalphAgent.__init__() | Critical | Small | Done |
+| [RALPH-SDK-CORR-2](story-sdk-corr-2-models.md) | Add correlation_id field to TaskResult and RalphStatusBlock | High | Small | Done |
+| [RALPH-SDK-CORR-3](story-sdk-corr-3-logging.md) | Thread correlation_id through all log messages | High | Small | Done |
+| [RALPH-SDK-CORR-4](story-sdk-corr-4-state.md) | Include correlation_id in status.json and circuit breaker events | Medium | Small | Done |
+| [RALPH-SDK-CORR-5](story-sdk-corr-5-otel.md) | Optional OpenTelemetry span attributes | Medium | Small | Done |
+| [RALPH-SDK-CORR-6](story-sdk-corr-6-optional-dep.md) | Add opentelemetry-api as optional dependency | Medium | Trivial | Done |
 
 ## Implementation Order
 

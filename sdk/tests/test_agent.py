@@ -104,16 +104,17 @@ class TestRalphAgent:
         result = agent.run_sync()
         assert result.status.status == RalphLoopStatus.DRY_RUN
 
-    def test_should_exit_requires_dual_condition(self, project_dir, config):
+    @pytest.mark.asyncio
+    async def test_should_exit_requires_dual_condition(self, project_dir, config):
         agent = RalphAgent(config=config, project_dir=project_dir)
 
         # EXIT_SIGNAL alone is not enough
         status = RalphStatus(exit_signal=True, progress_summary="Still working")
-        assert agent.should_exit(status, 1) is False
+        assert await agent.should_exit(status, 1) is False
 
         # EXIT_SIGNAL + completion phrase = exit
         status2 = RalphStatus(exit_signal=True, progress_summary="All tasks complete")
-        assert agent.should_exit(status2, 2) is True
+        assert await agent.should_exit(status2, 2) is True
 
     @pytest.mark.asyncio
     async def test_check_rate_limit_ok(self, project_dir, config):
@@ -157,15 +158,17 @@ class TestRalphAgent:
         status = agent._parse_response("", 1)
         assert status.status == RalphLoopStatus.ERROR
 
-    def test_handle_tool_call(self, project_dir, config):
+    @pytest.mark.asyncio
+    async def test_handle_tool_call(self, project_dir, config):
         agent = RalphAgent(config=config, project_dir=project_dir)
-        result = agent.handle_tool_call("ralph_circuit_state", {})
+        result = await agent.handle_tool_call("ralph_circuit_state", {})
         assert result["ok"] is True
         assert result["state"] == "CLOSED"
 
-    def test_handle_unknown_tool(self, project_dir, config):
+    @pytest.mark.asyncio
+    async def test_handle_unknown_tool(self, project_dir, config):
         agent = RalphAgent(config=config, project_dir=project_dir)
-        result = agent.handle_tool_call("nonexistent", {})
+        result = await agent.handle_tool_call("nonexistent", {})
         assert result["ok"] is False
 
     def test_get_tool_definitions(self, project_dir, config):

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-def ralph_status_tool(
+async def ralph_status_tool(
     work_type: str = "UNKNOWN",
     completed_task: str = "",
     next_task: str = "",
@@ -55,7 +55,7 @@ def ralph_status_tool(
     }
 
 
-def ralph_rate_check_tool(
+async def ralph_rate_check_tool(
     ralph_dir: str = ".ralph",
     max_calls_per_hour: int = 100,
 ) -> dict[str, Any]:
@@ -104,7 +104,7 @@ def ralph_rate_check_tool(
     }
 
 
-def ralph_circuit_state_tool(
+async def ralph_circuit_state_tool(
     ralph_dir: str = ".ralph",
 ) -> dict[str, Any]:
     """Get current circuit breaker state.
@@ -131,7 +131,7 @@ def ralph_circuit_state_tool(
     }
 
 
-def ralph_task_update_tool(
+async def ralph_task_update_tool(
     task_description: str,
     completed: bool = False,
     ralph_dir: str = ".ralph",

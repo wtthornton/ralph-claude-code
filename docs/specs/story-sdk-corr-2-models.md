@@ -2,7 +2,7 @@
 
 **Epic:** [Correlation ID Threading](epic-sdk-correlation-id.md)
 **Priority:** High
-**Status:** Pending
+**Status:** Done
 **Effort:** Small
 **Component:** `sdk/ralph_sdk/agent.py`, `sdk/ralph_sdk/status.py`
 

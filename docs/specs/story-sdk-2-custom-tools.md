@@ -2,7 +2,7 @@
 
 **Epic:** [RALPH-SDK](epic-sdk-integration.md)
 **Priority:** High
-**Status:** Open
+**Status:** Superseded by v2.0.0
 **Effort:** Medium
 **Component:** `sdk/tools/`
 

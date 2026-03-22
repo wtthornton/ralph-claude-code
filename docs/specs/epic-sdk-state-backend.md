@@ -7,6 +7,7 @@
 **Components:** New `sdk/ralph_sdk/state.py`, `sdk/ralph_sdk/agent.py`, `sdk/ralph_sdk/status.py`
 **Related specs:** [RFC-001 §4 HIGH-2](../../TheStudio/docs/architecture/RFC-001-ralph-sdk-integration.md), `epic-sdk-pydantic-models.md`
 **Target Version:** v1.4.0
+**Status:** Done
 
 ---
 
@@ -51,12 +52,12 @@ contract — TheStudio owns their implementation.
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SDK-STATE-1](story-sdk-state-1-protocol.md) | Define RalphStateBackend Protocol | Critical | Small | Pending |
-| [RALPH-SDK-STATE-2](story-sdk-state-2-file-backend.md) | Implement FileStateBackend | Critical | Medium | Pending |
-| [RALPH-SDK-STATE-3](story-sdk-state-3-null-backend.md) | Implement NullStateBackend | High | Small | Pending |
-| [RALPH-SDK-STATE-4](story-sdk-state-4-wire-agent.md) | Wire state_backend into RalphAgent | Critical | Small | Pending |
-| [RALPH-SDK-STATE-5](story-sdk-state-5-remove-direct-io.md) | Remove direct file I/O from agent.py | High | Medium | Pending |
-| [RALPH-SDK-STATE-6](story-sdk-state-6-tests.md) | Test both backends | High | Small | Pending |
+| [RALPH-SDK-STATE-1](story-sdk-state-1-protocol.md) | Define RalphStateBackend Protocol | Critical | Small | Done |
+| [RALPH-SDK-STATE-2](story-sdk-state-2-file-backend.md) | Implement FileStateBackend | Critical | Medium | Done |
+| [RALPH-SDK-STATE-3](story-sdk-state-3-null-backend.md) | Implement NullStateBackend | High | Small | Done |
+| [RALPH-SDK-STATE-4](story-sdk-state-4-wire-agent.md) | Wire state_backend into RalphAgent | Critical | Small | Done |
+| [RALPH-SDK-STATE-5](story-sdk-state-5-remove-direct-io.md) | Remove direct file I/O from agent.py | High | Medium | Done |
+| [RALPH-SDK-STATE-6](story-sdk-state-6-tests.md) | Test both backends | High | Small | Done |
 
 ## Implementation Order
 

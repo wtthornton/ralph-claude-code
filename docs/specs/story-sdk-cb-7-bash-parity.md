@@ -2,7 +2,7 @@
 
 **Epic:** [Active Circuit Breaker](epic-sdk-circuit-breaker.md)
 **Priority:** High
-**Status:** Pending
+**Status:** Done
 **Effort:** Small
 **Component:** `sdk/tests/`
 

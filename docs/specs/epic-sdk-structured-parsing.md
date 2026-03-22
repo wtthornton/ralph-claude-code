@@ -7,6 +7,7 @@
 **Components:** New `sdk/ralph_sdk/parsing.py`, `sdk/ralph_sdk/agent.py`
 **Related specs:** [RFC-001 §4 HIGH-4](../../TheStudio/docs/architecture/RFC-001-ralph-sdk-integration.md), `epic-sdk-pydantic-models.md`, `epic-jsonl-stream-resilience.md`
 **Target Version:** v1.4.0
+**Status:** Done
 
 ---
 
@@ -35,11 +36,11 @@ Even without TheStudio, structured parsing improves Ralph SDK reliability:
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SDK-PARSING-1](story-sdk-parsing-1-schema.md) | Define RalphStatusBlock Pydantic model with enums | Critical | Small | Pending |
-| [RALPH-SDK-PARSING-2](story-sdk-parsing-2-parser.md) | Implement multi-strategy parse_ralph_status() | Critical | Medium | Pending |
-| [RALPH-SDK-PARSING-3](story-sdk-parsing-3-bugfixes.md) | Fix EXIT_SIGNAL coercion and multi-result handling | High | Small | Pending |
-| [RALPH-SDK-PARSING-4](story-sdk-parsing-4-prompt.md) | Update agent prompt to request JSON status output | Medium | Trivial | Pending |
-| [RALPH-SDK-PARSING-5](story-sdk-parsing-5-wire.md) | Wire new parser into _parse_response() | High | Small | Pending |
+| [RALPH-SDK-PARSING-1](story-sdk-parsing-1-schema.md) | Define RalphStatusBlock Pydantic model with enums | Critical | Small | Done |
+| [RALPH-SDK-PARSING-2](story-sdk-parsing-2-parser.md) | Implement multi-strategy parse_ralph_status() | Critical | Medium | Done |
+| [RALPH-SDK-PARSING-3](story-sdk-parsing-3-bugfixes.md) | Fix EXIT_SIGNAL coercion and multi-result handling | High | Small | Done |
+| [RALPH-SDK-PARSING-4](story-sdk-parsing-4-prompt.md) | Update agent prompt to request JSON status output | Medium | Trivial | Done |
+| [RALPH-SDK-PARSING-5](story-sdk-parsing-5-wire.md) | Wire new parser into _parse_response() | High | Small | Done |
 
 ## Implementation Order
 

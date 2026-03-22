@@ -2,7 +2,7 @@
 
 **Epic:** [Pydantic v2 Models](epic-sdk-pydantic-models.md)
 **Priority:** Critical
-**Status:** Pending
+**Status:** Done
 **Effort:** Trivial
 **Component:** `sdk/pyproject.toml`
 

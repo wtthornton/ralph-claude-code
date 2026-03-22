@@ -2,7 +2,7 @@
 
 **Epic:** [Pluggable State Backend](epic-sdk-state-backend.md)
 **Priority:** Critical
-**Status:** Pending
+**Status:** Done
 **Effort:** Medium
 **Component:** `sdk/ralph_sdk/state.py`
 

@@ -6,6 +6,7 @@
 **Components:** `ralph_loop.sh`, `lib/`, `.claude/agents/ralph.md`, new `sdk/` directory
 **Related specs:** `IMPLEMENTATION_PLAN.md` (§Phase 2)
 **Target Version:** v1.3.0
+**Status:** Superseded by v2.0.0
 **Depends on:** None (foundational)
 
 ---
@@ -32,10 +33,10 @@ TheStudio already uses Claude Agent SDK natively. Ralph adopting SDK makes integ
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [SDK-1](story-sdk-1-proof-of-concept.md) | Agent SDK Proof of Concept | High | Medium | **Open** |
-| [SDK-2](story-sdk-2-custom-tools.md) | Define Custom Tools for Agent SDK | High | Medium | **Open** |
-| [SDK-3](story-sdk-3-hybrid-architecture.md) | Implement Hybrid CLI/SDK Architecture | Critical | Large | **Open** |
-| [SDK-4](story-sdk-4-migration-strategy.md) | Document SDK Migration Strategy | Medium | Small | **Open** |
+| [SDK-1](story-sdk-1-proof-of-concept.md) | Agent SDK Proof of Concept | High | Medium | **Superseded** |
+| [SDK-2](story-sdk-2-custom-tools.md) | Define Custom Tools for Agent SDK | High | Medium | **Superseded** |
+| [SDK-3](story-sdk-3-hybrid-architecture.md) | Implement Hybrid CLI/SDK Architecture | Critical | Large | **Superseded** |
+| [SDK-4](story-sdk-4-migration-strategy.md) | Document SDK Migration Strategy | Medium | Small | **Superseded** |
 
 ## Implementation Order
 

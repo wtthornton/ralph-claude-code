@@ -44,7 +44,7 @@ class RalphAgentInterface(Protocol):
         """Execute a single loop iteration."""
         ...
 
-    def should_exit(self, status: RalphStatus, loop_count: int) -> bool:
+    async def should_exit(self, status: RalphStatus, loop_count: int) -> bool:
         """Evaluate exit conditions (dual-condition gate)."""
         ...
 
@@ -275,7 +275,7 @@ class RalphAgent:
                 iteration_status = await self.run_iteration(task_input)
 
                 # Check exit conditions (dual-condition gate)
-                if self.should_exit(iteration_status, self.loop_count):
+                if await self.should_exit(iteration_status, self.loop_count):
                     logger.info("Exit conditions met after %d loops", self.loop_count)
                     result.status = iteration_status
                     break
@@ -363,7 +363,7 @@ class RalphAgent:
                 error=f"Claude CLI not found: {self.config.claude_code_cmd}",
             )
 
-    def should_exit(self, status: RalphStatus, loop_count: int) -> bool:
+    async def should_exit(self, status: RalphStatus, loop_count: int) -> bool:
         """Dual-condition exit gate (matching bash implementation).
 
         Requires BOTH:
@@ -542,27 +542,25 @@ class RalphAgent:
     # Tool handlers (for Agent SDK tool registration)
     # -------------------------------------------------------------------------
 
-    def handle_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-        """Dispatch tool calls to appropriate handlers (sync — tools use direct file I/O)."""
-        handlers = {
-            "ralph_status": lambda inp: ralph_status_tool(
-                ralph_dir=str(self.ralph_dir), **inp
-            ),
-            "ralph_rate_check": lambda inp: ralph_rate_check_tool(
+    async def handle_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+        """Dispatch tool calls to appropriate async handlers."""
+        if tool_name == "ralph_status":
+            return await ralph_status_tool(
+                ralph_dir=str(self.ralph_dir), **tool_input
+            )
+        elif tool_name == "ralph_rate_check":
+            return await ralph_rate_check_tool(
                 ralph_dir=str(self.ralph_dir),
                 max_calls_per_hour=self.config.max_calls_per_hour,
-            ),
-            "ralph_circuit_state": lambda inp: ralph_circuit_state_tool(
+            )
+        elif tool_name == "ralph_circuit_state":
+            return await ralph_circuit_state_tool(
                 ralph_dir=str(self.ralph_dir),
-            ),
-            "ralph_task_update": lambda inp: ralph_task_update_tool(
-                ralph_dir=str(self.ralph_dir), **inp
-            ),
-        }
-
-        handler = handlers.get(tool_name)
-        if handler:
-            return handler(tool_input)
+            )
+        elif tool_name == "ralph_task_update":
+            return await ralph_task_update_tool(
+                ralph_dir=str(self.ralph_dir), **tool_input
+            )
         return {"ok": False, "error": f"Unknown tool: {tool_name}"}
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:

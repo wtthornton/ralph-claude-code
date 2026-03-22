@@ -2,7 +2,7 @@
 
 **Epic:** [Correlation ID Threading](epic-sdk-correlation-id.md)
 **Priority:** Medium
-**Status:** Pending
+**Status:** Done
 **Effort:** Small
 **Component:** `sdk/ralph_sdk/status.py`, `sdk/ralph_sdk/circuit_breaker.py`
 

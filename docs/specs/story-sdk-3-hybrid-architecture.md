@@ -2,7 +2,7 @@
 
 **Epic:** [RALPH-SDK](epic-sdk-integration.md)
 **Priority:** Critical
-**Status:** Open
+**Status:** Superseded by v2.0.0
 **Effort:** Large
 **Component:** `sdk/ralph_agent.py`, `ralph_loop.sh`, new `sdk/interface.py`
 

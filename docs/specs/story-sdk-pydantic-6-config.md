@@ -2,7 +2,7 @@
 
 **Epic:** [Pydantic v2 Models](epic-sdk-pydantic-models.md)
 **Priority:** High
-**Status:** Pending
+**Status:** Done
 **Effort:** Medium
 **Component:** `sdk/ralph_sdk/config.py`
 

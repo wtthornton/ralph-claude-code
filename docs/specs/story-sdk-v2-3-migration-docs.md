@@ -2,7 +2,7 @@
 
 **Epic:** [Release, Integration Testing & v2.0.0](epic-sdk-v2-release.md)
 **Priority:** High
-**Status:** Pending
+**Status:** Done
 **Effort:** Small
 **Component:** `docs/specs/sdk-migration-strategy.md`
 

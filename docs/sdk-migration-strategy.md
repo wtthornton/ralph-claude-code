@@ -140,6 +140,46 @@ Environment vars  → read directly (both)
 
 Precedence is identical: Environment > ralph.config.json > .ralphrc > defaults.
 
+### RFC Section 9 Open Question Resolutions
+
+| # | Question | Decision | Rationale |
+|---|----------|----------|-----------|
+| 1 | Should Ralph SDK depend on TheStudio models? | **Own models** | Zero coupling. Ralph is free and independent. TheStudio writes a thin mapper (`TaskPacketRead` -> `TaskPacketInput`). |
+| 2 | `anyio` vs `asyncio`? | **`asyncio` only** | TheStudio uses asyncio. No Trio requirement. Avoids the anyio dependency. |
+| 3 | Include task queue ops in state backend? | **Exclude** | TheStudio manages tasks via TaskPacket lifecycle. Standalone Ralph reads `fix_plan.md` directly. Task queue is an orchestration concern, not a state concern. |
+| 4 | Configurable system prompt template? | **Yes — `system_prompt` override** | `run_iteration()` accepts an optional `system_prompt: str` parameter. When provided, it replaces the default PROMPT.md content. Enables TheStudio's `DeveloperRoleConfig.system_prompt_template`. |
+
+#### Q1: Own Models (Decision)
+
+Ralph defines `TaskPacketInput`, `IntentSpecInput`, and `EvidenceBundle` in its own
+codebase. These models mirror TheStudio's shapes but are independently versioned.
+TheStudio maps from its internal models to Ralph's types. This means:
+
+- Ralph can be used by any orchestration platform, not just TheStudio
+- Ralph has zero dependency on TheStudio packages
+- Model version drift is caught at TheStudio's mapper boundary, not at runtime
+
+#### Q2: asyncio Only (Decision)
+
+The SDK uses `asyncio` exclusively. The `FileStateBackend` uses `aiofiles` for async
+file I/O. The `NullStateBackend` uses `asyncio.sleep(0)` for cooperative yielding.
+There is no `anyio` or `trio` support.
+
+For callers that need synchronous access, `run_iteration_sync()` wraps the async
+method via `asyncio.run()`.
+
+#### Q3: Exclude Task Queue (Decision)
+
+`RalphStateBackend` Protocol covers: status, circuit breaker, rate limiting, session,
+and metrics. It does NOT include task queue operations (create, claim, complete, fail).
+Task lifecycle is managed by TheStudio's Temporal workflows, not by Ralph's state layer.
+
+#### Q4: System Prompt Override (Decision)
+
+`run_iteration(task_input, system_prompt="...")` replaces the default PROMPT.md content.
+This enables TheStudio to inject its `DeveloperRoleConfig.system_prompt_template` which
+includes role context, project conventions, and team-specific instructions.
+
 ## FAQ
 
 **Q: Do I need to rewrite my hooks for SDK mode?**

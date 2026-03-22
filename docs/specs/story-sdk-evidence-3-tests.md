@@ -2,7 +2,7 @@
 
 **Epic:** [EvidenceBundle Output](epic-sdk-evidence-bundle.md)
 **Priority:** High
-**Status:** Pending
+**Status:** Done
 **Effort:** Medium
 **Component:** `sdk/ralph_sdk/evidence.py`
 

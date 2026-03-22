@@ -8,6 +8,7 @@
 **Related specs:** [RFC-001 §4 BLOCKING-4](../../TheStudio/docs/architecture/RFC-001-ralph-sdk-integration.md), `epic-sdk-pydantic-models.md`, `epic-sdk-taskpacket.md`
 **Depends on:** Epic 1 (Pydantic Models), Epic 7 (TaskPacket Conversion)
 **Target Version:** v2.0.0
+**Status:** Done
 
 ---
 
@@ -51,12 +52,12 @@ Even without TheStudio, `to_evidence_bundle()` provides structured output:
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SDK-EVIDENCE-1](story-sdk-evidence-1-model.md) | Define Ralph-side EvidenceBundle model | Critical | Small | Pending |
-| [RALPH-SDK-EVIDENCE-2](story-sdk-evidence-2-method.md) | Implement TaskResult.to_evidence_bundle() | Critical | Small | Pending |
-| [RALPH-SDK-EVIDENCE-3](story-sdk-evidence-3-tests.md) | Extract test results from raw output | High | Medium | Pending |
-| [RALPH-SDK-EVIDENCE-4](story-sdk-evidence-4-lint.md) | Extract lint results from raw output | High | Small | Pending |
-| [RALPH-SDK-EVIDENCE-5](story-sdk-evidence-5-summary.md) | Preserve full raw output in agent_summary | Medium | Trivial | Pending |
-| [RALPH-SDK-EVIDENCE-6](story-sdk-evidence-6-roundtrip.md) | JSON round-trip verification | High | Small | Pending |
+| [RALPH-SDK-EVIDENCE-1](story-sdk-evidence-1-model.md) | Define Ralph-side EvidenceBundle model | Critical | Small | Done |
+| [RALPH-SDK-EVIDENCE-2](story-sdk-evidence-2-method.md) | Implement TaskResult.to_evidence_bundle() | Critical | Small | Done |
+| [RALPH-SDK-EVIDENCE-3](story-sdk-evidence-3-tests.md) | Extract test results from raw output | High | Medium | Done |
+| [RALPH-SDK-EVIDENCE-4](story-sdk-evidence-4-lint.md) | Extract lint results from raw output | High | Small | Done |
+| [RALPH-SDK-EVIDENCE-5](story-sdk-evidence-5-summary.md) | Preserve full raw output in agent_summary | Medium | Trivial | Done |
+| [RALPH-SDK-EVIDENCE-6](story-sdk-evidence-6-roundtrip.md) | JSON round-trip verification | High | Small | Done |
 
 ## Implementation Order
 

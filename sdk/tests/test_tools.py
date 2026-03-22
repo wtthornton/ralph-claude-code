@@ -23,8 +23,9 @@ def ralph_dir(tmp_path):
 
 
 class TestRalphStatusTool:
-    def test_writes_status_json(self, ralph_dir):
-        result = ralph_status_tool(
+    @pytest.mark.asyncio
+    async def test_writes_status_json(self, ralph_dir):
+        result = await ralph_status_tool(
             work_type="IMPLEMENTATION",
             completed_task="Added login form",
             next_task="Add validation",
@@ -39,8 +40,9 @@ class TestRalphStatusTool:
         assert data["WORK_TYPE"] == "IMPLEMENTATION"
         assert data["EXIT_SIGNAL"] is False
 
-    def test_exit_signal_sets_completed(self, ralph_dir):
-        result = ralph_status_tool(
+    @pytest.mark.asyncio
+    async def test_exit_signal_sets_completed(self, ralph_dir):
+        result = await ralph_status_tool(
             work_type="IMPLEMENTATION",
             completed_task="All done",
             progress_summary="Complete",
@@ -54,54 +56,61 @@ class TestRalphStatusTool:
 
 
 class TestRalphRateCheckTool:
-    def test_fresh_state(self, ralph_dir):
-        result = ralph_rate_check_tool(ralph_dir=ralph_dir, max_calls_per_hour=100)
+    @pytest.mark.asyncio
+    async def test_fresh_state(self, ralph_dir):
+        result = await ralph_rate_check_tool(ralph_dir=ralph_dir, max_calls_per_hour=100)
         assert result["ok"] is True
         assert result["calls_remaining"] == 100
         assert result["rate_limited"] is False
 
-    def test_at_limit(self, ralph_dir):
+    @pytest.mark.asyncio
+    async def test_at_limit(self, ralph_dir):
         (Path(ralph_dir) / ".call_count").write_text("100")
         (Path(ralph_dir) / ".last_reset").write_text(str(int(time.time())))
-        result = ralph_rate_check_tool(ralph_dir=ralph_dir, max_calls_per_hour=100)
+        result = await ralph_rate_check_tool(ralph_dir=ralph_dir, max_calls_per_hour=100)
         assert result["calls_remaining"] == 0
         assert result["rate_limited"] is True
 
-    def test_expired_resets(self, ralph_dir):
+    @pytest.mark.asyncio
+    async def test_expired_resets(self, ralph_dir):
         (Path(ralph_dir) / ".call_count").write_text("100")
         (Path(ralph_dir) / ".last_reset").write_text(str(int(time.time()) - 7200))
-        result = ralph_rate_check_tool(ralph_dir=ralph_dir, max_calls_per_hour=100)
+        result = await ralph_rate_check_tool(ralph_dir=ralph_dir, max_calls_per_hour=100)
         # Elapsed > 3600 so remaining = max (counter not physically reset until next call)
         assert result["calls_remaining"] == 0  # count file still says 100
 
 
 class TestRalphCircuitStateTool:
-    def test_default_closed(self, ralph_dir):
-        result = ralph_circuit_state_tool(ralph_dir=ralph_dir)
+    @pytest.mark.asyncio
+    async def test_default_closed(self, ralph_dir):
+        result = await ralph_circuit_state_tool(ralph_dir=ralph_dir)
         assert result["ok"] is True
         assert result["state"] == "CLOSED"
         assert result["can_proceed"] is True
 
-    def test_open_blocks(self, ralph_dir):
+    @pytest.mark.asyncio
+    async def test_open_blocks(self, ralph_dir):
         cb_file = Path(ralph_dir) / ".circuit_breaker_state"
         cb_file.write_text(json.dumps({"state": "OPEN", "no_progress_count": 3}))
-        result = ralph_circuit_state_tool(ralph_dir=ralph_dir)
+        result = await ralph_circuit_state_tool(ralph_dir=ralph_dir)
         assert result["state"] == "OPEN"
         assert result["can_proceed"] is False
 
-    def test_half_open_allows(self, ralph_dir):
+    @pytest.mark.asyncio
+    async def test_half_open_allows(self, ralph_dir):
         cb_file = Path(ralph_dir) / ".circuit_breaker_state"
         cb_file.write_text(json.dumps({"state": "HALF_OPEN"}))
-        result = ralph_circuit_state_tool(ralph_dir=ralph_dir)
+        result = await ralph_circuit_state_tool(ralph_dir=ralph_dir)
         assert result["state"] == "HALF_OPEN"
         assert result["can_proceed"] is True
 
 
 class TestRalphTaskUpdateTool:
-    def test_complete_task(self, ralph_dir):
+    @pytest.mark.asyncio
+    async def test_complete_task(self, ralph_dir):
         fix_plan = Path(ralph_dir) / "fix_plan.md"
         fix_plan.write_text("# Fix Plan\n- [ ] Add login form\n- [ ] Add validation\n")
-        result = ralph_task_update_tool(
+        result = await ralph_task_update_tool(
             task_description="Add login form",
             completed=True,
             ralph_dir=ralph_dir,
@@ -111,10 +120,11 @@ class TestRalphTaskUpdateTool:
         assert "- [x] Add login form" in content
         assert "- [ ] Add validation" in content
 
-    def test_reopen_task(self, ralph_dir):
+    @pytest.mark.asyncio
+    async def test_reopen_task(self, ralph_dir):
         fix_plan = Path(ralph_dir) / "fix_plan.md"
         fix_plan.write_text("# Fix Plan\n- [x] Add login form\n")
-        result = ralph_task_update_tool(
+        result = await ralph_task_update_tool(
             task_description="Add login form",
             completed=False,
             ralph_dir=ralph_dir,
@@ -123,18 +133,20 @@ class TestRalphTaskUpdateTool:
         content = fix_plan.read_text()
         assert "- [ ] Add login form" in content
 
-    def test_missing_task(self, ralph_dir):
+    @pytest.mark.asyncio
+    async def test_missing_task(self, ralph_dir):
         fix_plan = Path(ralph_dir) / "fix_plan.md"
         fix_plan.write_text("# Fix Plan\n- [ ] Add login form\n")
-        result = ralph_task_update_tool(
+        result = await ralph_task_update_tool(
             task_description="Nonexistent task",
             completed=True,
             ralph_dir=ralph_dir,
         )
         assert result["ok"] is False
 
-    def test_missing_fix_plan(self, ralph_dir):
-        result = ralph_task_update_tool(
+    @pytest.mark.asyncio
+    async def test_missing_fix_plan(self, ralph_dir):
+        result = await ralph_task_update_tool(
             task_description="Something",
             completed=True,
             ralph_dir=ralph_dir,

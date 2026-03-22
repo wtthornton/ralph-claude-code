@@ -2,7 +2,7 @@
 
 **Epic:** [RALPH-SDK](epic-sdk-integration.md)
 **Priority:** Medium
-**Status:** Open
+**Status:** Superseded by v2.0.0
 **Effort:** Small
 **Component:** `docs/sdk-migration.md`
 

@@ -23,7 +23,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/audit.sh" ]] && source "$SCRIPT_DIR/lib/audit.sh"
 
 # Version
-RALPH_VERSION="2.0.0"
+RALPH_VERSION="2.0.1"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder

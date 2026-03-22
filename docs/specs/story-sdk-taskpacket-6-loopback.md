@@ -2,7 +2,7 @@
 
 **Epic:** [TaskPacket Conversion](epic-sdk-taskpacket.md)
 **Priority:** High
-**Status:** Pending
+**Status:** Done
 **Effort:** Small
 **Component:** `sdk/ralph_sdk/agent.py`
 

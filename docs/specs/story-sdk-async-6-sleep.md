@@ -2,7 +2,7 @@
 
 **Epic:** [Async SDK](epic-sdk-async.md)
 **Priority:** High
-**Status:** Pending
+**Status:** Done
 **Effort:** Trivial
 **Component:** `sdk/ralph_sdk/agent.py`
 

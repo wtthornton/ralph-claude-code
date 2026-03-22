@@ -2,7 +2,7 @@
 
 **Epic:** [Active Circuit Breaker](epic-sdk-circuit-breaker.md)
 **Priority:** Critical
-**Status:** Pending
+**Status:** Done
 **Effort:** Small
 **Component:** `sdk/ralph_sdk/circuit_breaker.py`
 

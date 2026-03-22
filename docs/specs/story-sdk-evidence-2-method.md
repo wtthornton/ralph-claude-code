@@ -2,7 +2,7 @@
 
 **Epic:** [EvidenceBundle Output](epic-sdk-evidence-bundle.md)
 **Priority:** Critical
-**Status:** Pending
+**Status:** Done
 **Effort:** Small
 **Component:** `sdk/ralph_sdk/agent.py`
 

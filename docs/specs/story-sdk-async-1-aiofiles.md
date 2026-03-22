@@ -2,7 +2,7 @@
 
 **Epic:** [Async SDK](epic-sdk-async.md)
 **Priority:** Critical
-**Status:** Pending
+**Status:** Done
 **Effort:** Trivial
 **Component:** `sdk/pyproject.toml`
 

@@ -8,6 +8,7 @@
 **Related specs:** All SDK epics, [RFC-001](../../TheStudio/docs/architecture/RFC-001-ralph-sdk-integration.md)
 **Depends on:** All previous SDK epics (1-8)
 **Target Version:** v2.0.0
+**Status:** Done
 
 ---
 
@@ -33,13 +34,13 @@ Version bump in both `package.json` and `ralph_loop.sh` `RALPH_VERSION` must sta
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SDK-V2-1](story-sdk-v2-1-integration-test.md) | Write end-to-end integration test (TaskPacket → Ralph → EvidenceBundle) | Critical | Medium | Pending |
-| [RALPH-SDK-V2-2](story-sdk-v2-2-promote-models.md) | Promote Pydantic TaskInput as default | High | Small | Pending |
-| [RALPH-SDK-V2-3](story-sdk-v2-3-migration-docs.md) | Update sdk-migration-strategy.md with v2.0.0 guide | High | Small | Pending |
-| [RALPH-SDK-V2-4](story-sdk-v2-4-open-questions.md) | Resolve and document RFC §9 open questions | Medium | Small | Pending |
-| [RALPH-SDK-V2-5](story-sdk-v2-5-version-bump.md) | Bump version to 2.0.0 in package.json and ralph_loop.sh | Critical | Trivial | Pending |
-| [RALPH-SDK-V2-6](story-sdk-v2-6-claude-md.md) | Update CLAUDE.md with new SDK architecture | High | Small | Pending |
-| [RALPH-SDK-V2-7](story-sdk-v2-7-cli-regression.md) | Full CLI regression test (bash loop + SDK mode) | Critical | Medium | Pending |
+| [RALPH-SDK-V2-1](story-sdk-v2-1-integration-test.md) | Write end-to-end integration test (TaskPacket → Ralph → EvidenceBundle) | Critical | Medium | Done |
+| [RALPH-SDK-V2-2](story-sdk-v2-2-promote-models.md) | Promote Pydantic TaskInput as default | High | Small | Done |
+| [RALPH-SDK-V2-3](story-sdk-v2-3-migration-docs.md) | Update sdk-migration-strategy.md with v2.0.0 guide | High | Small | Done |
+| [RALPH-SDK-V2-4](story-sdk-v2-4-open-questions.md) | Resolve and document RFC §9 open questions | Medium | Small | Done |
+| [RALPH-SDK-V2-5](story-sdk-v2-5-version-bump.md) | Bump version to 2.0.0 in package.json and ralph_loop.sh | Critical | Trivial | Done |
+| [RALPH-SDK-V2-6](story-sdk-v2-6-claude-md.md) | Update CLAUDE.md with new SDK architecture | High | Small | Done |
+| [RALPH-SDK-V2-7](story-sdk-v2-7-cli-regression.md) | Full CLI regression test (bash loop + SDK mode) | Critical | Medium | Done |
 
 ## Implementation Order
 

@@ -9,6 +9,7 @@
 **Related specs:** [RFC-001 §4 HIGH-3](../../TheStudio/docs/architecture/RFC-001-ralph-sdk-integration.md), `epic-sdk-state-backend.md`
 **Depends on:** Epic 2 (State Backend Protocol)
 **Target Version:** v1.5.0
+**Status:** Done
 
 ---
 
@@ -41,13 +42,13 @@ The SDK currently relies on the bash loop for circuit breaker management. When r
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SDK-CB-1](story-sdk-cb-1-class.md) | Implement CircuitBreaker class with state machine | Critical | Medium | Pending |
-| [RALPH-SDK-CB-2](story-sdk-cb-2-success.md) | Implement record_success() — HALF_OPEN → CLOSED | High | Small | Pending |
-| [RALPH-SDK-CB-3](story-sdk-cb-3-failure.md) | Implement record_failure() with sliding window | Critical | Medium | Pending |
-| [RALPH-SDK-CB-4](story-sdk-cb-4-no-progress.md) | Implement record_no_progress() detection | High | Small | Pending |
-| [RALPH-SDK-CB-5](story-sdk-cb-5-can-proceed.md) | Implement can_proceed() with cooldown check | Critical | Small | Pending |
-| [RALPH-SDK-CB-6](story-sdk-cb-6-wire-agent.md) | Wire CircuitBreaker into RalphAgent loop | High | Small | Pending |
-| [RALPH-SDK-CB-7](story-sdk-cb-7-bash-parity.md) | Verify behavior matches lib/circuit_breaker.sh | High | Small | Pending |
+| [RALPH-SDK-CB-1](story-sdk-cb-1-class.md) | Implement CircuitBreaker class with state machine | Critical | Medium | Done |
+| [RALPH-SDK-CB-2](story-sdk-cb-2-success.md) | Implement record_success() — HALF_OPEN → CLOSED | High | Small | Done |
+| [RALPH-SDK-CB-3](story-sdk-cb-3-failure.md) | Implement record_failure() with sliding window | Critical | Medium | Done |
+| [RALPH-SDK-CB-4](story-sdk-cb-4-no-progress.md) | Implement record_no_progress() detection | High | Small | Done |
+| [RALPH-SDK-CB-5](story-sdk-cb-5-can-proceed.md) | Implement can_proceed() with cooldown check | Critical | Small | Done |
+| [RALPH-SDK-CB-6](story-sdk-cb-6-wire-agent.md) | Wire CircuitBreaker into RalphAgent loop | High | Small | Done |
+| [RALPH-SDK-CB-7](story-sdk-cb-7-bash-parity.md) | Verify behavior matches lib/circuit_breaker.sh | High | Small | Done |
 
 ## Implementation Order
 

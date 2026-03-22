@@ -8,6 +8,7 @@
 **Related specs:** [RFC-001 §4 BLOCKING-1](../../TheStudio/docs/architecture/RFC-001-ralph-sdk-integration.md), `epic-sdk-pydantic-models.md`, `epic-sdk-state-backend.md`
 **Depends on:** Epic 1 (Pydantic Models), Epic 2 (State Backend Protocol)
 **Target Version:** v1.5.0
+**Status:** Done
 
 ---
 
@@ -53,15 +54,15 @@ class RalphAgent:
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SDK-ASYNC-1](story-sdk-async-1-aiofiles.md) | Add aiofiles dependency | Critical | Trivial | Pending |
-| [RALPH-SDK-ASYNC-2](story-sdk-async-2-file-backend.md) | Make FileStateBackend async with aiofiles | Critical | Medium | Pending |
-| [RALPH-SDK-ASYNC-3](story-sdk-async-3-run.md) | Convert RalphAgent.run() to async | Critical | Medium | Pending |
-| [RALPH-SDK-ASYNC-4](story-sdk-async-4-iteration.md) | Convert RalphAgent.run_iteration() to async subprocess | Critical | Medium | Pending |
-| [RALPH-SDK-ASYNC-5](story-sdk-async-5-checks.md) | Convert should_exit, check_rate_limit, check_circuit_breaker to async | High | Small | Pending |
-| [RALPH-SDK-ASYNC-6](story-sdk-async-6-sleep.md) | Replace time.sleep with asyncio.sleep | High | Trivial | Pending |
-| [RALPH-SDK-ASYNC-7](story-sdk-async-7-sync-wrapper.md) | Add run_sync() wrapper and update __main__.py | Critical | Small | Pending |
-| [RALPH-SDK-ASYNC-8](story-sdk-async-8-tools.md) | Convert tool handlers to async | Medium | Small | Pending |
-| [RALPH-SDK-ASYNC-9](story-sdk-async-9-cli-verify.md) | Verify CLI mode end-to-end | Critical | Small | Pending |
+| [RALPH-SDK-ASYNC-1](story-sdk-async-1-aiofiles.md) | Add aiofiles dependency | Critical | Trivial | Done |
+| [RALPH-SDK-ASYNC-2](story-sdk-async-2-file-backend.md) | Make FileStateBackend async with aiofiles | Critical | Medium | Done |
+| [RALPH-SDK-ASYNC-3](story-sdk-async-3-run.md) | Convert RalphAgent.run() to async | Critical | Medium | Done |
+| [RALPH-SDK-ASYNC-4](story-sdk-async-4-iteration.md) | Convert RalphAgent.run_iteration() to async subprocess | Critical | Medium | Done |
+| [RALPH-SDK-ASYNC-5](story-sdk-async-5-checks.md) | Convert should_exit, check_rate_limit, check_circuit_breaker to async | High | Small | Done |
+| [RALPH-SDK-ASYNC-6](story-sdk-async-6-sleep.md) | Replace time.sleep with asyncio.sleep | High | Trivial | Done |
+| [RALPH-SDK-ASYNC-7](story-sdk-async-7-sync-wrapper.md) | Add run_sync() wrapper and update __main__.py | Critical | Small | Done |
+| [RALPH-SDK-ASYNC-8](story-sdk-async-8-tools.md) | Convert tool handlers to async | Medium | Small | Done |
+| [RALPH-SDK-ASYNC-9](story-sdk-async-9-cli-verify.md) | Verify CLI mode end-to-end | Critical | Small | Done |
 
 ## Implementation Order
 

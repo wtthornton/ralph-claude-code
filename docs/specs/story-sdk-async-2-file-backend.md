@@ -2,7 +2,7 @@
 
 **Epic:** [Async SDK](epic-sdk-async.md)
 **Priority:** Critical
-**Status:** Pending
+**Status:** Done
 **Effort:** Medium
 **Component:** `sdk/ralph_sdk/status.py`
 

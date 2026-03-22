@@ -2,7 +2,7 @@
 
 **Epic:** [Structured Response Parsing](epic-sdk-structured-parsing.md)
 **Priority:** Medium
-**Status:** Pending
+**Status:** Done
 **Effort:** Trivial
 **Component:** `sdk/ralph_sdk/agent.py` (`_build_iteration_prompt`)
 

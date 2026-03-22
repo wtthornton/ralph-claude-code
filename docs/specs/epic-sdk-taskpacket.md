@@ -8,6 +8,7 @@
 **Related specs:** [RFC-001 §4 BLOCKING-3](../../TheStudio/docs/architecture/RFC-001-ralph-sdk-integration.md), `epic-sdk-pydantic-models.md`
 **Depends on:** Epic 1 (Pydantic Models)
 **Target Version:** v2.0.0
+**Status:** Done
 
 ---
 
@@ -50,13 +51,13 @@ never call it.
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SDK-TASKPACKET-1](story-sdk-taskpacket-1-models.md) | Define Ralph-side input mirror models | Critical | Small | Pending |
-| [RALPH-SDK-TASKPACKET-2](story-sdk-taskpacket-2-signature.md) | Implement new from_task_packet() with full signature | Critical | Medium | Pending |
-| [RALPH-SDK-TASKPACKET-3](story-sdk-taskpacket-3-intent.md) | Map IntentSpec fields (goal, constraints, criteria, non-goals) | Critical | Small | Pending |
-| [RALPH-SDK-TASKPACKET-4](story-sdk-taskpacket-4-risk.md) | Map risk_flags, context_packs, trust_tier | High | Small | Pending |
-| [RALPH-SDK-TASKPACKET-5](story-sdk-taskpacket-5-complexity.md) | Scale max_turns by complexity band | High | Small | Pending |
-| [RALPH-SDK-TASKPACKET-6](story-sdk-taskpacket-6-loopback.md) | Include loopback_context for retry attempts | High | Small | Pending |
-| [RALPH-SDK-TASKPACKET-7](story-sdk-taskpacket-7-deprecate.md) | Deprecate old from_task_packet(dict) with warning | Medium | Small | Pending |
+| [RALPH-SDK-TASKPACKET-1](story-sdk-taskpacket-1-models.md) | Define Ralph-side input mirror models | Critical | Small | Done |
+| [RALPH-SDK-TASKPACKET-2](story-sdk-taskpacket-2-signature.md) | Implement new from_task_packet() with full signature | Critical | Medium | Done |
+| [RALPH-SDK-TASKPACKET-3](story-sdk-taskpacket-3-intent.md) | Map IntentSpec fields (goal, constraints, criteria, non-goals) | Critical | Small | Done |
+| [RALPH-SDK-TASKPACKET-4](story-sdk-taskpacket-4-risk.md) | Map risk_flags, context_packs, trust_tier | High | Small | Done |
+| [RALPH-SDK-TASKPACKET-5](story-sdk-taskpacket-5-complexity.md) | Scale max_turns by complexity band | High | Small | Done |
+| [RALPH-SDK-TASKPACKET-6](story-sdk-taskpacket-6-loopback.md) | Include loopback_context for retry attempts | High | Small | Done |
+| [RALPH-SDK-TASKPACKET-7](story-sdk-taskpacket-7-deprecate.md) | Deprecate old from_task_packet(dict) with warning | Medium | Small | Done |
 
 ## Implementation Order
 

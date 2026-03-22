@@ -2,7 +2,7 @@
 
 **Epic:** [Release, Integration Testing & v2.0.0](epic-sdk-v2-release.md)
 **Priority:** Critical
-**Status:** Pending
+**Status:** Done
 **Effort:** Trivial
 **Component:** `package.json`, `ralph_loop.sh`
 

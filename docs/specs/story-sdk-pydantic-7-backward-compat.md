@@ -2,7 +2,7 @@
 
 **Epic:** [Pydantic v2 Models](epic-sdk-pydantic-models.md)
 **Priority:** Critical
-**Status:** Pending
+**Status:** Done
 **Effort:** Small
 **Component:** `sdk/ralph_sdk/status.py`, `sdk/ralph_sdk/agent.py`, `sdk/ralph_sdk/config.py`
 

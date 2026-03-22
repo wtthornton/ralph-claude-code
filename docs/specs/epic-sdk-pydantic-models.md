@@ -7,6 +7,7 @@
 **Components:** `sdk/ralph_sdk/status.py`, `sdk/ralph_sdk/agent.py`, `sdk/ralph_sdk/config.py`, `pyproject.toml`
 **Related specs:** [RFC-001](../../TheStudio/docs/architecture/RFC-001-ralph-sdk-integration.md), `epic-sdk-state-backend.md`, `epic-sdk-structured-parsing.md`
 **Target Version:** v1.4.0
+**Status:** Done
 
 ---
 
@@ -41,13 +42,13 @@ completely unaffected — it reads/writes the same `status.json` format.
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [RALPH-SDK-PYDANTIC-1](story-sdk-pydantic-1-dependency.md) | Add Pydantic v2 dependency | Critical | Trivial | Pending |
-| [RALPH-SDK-PYDANTIC-2](story-sdk-pydantic-2-status.md) | Convert RalphStatus to Pydantic BaseModel | Critical | Small | Pending |
-| [RALPH-SDK-PYDANTIC-3](story-sdk-pydantic-3-circuit-breaker.md) | Convert CircuitBreakerState to Pydantic BaseModel | Critical | Small | Pending |
-| [RALPH-SDK-PYDANTIC-4](story-sdk-pydantic-4-task-input.md) | Convert TaskInput to Pydantic BaseModel | Critical | Small | Pending |
-| [RALPH-SDK-PYDANTIC-5](story-sdk-pydantic-5-task-result.md) | Convert TaskResult to Pydantic BaseModel | Critical | Small | Pending |
-| [RALPH-SDK-PYDANTIC-6](story-sdk-pydantic-6-config.md) | Convert RalphConfig to Pydantic BaseModel | High | Medium | Pending |
-| [RALPH-SDK-PYDANTIC-7](story-sdk-pydantic-7-backward-compat.md) | Backward compatibility verification | Critical | Small | Pending |
+| [RALPH-SDK-PYDANTIC-1](story-sdk-pydantic-1-dependency.md) | Add Pydantic v2 dependency | Critical | Trivial | Done |
+| [RALPH-SDK-PYDANTIC-2](story-sdk-pydantic-2-status.md) | Convert RalphStatus to Pydantic BaseModel | Critical | Small | Done |
+| [RALPH-SDK-PYDANTIC-3](story-sdk-pydantic-3-circuit-breaker.md) | Convert CircuitBreakerState to Pydantic BaseModel | Critical | Small | Done |
+| [RALPH-SDK-PYDANTIC-4](story-sdk-pydantic-4-task-input.md) | Convert TaskInput to Pydantic BaseModel | Critical | Small | Done |
+| [RALPH-SDK-PYDANTIC-5](story-sdk-pydantic-5-task-result.md) | Convert TaskResult to Pydantic BaseModel | Critical | Small | Done |
+| [RALPH-SDK-PYDANTIC-6](story-sdk-pydantic-6-config.md) | Convert RalphConfig to Pydantic BaseModel | High | Medium | Done |
+| [RALPH-SDK-PYDANTIC-7](story-sdk-pydantic-7-backward-compat.md) | Backward compatibility verification | Critical | Small | Done |
 
 ## Implementation Order
 

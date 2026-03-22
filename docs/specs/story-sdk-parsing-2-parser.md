@@ -2,7 +2,7 @@
 
 **Epic:** [Structured Response Parsing](epic-sdk-structured-parsing.md)
 **Priority:** Critical
-**Status:** Pending
+**Status:** Done
 **Effort:** Medium
 **Component:** New file `sdk/ralph_sdk/parsing.py`
 

@@ -2,7 +2,7 @@
 
 **Epic:** [Async SDK](epic-sdk-async.md)
 **Priority:** Medium
-**Status:** Pending
+**Status:** Done
 **Effort:** Small
 **Component:** `sdk/ralph_sdk/tools.py`, `sdk/ralph_sdk/agent.py`
 
