@@ -98,13 +98,11 @@ class FileStateBackend:
         try:
             async with aiofiles.open(tmp_file, "w", encoding="utf-8") as f:
                 await f.write(content)
-            # aiofiles.os.replace for atomic rename
-            tmp_path = str(tmp_file)
-            target_path = str(path)
-            os.replace(tmp_path, target_path)
+            # Use async os.replace for atomic rename (non-blocking)
+            await aiofiles.os.replace(str(tmp_file), str(path))
         finally:
             try:
-                os.unlink(str(tmp_file))
+                await aiofiles.os.remove(str(tmp_file))
             except FileNotFoundError:
                 pass
 

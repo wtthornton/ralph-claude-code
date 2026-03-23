@@ -515,7 +515,7 @@ import_tasks_from_sources() {
 # Tasks from beads
 ${beads_tasks}
 "
-                ((source_count++))
+                source_count=$((source_count + 1))
             fi
         fi
     fi
@@ -529,7 +529,7 @@ ${beads_tasks}
 # Tasks from GitHub
 ${github_tasks}
 "
-                ((source_count++))
+                source_count=$((source_count + 1))
             fi
         fi
     fi
@@ -544,7 +544,7 @@ ${github_tasks}
 # Tasks from PRD
 ${prd_tasks}
 "
-                    ((source_count++))
+                    source_count=$((source_count + 1))
                 fi
             fi
         fi

@@ -76,8 +76,11 @@ _notify_os() {
         # Linux (GNOME, KDE, etc.)
         notify-send "Ralph: $title" "$message" --icon=dialog-information 2>/dev/null || true
     elif command -v osascript &>/dev/null; then
-        # macOS
-        osascript -e "display notification \"$message\" with title \"Ralph: $title\"" 2>/dev/null || true
+        # macOS — sanitize inputs to prevent AppleScript injection
+        local safe_title safe_message
+        safe_title=$(printf '%s' "$title" | sed 's/[\\\"]/\\&/g' | tr -d '\n')
+        safe_message=$(printf '%s' "$message" | sed 's/[\\\"]/\\&/g' | tr -d '\n')
+        osascript -e "display notification \"$safe_message\" with title \"Ralph: $safe_title\"" 2>/dev/null || true
     fi
     # Windows/WSL: no native support, terminal-only
 }

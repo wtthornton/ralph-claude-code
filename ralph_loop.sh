@@ -3254,11 +3254,13 @@ main() {
     init_session_tracking
 
     # Detect previous crash (LOOP-5)
+    # Save crash info before circuit breaker reset (which checks this file)
+    local _had_crash=false
     if [[ -f "$RALPH_DIR/.last_crash_code" ]]; then
         local last_crash_code
         last_crash_code=$(cat "$RALPH_DIR/.last_crash_code" 2>/dev/null || echo "unknown")
         log_status "WARN" "Previous Ralph invocation crashed (exit code: $last_crash_code)"
-        rm -f "$RALPH_DIR/.last_crash_code"
+        _had_crash=true
     fi
 
     # Detect stale "running" status from a crashed run
@@ -3295,7 +3297,7 @@ main() {
 
     # Reset circuit breaker for new session
     if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
-        if [[ -f "$RALPH_DIR/.last_crash_code" ]]; then
+        if [[ "$_had_crash" == "true" ]]; then
             # Genuine crash — preserve OPEN/CLOSED state, only reset counters
             if jq '.consecutive_no_progress = 0 |
                 .consecutive_same_error = 0 |
@@ -3331,6 +3333,9 @@ main() {
             fi
         fi
     fi
+
+    # Clean up crash code file after circuit breaker has consumed it
+    rm -f "$RALPH_DIR/.last_crash_code" 2>/dev/null
 
     # Optional: warn if Docker MCP containers (label ralph.mcp=true) are not running
     if command -v docker >/dev/null 2>&1; then

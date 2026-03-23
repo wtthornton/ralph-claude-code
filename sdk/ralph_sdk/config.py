@@ -162,7 +162,7 @@ class RalphConfig(BaseModel):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            match = re.match(r'^([A-Z_]+)=(.*)$', line)
+            match = re.match(r'^(?:export\s+)?([A-Z_]+)=(.*)$', line)
             if not match:
                 continue
             key, value = match.group(1), match.group(2)

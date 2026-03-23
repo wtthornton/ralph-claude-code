@@ -179,13 +179,24 @@ show_circuit_status() {
 reset_circuit_breaker() {
     local reason=${1:-"Manual reset"}
 
+    # Preserve total_opens count across resets
+    local prev_total_opens=0
+    if [[ -f "$CB_STATE_FILE" ]]; then
+        prev_total_opens=$(jq -r '.total_opens // 0' "$CB_STATE_FILE" 2>/dev/null || echo "0")
+        [[ "$prev_total_opens" =~ ^[0-9]+$ ]] || prev_total_opens=0
+    fi
+
+    # Escape reason for safe JSON interpolation
+    local safe_reason
+    safe_reason=$(printf '%s' "$reason" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
     cat > "$CB_STATE_FILE" << EOF
 {
     "state": "$CB_STATE_CLOSED",
     "last_change": "$(get_iso_timestamp)",
     "consecutive_no_progress": 0,
-    "total_opens": 0,
-    "reason": "$reason"
+    "total_opens": $prev_total_opens,
+    "reason": "$safe_reason"
 }
 EOF
 

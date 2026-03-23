@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-Ralph is an autonomous AI development loop for Claude Code. It repeatedly invokes the Claude Code CLI, tracks progress, detects completion, and manages rate limits and error recovery. The entire codebase is **bash/shell** — no JavaScript, Python, or TypeScript runtime code.
+Ralph is an autonomous AI development loop for Claude Code. It repeatedly invokes the Claude Code CLI, tracks progress, detects completion, and manages rate limits and error recovery. The core loop and tooling are **bash/shell**; the optional Agent SDK (`sdk/`) is **Python 3.12+**.
 
 ## Commands
 
@@ -26,7 +26,7 @@ bats tests/unit/test_cli_parsing.bats
 ./install.sh
 
 # Uninstall
-./install.sh uninstall
+./uninstall.sh
 ```
 
 ## Architecture

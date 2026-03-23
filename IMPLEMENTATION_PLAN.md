@@ -1,6 +1,6 @@
 # Ralph for Claude Code - Implementation Plan
 
-**Version**: v1.8.0 | **Tests**: 736+ passing (100% pass rate) | **CI/CD**: GitHub Actions
+**Version**: v2.0.1 | **Tests**: 736+ passing (100% pass rate) | **CI/CD**: GitHub Actions
 
 ---
 
@@ -220,4 +220,4 @@ Run Ralph in isolated sandbox environments for security and reproducibility.
 ---
 
 **Last Updated**: 2026-03-21
-**Status**: All epic stories complete (66/66). Phases 0-11 delivered. v1.8.0 released.
+**Status**: All epic stories complete (66/66). Phases 0-11 delivered. SDK v2.0.0 released. Current: v2.0.1.

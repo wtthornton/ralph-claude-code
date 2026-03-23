@@ -146,13 +146,15 @@ ralph_rollback() {
         return 0
     fi
 
-    # Restore files
+    # Restore files (including dotfiles which are critical state files)
     local restored=0
-    for file in "$target_backup"/*; do
+    for file in "$target_backup"/* "$target_backup"/.*; do
+        [[ ! -e "$file" ]] && continue
         local filename
         filename=$(basename "$file")
+        [[ "$filename" == "." || "$filename" == ".." ]] && continue
         [[ "$filename" == ".backup_meta.json" ]] && continue
-        cp "$file" "$ralph_dir/$filename" 2>/dev/null && ((restored++))
+        cp "$file" "$ralph_dir/$filename" 2>/dev/null && ((restored++)) || true
     done
 
     echo "Restored $restored files from backup $backup_name"

@@ -1,8 +1,8 @@
 # Implementation Status Summary
 
-**Last Updated**: 2026-03-21
-**Version**: v1.8.0
-**Overall Status**: All 66 epic stories complete across 15 epics (Phases 0-11). v1.8.0 completes all planned phases including SDK, config, observability, testing, GitHub issues, and Docker sandbox.
+**Last Updated**: 2026-03-22
+**Version**: v2.0.1
+**Overall Status**: All 66 epic stories complete across 15 epics (Phases 0-11). SDK v2.0.0 delivered (Pydantic v2, async, pluggable state backend, correlation IDs, TaskPacket/EvidenceBundle). Current: v2.0.1.
 
 > **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count.
 
@@ -267,6 +267,14 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 
 ## Recent Completions
 
+### v2.0.1 (2026-03-22)
+- Comprehensive code review and bug fix audit: 24 fixes across 16 files
+- **Python SDK**: Fixed sync-call-to-async crash in `status.py`, orphaned subprocess on timeout in `agent.py`, blocking I/O in async `state.py`, enum serialization in `tools.py`, `.ralphrc` export keyword parsing in `config.py`, session ID persistence in `agent.py`
+- **Bash core**: Fixed crash-recovery dead code in `ralph_loop.sh`, `local` masking return code in `create_files.sh`, `ralph-upgrade` missing from `uninstall.sh`
+- **Libraries**: Fixed dotfile restoration in `backup.sh`, `((count++))` set -e crash in `task_sources.sh`, `total_opens` reset in `circuit_breaker.sh`, osascript injection in `notifications.sh`, JSON sort in `memory.sh`
+- **Hooks**: Fixed `printf '%b'` data corruption and numeric validation in `on-stop.sh`, IFS splitting in `on-subagent-done.sh`, `--force-with-lease` false positive in `validate-command.sh`, temp file leak in `on-stop-failure.sh`
+- **Config**: Fixed license mismatch (ISC→MIT in `package.json` to match LICENSE file and `pyproject.toml`)
+
 ### v0.9.8 (2026-01-10)
 - Modern CLI for PRD import with JSON output
 - 11 new tests for modern CLI features
@@ -341,51 +349,41 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 
 ---
 
-## Open Issues by Priority
+## Open GitHub Issues (Stale — Need Closing)
 
-### P2 (Medium - Important)
+> **Note:** The issues below are still open on GitHub but the underlying work was completed via the epic/story system. They should be closed with "completed" or "deferred" status.
+
+### Completed (close as done)
+| Issue | Phase | Title | Completed Via |
+|-------|-------|-------|---------------|
+| #32 | 2.1 | Create Agent SDK proof of concept | SDK-1 |
+| #33 | 2.2 | Define custom tools for Agent SDK | SDK-2 |
+| #34 | 2.3 | Implement hybrid CLI/SDK architecture | SDK-3 |
+| #35 | 2.4 | Document SDK migration strategy | SDK-4 |
+| #36 | 3.1 | Add JSON configuration file support | CONFIG-1 |
+| #37 | 3.2 | Update installation for SDK support | CONFIG-2 |
+| #38 | 3.3 | Create CLI and SDK documentation | CONFIG-3 |
+| #21 | 3.7 | Implement metrics and analytics | OBSERVE-1 |
+| #22 | 3.8 | Implement notification system | OBSERVE-2 |
+| #23 | 3.9 | Implement backup and rollback system | OBSERVE-3 |
+| #14 | 4.4 | Implement tmux integration tests | TEST-1 |
+| #15 | 4.5 | Implement monitor dashboard tests | TEST-2 |
+| #16 | 4.6 | Implement status update tests | TEST-3 |
+| #39 | 4.1 | Implement CLI enhancement tests | TEST-4 |
+| #40 | 4.2 | Implement SDK integration tests | TEST-5 |
+| #41 | 4.3 | Implement backward compatibility tests | TEST-6 |
+| #17 | 4.7 | Implement E2E full loop tests | TEST-7 |
+| #69 | 5.1 | Allow plan import from GitHub Issue | GHISSUE-1 |
+| #70 | 5.2 | Assess issue completeness and generate plan | GHISSUE-2 |
+| #71 | 5.3 | Filter and select GitHub issues by metadata | GHISSUE-3 |
+| #72 | 5.4 | Batch processing and issue queue management | GHISSUE-4 |
+| #73 | 5.5 | Issue lifecycle management | GHISSUE-5 |
+| #49 | 6.0 | Sandbox execution environments (umbrella) | SANDBOX-1/2 |
+| #74 | 6.1 | Local Docker Sandbox Execution | SANDBOX-2 |
+
+### Deferred to TheStudio Premium (close as not-planned)
 | Issue | Phase | Title |
 |-------|-------|-------|
-| ~~#51~~ | ~~1.5~~ | ~~Session expiration for .claude_session_id~~ (Done) |
-| #32 | 2.1 | Create Agent SDK proof of concept |
-| #33 | 2.2 | Define custom tools for Agent SDK |
-| #34 | 2.3 | Implement hybrid CLI/SDK architecture |
-| #35 | 2.4 | Document SDK migration strategy |
-| #36 | 3.1 | Add JSON configuration file support |
-| #37 | 3.2 | Update installation for SDK support |
-| ~~#18~~ | ~~3.4~~ | ~~Implement log rotation feature~~ (Done) |
-| ~~#19~~ | ~~3.5~~ | ~~Implement dry-run mode feature~~ (Done) |
-| ~~#20~~ | ~~3.6~~ | ~~Implement config file support (.ralphrc)~~ (Done) |
-| #14 | 4.4 | Implement tmux integration tests |
-| #15 | 4.5 | Implement monitor dashboard tests |
-| #16 | 4.6 | Implement status update tests |
-
-### P3 (Low - Nice to have)
-| Issue | Phase | Title |
-|-------|-------|-------|
-| ~~#24~~ | ~~1.9~~ | ~~Create TESTING.md documentation~~ (Done) |
-| ~~#25~~ | ~~1.10~~ | ~~Create CONTRIBUTING.md guide~~ (Done) |
-| ~~#26~~ | ~~1.11~~ | ~~Update README with testing instructions~~ (Done) |
-| ~~#27~~ | ~~1.12~~ | ~~Add badges to README~~ (Done) |
-| #38 | 3.3 | Create CLI and SDK documentation |
-| #21 | 3.7 | Implement metrics and analytics |
-| #22 | 3.8 | Implement notification system |
-| #23 | 3.9 | Implement backup and rollback system |
-| #39 | 4.1 | Implement CLI enhancement tests |
-| #40 | 4.2 | Implement SDK integration tests |
-| #41 | 4.3 | Implement backward compatibility tests |
-| #17 | 4.7 | Implement E2E full loop tests |
-
-### P4 (Enhancements - New functionality)
-| Issue | Phase | Title |
-|-------|-------|-------|
-| #69 | 5.1 | Allow plan import from GitHub Issue |
-| #70 | 5.2 | Assess issue completeness and generate plan |
-| #71 | 5.3 | Filter and select GitHub issues by metadata |
-| #72 | 5.4 | Batch processing and issue queue management |
-| #73 | 5.5 | Issue lifecycle management |
-| #49 | 6.0 | Sandbox execution environments (umbrella) |
-| #74 | 6.1 | Local Docker Sandbox Execution |
 | #75 | 6.2 | E2B Cloud Sandbox Integration |
 | #76 | 6.3 | Sandbox File Synchronization |
 | #77 | 6.4 | Sandbox Security and Resource Policies |
@@ -393,21 +391,45 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 | #79 | 6.6 | Daytona Sandbox Integration |
 | #80 | 6.7 | Cloudflare Sandbox Integration |
 
+### Genuinely Open Issues (active backlog)
+| Issue | Priority | Title |
+|-------|----------|-------|
+| #224 | Bug | Exit confidence threshold false-positive completions |
+| #154 | Bug | Bash wildcard patterns in ALLOWED_TOOLS |
+| #225 | P2 | No E2E integration tests |
+| #223 | P2 | Rate limiter counts invocations only |
+| #221 | P2 | Block --no-verify for AI agents |
+| #163 | P3 | Monorepo-aware features |
+| #156 | P3 | Windows native support |
+| #157 | P3 | Nix flake support |
+| #213 | P3 | KEEP_MONITOR_AFTER_EXIT option |
+| #211 | P3 | Support .zshrc loading |
+| #152 | P3 | Integration tests for task import |
+| #138 | P3 | Automate version/test badges |
+| #123 | P4 | Session storage format consistency |
+| #110 | P4 | Token cost tracking |
+| #102 | P4 | Plan limit exhaustion handling |
+| #87 | P4 | Beads integration |
+| #82 | P4 | Update README with feature docs |
+
 ---
 
 ## Summary Statistics
 
 | Category | Count |
 |----------|-------|
-| Total Open Issues | 50 |
+| GitHub Issues (genuinely open) | ~17 |
+| GitHub Issues (stale, need closing) | ~30 |
 | Closed Issues | 28+ |
 | Total Tests | 736+ |
 | Test Pass Rate | 100% |
-| Epic Stories | 42/42 Done |
+| Epic Stories | 66/66 Done |
 
 ---
 
-**Status**: ✅ 66/66 stories complete (100%). All 15 epics and 12 phases delivered. v1.8.0 released.
+**Status**: ✅ 66/66 stories complete (100%). All 15 epics and 12 phases delivered. SDK v2.0.0 shipped. Current: v2.0.1.
 **Removed** (cumulative): `lib/response_analyzer.sh` (-1042 lines), `lib/file_protection.sh` (-58 lines), simplified `lib/circuit_breaker.sh` (-285 lines). Total: ~1,385 lines of bash removed.
 **Added** (cumulative): 4 sub-agent definitions, 2 skills, hook-based analysis, Python SDK (4 modules + tests), 4 lib modules (metrics, notifications, backup, github_issues, sandbox), Dockerfile.sandbox, 3 documentation files, JSON config template, 7 new BATS test files.
 **v1.8.0**: All phases complete — SDK integration (Phase 6), JSON config + SDK install + docs (Phase 7), metrics/notifications/backup (Phase 8), comprehensive validation tests (Phase 9), GitHub issue integration (Phase 10), Docker sandbox (Phase 11).
+**v2.0.0**: SDK v2 — Pydantic v2 models, async agent loop, pluggable state backend, structured response parsing, active circuit breaker, correlation ID threading, TaskPacket conversion, EvidenceBundle output.
+**v2.0.1**: Comprehensive code review — 24 bug fixes across 16 files. Critical: `create_files.sh` exit gate always triggered (local masking $?), SDK sync-call-to-async crash (`status.py`), orphaned subprocess on timeout (`agent.py`). High: session ID never persisted, blocking I/O in async context (`state.py`), enum not JSON-serializable (`tools.py`), `.ralphrc` export keyword ignored (`config.py`), backup dotfile restoration (`backup.sh`), `((count++))` crash under set -e (`task_sources.sh`), crash-recovery dead code (`ralph_loop.sh`), `ralph-upgrade` missing from uninstall, `on-stop.sh` arithmetic crashes and data corruption, `on-subagent-done.sh` IFS splitting, `validate-command.sh` false positive on `--force-with-lease`. License mismatch fixed (ISC→MIT).

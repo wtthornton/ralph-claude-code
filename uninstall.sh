@@ -43,7 +43,7 @@ check_installation() {
     local installed=false
 
     # Check for any of the Ralph commands
-    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor; do
+    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade; do
         if [ -f "$INSTALL_DIR/$cmd" ]; then
             installed=true
             break
@@ -75,7 +75,7 @@ show_removal_plan() {
 
     # Commands
     echo "Commands in $INSTALL_DIR:"
-    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor; do
+    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade; do
         if [ -f "$INSTALL_DIR/$cmd" ]; then
             echo "  - $cmd"
         fi
@@ -118,7 +118,7 @@ remove_commands() {
     log "INFO" "Removing Ralph commands..."
 
     local removed=0
-    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor; do
+    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade; do
         if [ -f "$INSTALL_DIR/$cmd" ]; then
             rm -f "$INSTALL_DIR/$cmd"
             removed=$((removed + 1))

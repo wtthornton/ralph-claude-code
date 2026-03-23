@@ -333,12 +333,16 @@ class RalphAgent:
             # Increment call count
             await self._increment_call_count()
 
-            # Parse response
+            # Parse response (also extracts session_id)
             status = self._parse_response(stdout, returncode)
             status.loop_count = self.loop_count
             status.session_id = self.session_id
             status.correlation_id = self.correlation_id
             await self.state_backend.write_status(status.to_dict())
+
+            # Persist extracted session_id for continuity across restarts
+            if self.session_id:
+                await self._save_session()
 
             # Log output
             self._log_output(stdout, stderr, self.loop_count)
@@ -347,6 +351,12 @@ class RalphAgent:
 
         except asyncio.TimeoutError:
             logger.warning("Claude CLI timed out after %d minutes", self.config.timeout_minutes)
+            # Kill the orphaned subprocess to prevent resource leaks
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
             status = RalphStatus(
                 status="TIMEOUT",
                 work_type="UNKNOWN",

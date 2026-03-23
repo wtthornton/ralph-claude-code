@@ -37,7 +37,8 @@ fi
 # newlines), unescape it so grep-based field extraction works correctly.
 # This happens when the response arrives from JSONL stream extraction.
 if echo "$response_text" | grep -q '\\n.*RALPH_STATUS' 2>/dev/null; then
-  response_text=$(printf '%b' "$response_text")
+  # Only convert literal \n to newlines (not all backslash sequences like \t, \x, etc.)
+  response_text=$(echo "$response_text" | sed 's/\\n/\n/g')
 fi
 
 # PERF: Extract ALL fields in a single grep+sed pass instead of 6 separate extract_field() calls
@@ -69,6 +70,10 @@ tasks_done="${tasks_done:-0}"
 files_modified_reported="${files_modified_reported:-0}"
 work_type="${work_type:-UNKNOWN}"
 
+# Validate numeric fields to prevent arithmetic errors from non-numeric Claude output
+[[ "$tasks_done" =~ ^[0-9]+$ ]] || tasks_done=0
+[[ "$files_modified_reported" =~ ^[0-9]+$ ]] || files_modified_reported=0
+
 # STREAM-3: Fallback inference — if WORK_TYPE is UNKNOWN but files were modified, infer IMPLEMENTATION
 if [[ "$work_type" == "UNKNOWN" && "$files_modified_reported" -gt 0 ]]; then
   work_type="IMPLEMENTATION"
@@ -88,6 +93,8 @@ loop_count=0
 if [[ -f "$RALPH_DIR/status.json" ]]; then
   loop_count=$(jq -r '.loop_count // 0' "$RALPH_DIR/status.json" 2>/dev/null || echo "0")
 fi
+# Validate loop_count is numeric before arithmetic
+[[ "$loop_count" =~ ^[0-9]+$ ]] || loop_count=0
 loop_count=$((loop_count + 1))
 
 # Write status.json (atomic write via temp file)

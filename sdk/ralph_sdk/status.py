@@ -94,9 +94,24 @@ class RalphStatus(BaseModel):
 
     @classmethod
     def load(cls, ralph_dir: str | Path = ".ralph", *, backend: Any | None = None) -> RalphStatus:
-        """Load status from .ralph/status.json or via state backend."""
+        """Load status from .ralph/status.json or via state backend.
+
+        Note: When using an async backend, use load_async() instead.
+        This method only supports sync file reads (no backend).
+        """
         if backend is not None:
-            data = backend.read_status()
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                # Already in async context — caller must use load_async()
+                raise RuntimeError(
+                    "Cannot call sync load() with async backend from async context. "
+                    "Use load_async() instead."
+                )
+            data = asyncio.run(backend.read_status())
             return cls.from_dict(data) if data else cls()
 
         status_file = Path(ralph_dir) / "status.json"
@@ -109,9 +124,22 @@ class RalphStatus(BaseModel):
             return cls()
 
     def save(self, ralph_dir: str | Path = ".ralph", *, backend: Any | None = None) -> None:
-        """Write status atomically to .ralph/status.json or via state backend."""
+        """Write status atomically to .ralph/status.json or via state backend.
+
+        Note: When using an async backend, use save_async() instead.
+        """
         if backend is not None:
-            backend.write_status(self.to_dict())
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                raise RuntimeError(
+                    "Cannot call sync save() with async backend from async context. "
+                    "Use save_async() instead."
+                )
+            asyncio.run(backend.write_status(self.to_dict()))
             return
 
         ralph_dir = Path(ralph_dir)
@@ -166,9 +194,21 @@ class CircuitBreakerState(BaseModel):
 
     @classmethod
     def load(cls, ralph_dir: str | Path = ".ralph", *, backend: Any | None = None) -> CircuitBreakerState:
-        """Load from .ralph/.circuit_breaker_state or via state backend."""
+        """Load from .ralph/.circuit_breaker_state or via state backend.
+
+        Note: When using an async backend, use asyncio.run() or call backend directly.
+        """
         if backend is not None:
-            data = backend.read_circuit_breaker()
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                raise RuntimeError(
+                    "Cannot call sync load() with async backend from async context."
+                )
+            data = asyncio.run(backend.read_circuit_breaker())
             return cls._from_state_dict(data) if data else cls()
 
         cb_file = Path(ralph_dir) / ".circuit_breaker_state"
@@ -183,7 +223,16 @@ class CircuitBreakerState(BaseModel):
     def save(self, ralph_dir: str | Path = ".ralph", *, backend: Any | None = None) -> None:
         """Write circuit breaker state atomically or via state backend."""
         if backend is not None:
-            backend.write_circuit_breaker(self._to_state_dict())
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                raise RuntimeError(
+                    "Cannot call sync save() with async backend from async context."
+                )
+            asyncio.run(backend.write_circuit_breaker(self._to_state_dict()))
             return
 
         ralph_dir = Path(ralph_dir)

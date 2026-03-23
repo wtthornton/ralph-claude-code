@@ -91,8 +91,15 @@ async def ralph_rate_check_tool(
 
     now = int(time.time())
     elapsed = now - last_reset if last_reset > 0 else 3600
-    remaining = max(0, max_calls_per_hour - call_count)
-    reset_in = max(0, 3600 - elapsed)
+
+    # If the hour has elapsed, counter is effectively reset
+    if elapsed >= 3600:
+        remaining = max_calls_per_hour
+        reset_in = 0
+        call_count = 0
+    else:
+        remaining = max(0, max_calls_per_hour - call_count)
+        reset_in = max(0, 3600 - elapsed)
 
     return {
         "ok": True,
@@ -122,12 +129,12 @@ async def ralph_circuit_state_tool(
     cb = CircuitBreakerState.load(ralph_dir)
     return {
         "ok": True,
-        "state": cb.state,
+        "state": cb.state.value,
         "no_progress_count": cb.no_progress_count,
         "same_error_count": cb.same_error_count,
         "last_error": cb.last_error,
         "opened_at": cb.opened_at,
-        "can_proceed": cb.state in ("CLOSED", "HALF_OPEN"),
+        "can_proceed": cb.state.value in ("CLOSED", "HALF_OPEN"),
     }
 
 

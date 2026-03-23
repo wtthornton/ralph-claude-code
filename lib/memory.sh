@@ -87,11 +87,16 @@ ralph_get_relevant_episodes() {
         local keyword_pattern
         keyword_pattern=$(echo "$keywords" | tr '\n' '|' | sed 's/|$//')
 
+        # Guard against empty pattern matching everything
+        if [[ -z "$keyword_pattern" ]]; then
+            return 0
+        fi
+
         # Simple relevance: grep for any keyword matches, add +2 for failures
+        # Use jq -s for proper JSON-aware sorting instead of text-based sort
         grep -iE "$keyword_pattern" "$episodes_file" 2>/dev/null | \
             jq -c '. + {relevance: (if .outcome == "failure" then 2 else 0 end)}' 2>/dev/null | \
-            sort -t: -k2 -rn 2>/dev/null | \
-            head -n "$max_results"
+            jq -s 'sort_by(.relevance) | reverse | .[:'"$max_results"'][]' 2>/dev/null
     fi
 }
 
