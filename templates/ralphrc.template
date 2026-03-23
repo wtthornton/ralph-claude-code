@@ -158,3 +158,37 @@ RALPH_BG_TESTING=false
 # Teammate display mode: "in-process" | "tmux" | "auto"
 # "tmux" recommended for Ralph (already uses tmux for monitoring)
 RALPH_TEAMMATE_MODE="tmux"
+
+# =============================================================================
+# CONTEXT MANAGEMENT (Phase 14)
+# =============================================================================
+
+# Enable progressive context loading to reduce token usage per iteration
+# When enabled, only the current epic and next N unchecked items are injected
+# RALPH_PROGRESSIVE_CONTEXT=false
+
+# Maximum unchecked plan items to include in progressive context
+# RALPH_MAX_PLAN_ITEMS=10
+
+# =============================================================================
+# COST OPTIMIZATION (Phase 14)
+# =============================================================================
+
+# Prompt cache optimization — structure prompts for maximum cache hits
+# RALPH_PROMPT_CACHE_ENABLED=false
+
+# Cost budget in USD (0 = no budget limit)
+# RALPH_COST_BUDGET_USD=0
+
+# =============================================================================
+# OPENTELEMETRY EXPORT (Phase 14)
+# =============================================================================
+
+# OTLP HTTP endpoint for trace export (e.g., http://localhost:4318/v1/traces)
+# RALPH_OTLP_ENDPOINT=""
+
+# Enable OTLP trace export to external backend
+# RALPH_OTLP_EXPORT_ENABLED=false
+
+# Monthly cost budget in USD (0 = disabled, triggers alert at 80% by default)
+# RALPH_COST_BUDGET_USD=0

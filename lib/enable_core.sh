@@ -85,6 +85,7 @@ check_existing_ralph() {
         ".ralph/PROMPT.md"
         ".ralph/fix_plan.md"
         ".ralph/AGENT.md"
+        ".ralphrc"
     )
 
     local missing=()
@@ -151,7 +152,11 @@ safe_create_file() {
 
     if [[ -f "$target" ]]; then
         if [[ "$force" == "true" ]]; then
-            # Force mode: overwrite existing file
+            # Backup existing file before overwrite
+            local backup_path="${target}.backup.$(date +%Y%m%d-%H%M%S)"
+            if cp "$target" "$backup_path" 2>/dev/null; then
+                enable_log "INFO" "Backed up $target → $backup_path"
+            fi
             enable_log "INFO" "Overwriting $target (--force)"
         else
             # Normal mode: skip existing file
@@ -806,13 +811,37 @@ enable_ralph_in_directory() {
     fix_plan_content=$(generate_fix_plan_md "$task_content")
     safe_create_file ".ralph/fix_plan.md" "$fix_plan_content"
 
-    # Copy .gitignore template to project root (if available)
+    # Handle .gitignore — never overwrite user's .gitignore, merge Ralph entries instead
     local templates_dir
     templates_dir=$(get_templates_dir 2>/dev/null) || true
     if [[ -n "$templates_dir" ]] && [[ -f "$templates_dir/.gitignore" ]]; then
-        local gitignore_content
-        gitignore_content=$(<"$templates_dir/.gitignore")
-        safe_create_file ".gitignore" "$gitignore_content"
+        if [[ -f ".gitignore" ]]; then
+            # Merge: add missing Ralph entries to existing .gitignore
+            local ralph_marker="# Ralph managed entries"
+            if ! grep -qF "$ralph_marker" ".gitignore" 2>/dev/null; then
+                {
+                    echo ""
+                    echo "$ralph_marker"
+                    echo ".ralph/logs/"
+                    echo ".ralph/metrics/"
+                    echo ".ralph/backups/"
+                    echo ".ralph/.circuit_breaker_state"
+                    echo ".ralph/.call_count"
+                    echo ".ralph/.last_reset"
+                    echo ".ralph/.exit_signals"
+                    echo ".ralph/.claude_session_id"
+                    echo ".ralph/status.json"
+                    echo "claude_output_*.log"
+                } >> ".gitignore"
+                enable_log "SUCCESS" "Merged Ralph entries into existing .gitignore"
+            else
+                enable_log "SKIP" ".gitignore already has Ralph entries"
+            fi
+        else
+            local gitignore_content
+            gitignore_content=$(<"$templates_dir/.gitignore")
+            safe_create_file ".gitignore" "$gitignore_content"
+        fi
     else
         enable_log "WARN" ".gitignore template not found, skipping"
     fi

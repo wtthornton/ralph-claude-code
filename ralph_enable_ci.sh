@@ -130,7 +130,15 @@ parse_arguments() {
         case "$1" in
             --from)
                 if [[ -n "$2" && ! "$2" =~ ^-- ]]; then
-                    TASK_SOURCE="$2"
+                    case "$2" in
+                        beads|github|prd|none)
+                            TASK_SOURCE="$2"
+                            ;;
+                        *)
+                            output_error "--from must be 'beads', 'github', 'prd', or 'none' (got: '$2')"
+                            exit $ENABLE_INVALID_ARGS
+                            ;;
+                    esac
                     shift 2
                 else
                     output_error "--from requires a source (beads, github, prd, none)"
@@ -139,6 +147,10 @@ parse_arguments() {
                 ;;
             --prd)
                 if [[ -n "$2" && ! "$2" =~ ^-- ]]; then
+                    if [[ ! -f "$2" ]]; then
+                        output_error "PRD file not found: $2"
+                        exit $ENABLE_FILE_NOT_FOUND
+                    fi
                     PRD_FILE="$2"
                     shift 2
                 else

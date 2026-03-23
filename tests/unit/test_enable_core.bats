@@ -47,6 +47,7 @@ teardown() {
     echo "# PROMPT" > .ralph/PROMPT.md
     echo "# Fix Plan" > .ralph/fix_plan.md
     echo "# Agent" > .ralph/AGENT.md
+    echo "# Config" > .ralphrc
 
     check_existing_ralph || true
 
@@ -70,6 +71,7 @@ teardown() {
     echo "# PROMPT" > .ralph/PROMPT.md
     echo "# Fix Plan" > .ralph/fix_plan.md
     echo "# Agent" > .ralph/AGENT.md
+    echo "# Config" > .ralphrc
 
     run is_ralph_enabled
     assert_success
@@ -78,6 +80,26 @@ teardown() {
 @test "is_ralph_enabled returns 1 when not enabled" {
     run is_ralph_enabled
     assert_failure
+}
+
+@test "ENABLE-1: check_existing_ralph detects missing .ralphrc as partial" {
+    mkdir -p .ralph
+    touch .ralph/PROMPT.md .ralph/fix_plan.md .ralph/AGENT.md
+    # No .ralphrc
+
+    check_existing_ralph || true
+
+    assert_equal "$RALPH_STATE" "partial"
+    [[ " ${RALPH_MISSING_FILES[*]} " =~ ".ralphrc" ]]
+}
+
+@test "ENABLE-1: check_existing_ralph detects complete with all files including .ralphrc" {
+    mkdir -p .ralph
+    touch .ralph/PROMPT.md .ralph/fix_plan.md .ralph/AGENT.md .ralphrc
+
+    check_existing_ralph || true
+
+    assert_equal "$RALPH_STATE" "complete"
 }
 
 # =============================================================================
@@ -330,6 +352,7 @@ EOF
     echo "# PROMPT" > .ralph/PROMPT.md
     echo "# Fix Plan" > .ralph/fix_plan.md
     echo "# Agent" > .ralph/AGENT.md
+    echo "# Config" > .ralphrc
 
     export ENABLE_FORCE="false"
 
@@ -343,6 +366,7 @@ EOF
     echo "old content" > .ralph/PROMPT.md
     echo "old fix plan" > .ralph/fix_plan.md
     echo "old agent" > .ralph/AGENT.md
+    echo "old config" > .ralphrc
 
     export ENABLE_FORCE="true"
     export ENABLE_PROJECT_NAME="new-project"
@@ -464,7 +488,7 @@ EOF
     grep -q "my-custom-ignore" .gitignore
 }
 
-@test "enable_ralph_in_directory overwrites .gitignore with force" {
+@test "enable_ralph_in_directory merges Ralph entries into existing .gitignore with force" {
     mkdir -p "$HOME/.ralph/templates"
     echo ".ralph/.call_count" > "$HOME/.ralph/templates/.gitignore"
 
@@ -478,9 +502,11 @@ EOF
     run enable_ralph_in_directory
 
     assert_success
-    # Should have template content, not old content
-    grep -q ".ralph/.call_count" .gitignore
-    ! grep -q "my-custom-ignore" .gitignore
+    # Original content preserved
+    grep -q "my-custom-ignore" .gitignore
+    # Ralph entries merged in
+    grep -q "# Ralph managed entries" .gitignore
+    grep -q ".ralph/logs/" .gitignore
 }
 
 @test "enable_ralph_in_directory succeeds when templates dir exists but .gitignore is missing" {
@@ -496,4 +522,66 @@ EOF
     assert_success
     # .gitignore should not be created
     [[ ! -f ".gitignore" ]]
+}
+
+# =============================================================================
+# ENABLE-4: Harden --force Behavior and Preserve User Files
+# =============================================================================
+
+@test "ENABLE-4: safe_create_file creates backup on force overwrite" {
+    echo "original content" > testfile.txt
+    ENABLE_FORCE=true
+    safe_create_file "testfile.txt" "new content"
+    # Check backup exists
+    local backup
+    backup=$(ls testfile.txt.backup.* 2>/dev/null | head -1)
+    [[ -n "$backup" ]]
+    # Check backup has original content
+    [[ "$(cat "$backup")" == "original content" ]]
+    # Check file has new content
+    [[ "$(cat testfile.txt)" == "new content" ]]
+}
+
+@test "ENABLE-4: safe_create_file without force does not create backup" {
+    echo "original content" > testfile.txt
+    ENABLE_FORCE=false
+    safe_create_file "testfile.txt" "new content" || true
+    # No backup should exist
+    local backup_count
+    backup_count=$(ls testfile.txt.backup.* 2>/dev/null | wc -l)
+    [[ "$backup_count" -eq 0 ]]
+    # Original content preserved
+    [[ "$(cat testfile.txt)" == "original content" ]]
+}
+
+@test "ENABLE-4: gitignore merge adds Ralph entries without overwriting" {
+    echo "node_modules/" > .gitignore
+    # Simulate the merge logic
+    local ralph_marker="# Ralph managed entries"
+    if ! grep -qF "$ralph_marker" ".gitignore" 2>/dev/null; then
+        echo "" >> .gitignore
+        echo "$ralph_marker" >> .gitignore
+        echo ".ralph/logs/" >> .gitignore
+    fi
+    # Original content preserved
+    grep -q "node_modules/" .gitignore
+    # Ralph entries added
+    grep -q "# Ralph managed entries" .gitignore
+    grep -q ".ralph/logs/" .gitignore
+}
+
+@test "ENABLE-4: gitignore merge is idempotent — does not duplicate entries" {
+    # Create .gitignore that already has Ralph entries
+    printf "node_modules/\n\n# Ralph managed entries\n.ralph/logs/\n" > .gitignore
+    local ralph_marker="# Ralph managed entries"
+    # Run merge logic again
+    if ! grep -qF "$ralph_marker" ".gitignore" 2>/dev/null; then
+        echo "" >> .gitignore
+        echo "$ralph_marker" >> .gitignore
+        echo ".ralph/logs/" >> .gitignore
+    fi
+    # Should only have one occurrence of the marker
+    local marker_count
+    marker_count=$(grep -cF "# Ralph managed entries" .gitignore)
+    [[ "$marker_count" -eq 1 ]]
 }

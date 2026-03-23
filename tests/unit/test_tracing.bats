@@ -91,3 +91,119 @@ teardown() {
     [[ "$ts" =~ ^[0-9]+$ ]]
     [[ ${#ts} -ge 10 ]]
 }
+
+# =============================================================================
+# OTEL-3: Cost Attribution and Budget Alerts
+# =============================================================================
+
+@test "OTEL-3: cost calculation for sonnet" {
+    # 1M input tokens at $3/1M + 1M output at $15/1M = $18.00
+    result=$(ralph_trace_calculate_cost "sonnet" 1000000 1000000)
+    [[ "$result" == "18.000000" ]]
+}
+
+@test "OTEL-3: cost calculation for haiku" {
+    # 1M input at $0.25/1M + 1M output at $1.25/1M = $1.50
+    result=$(ralph_trace_calculate_cost "haiku" 1000000 1000000)
+    [[ "$result" == "1.500000" ]]
+}
+
+@test "OTEL-3: cost calculation for opus" {
+    # 1M input at $15/1M + 1M output at $75/1M = $90.00
+    result=$(ralph_trace_calculate_cost "opus" 1000000 1000000)
+    [[ "$result" == "90.000000" ]]
+}
+
+@test "OTEL-3: cost calculation with zero tokens" {
+    result=$(ralph_trace_calculate_cost "sonnet" 0 0)
+    [[ "$result" == "0.000000" ]]
+}
+
+@test "OTEL-3: cost record written to costs.jsonl" {
+    TRACE_DIR="$BATS_TEST_TMPDIR/.ralph/traces"
+    RALPH_DIR="$BATS_TEST_TMPDIR/.ralph"
+    mkdir -p "$TRACE_DIR"
+    ralph_trace_record_cost "sonnet" 5000 2000
+    [[ -f "$TRACE_DIR/costs.jsonl" ]]
+    # Validate it's valid JSON
+    local line
+    line=$(head -1 "$TRACE_DIR/costs.jsonl")
+    echo "$line" | jq . >/dev/null 2>&1
+}
+
+@test "OTEL-3: cost record contains expected fields" {
+    TRACE_DIR="$BATS_TEST_TMPDIR/.ralph/traces"
+    RALPH_DIR="$BATS_TEST_TMPDIR/.ralph"
+    mkdir -p "$TRACE_DIR"
+    ralph_trace_record_cost "sonnet" 5000 2000
+    local line
+    line=$(head -1 "$TRACE_DIR/costs.jsonl")
+    echo "$line" | jq -e '.model' >/dev/null
+    echo "$line" | jq -e '.input_tokens' >/dev/null
+    echo "$line" | jq -e '.output_tokens' >/dev/null
+    echo "$line" | jq -e '.cost_usd' >/dev/null
+    echo "$line" | jq -e '.timestamp' >/dev/null
+}
+
+@test "OTEL-3: budget alert triggered at threshold" {
+    TRACE_DIR="$BATS_TEST_TMPDIR/.ralph/traces"
+    RALPH_DIR="$BATS_TEST_TMPDIR/.ralph"
+    export RALPH_COST_BUDGET_USD="0.01"
+    export RALPH_COST_ALERT_THRESHOLD="50"
+    mkdir -p "$TRACE_DIR"
+    # Record cost that exceeds 50% of $0.01 budget
+    ralph_trace_record_cost "sonnet" 100000 100000
+    [[ -f "$RALPH_DIR/.cost_alert" ]]
+}
+
+@test "OTEL-3: no budget alert when budget is 0 (disabled)" {
+    TRACE_DIR="$BATS_TEST_TMPDIR/.ralph/traces"
+    RALPH_DIR="$BATS_TEST_TMPDIR/.ralph"
+    export RALPH_COST_BUDGET_USD="0"
+    mkdir -p "$TRACE_DIR"
+    ralph_trace_record_cost "sonnet" 1000000 1000000
+    [[ ! -f "$RALPH_DIR/.cost_alert" ]]
+}
+
+@test "OTEL-3: cost record skipped when OTEL disabled" {
+    export RALPH_OTEL_ENABLED="false"
+    TRACE_DIR="$BATS_TEST_TMPDIR/.ralph/traces"
+    mkdir -p "$TRACE_DIR"
+    ralph_trace_record_cost "sonnet" 5000 2000
+    [[ ! -f "$TRACE_DIR/costs.jsonl" ]]
+}
+
+# =============================================================================
+# OTEL-4: OTLP Exporter
+# =============================================================================
+
+@test "OTEL-4: export skipped when disabled" {
+    export RALPH_OTLP_EXPORT_ENABLED="false"
+    ralph_otlp_export  # Should return 0 silently
+}
+
+@test "OTEL-4: export skipped without endpoint" {
+    export RALPH_OTLP_EXPORT_ENABLED="true"
+    export RALPH_OTLP_ENDPOINT=""
+    ralph_otlp_export  # Should return 0 silently
+}
+
+@test "OTEL-4: batch export skipped when disabled" {
+    export RALPH_OTLP_EXPORT_ENABLED="false"
+    ralph_otlp_export_batch  # Should return 0 silently
+}
+
+@test "OTEL-4: batch export skipped without endpoint" {
+    export RALPH_OTLP_EXPORT_ENABLED="true"
+    export RALPH_OTLP_ENDPOINT=""
+    ralph_otlp_export_batch  # Should return 0 silently
+}
+
+@test "OTEL-4: export handles missing trace file gracefully" {
+    export RALPH_OTLP_EXPORT_ENABLED="true"
+    export RALPH_OTLP_ENDPOINT="http://localhost:4318/v1/traces"
+    TRACE_DIR="$BATS_TEST_TMPDIR/.ralph/traces"
+    mkdir -p "$TRACE_DIR"
+    # No trace file exists — should return 0
+    ralph_otlp_export
+}

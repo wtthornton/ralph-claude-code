@@ -174,3 +174,119 @@ ralph_show_stats() {
         echo "$work_breakdown" | jq -r '.[] | "  \(.type): \(.count)"' 2>/dev/null
     fi
 }
+
+# =============================================================================
+# COSTROUTE-4: Token Budget and Cost Dashboard
+# =============================================================================
+
+# ralph_show_cost_dashboard — Unified cost dashboard
+#
+# Combines metrics and trace cost data for a complete cost view.
+#
+# Usage: ralph --cost-dashboard [--json] [--last PERIOD]
+#
+ralph_show_cost_dashboard() {
+    local format="human"
+    local period=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json) format="json"; shift ;;
+            --last) period="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local trace_dir="${RALPH_DIR:-.ralph}/traces"
+    local metrics_dir="${RALPH_DIR:-.ralph}/metrics"
+    local cost_file="$trace_dir/costs.jsonl"
+
+    # Token totals from metrics
+    local total_iterations=0
+    if [[ -d "$metrics_dir" ]]; then
+        total_iterations=$(cat "$metrics_dir"/*.jsonl 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
+    # Cost data from traces
+    local total_cost="0" total_input=0 total_output=0 model_breakdown='[]'
+    if [[ -f "$cost_file" ]] && command -v jq &>/dev/null; then
+        local cost_data
+        cost_data=$(jq -s '{
+            total_cost: ([.[].cost_usd] | add // 0),
+            total_input: ([.[].input_tokens] | add // 0),
+            total_output: ([.[].output_tokens] | add // 0),
+            by_model: (group_by(.model) | map({
+                model: .[0].model,
+                cost: ([.[].cost_usd] | add // 0),
+                input_tokens: ([.[].input_tokens] | add // 0),
+                output_tokens: ([.[].output_tokens] | add // 0),
+                iterations: length
+            }) | sort_by(-.cost))
+        }' "$cost_file" 2>/dev/null || echo '{}')
+
+        total_cost=$(echo "$cost_data" | jq -r '.total_cost // 0')
+        total_input=$(echo "$cost_data" | jq -r '.total_input // 0')
+        total_output=$(echo "$cost_data" | jq -r '.total_output // 0')
+        model_breakdown=$(echo "$cost_data" | jq '.by_model // []')
+    fi
+
+    # Budget info
+    local budget="${RALPH_COST_BUDGET_USD:-0}"
+    local budget_pct=0
+    if [[ "$budget" != "0" ]]; then
+        budget_pct=$(awk -v t="$total_cost" -v b="$budget" 'BEGIN{if(b>0) printf "%.0f", t/b*100; else print 0}')
+    fi
+
+    # Cost per iteration
+    local cost_per_iter="0"
+    if [[ "$total_iterations" -gt 0 ]]; then
+        cost_per_iter=$(awk -v c="$total_cost" -v n="$total_iterations" 'BEGIN{printf "%.4f", c/n}')
+    fi
+
+    if [[ "$format" == "json" ]]; then
+        jq -n \
+            --argjson cost "$total_cost" \
+            --argjson input "$total_input" \
+            --argjson output "$total_output" \
+            --argjson iters "$total_iterations" \
+            --argjson budget "$budget" \
+            --argjson pct "$budget_pct" \
+            --arg cpi "$cost_per_iter" \
+            --argjson models "$model_breakdown" \
+            '{
+                total_cost_usd: $cost,
+                total_input_tokens: $input,
+                total_output_tokens: $output,
+                total_iterations: $iters,
+                cost_per_iteration: ($cpi | tonumber),
+                budget_usd: $budget,
+                budget_used_pct: $pct,
+                by_model: $models
+            }'
+    else
+        echo "Ralph Cost Dashboard"
+        echo "===================="
+        printf "  Total cost:          \$%.2f\n" "$total_cost"
+        echo "  Total iterations:    $total_iterations"
+        printf "  Cost/iteration:      \$%s\n" "$cost_per_iter"
+        echo "  Input tokens:        $total_input"
+        echo "  Output tokens:       $total_output"
+        echo ""
+
+        if [[ "$budget" != "0" ]]; then
+            printf "  Budget:              \$%.2f (%s%% used)\n" "$budget" "$budget_pct"
+            # Progress bar
+            local bar_width=30
+            local filled=$((budget_pct * bar_width / 100))
+            [[ $filled -gt $bar_width ]] && filled=$bar_width
+            local empty=$((bar_width - filled))
+            printf "  [%s%s]\n" "$(printf '#%.0s' $(seq 1 $filled 2>/dev/null) 2>/dev/null)" "$(printf '.%.0s' $(seq 1 $empty 2>/dev/null) 2>/dev/null)"
+            echo ""
+        fi
+
+        if [[ "$model_breakdown" != "[]" ]]; then
+            echo "By model:"
+            echo "$model_breakdown" | jq -r '.[] | "  \(.model): $\(.cost | . * 100 | round / 100) (\(.iterations) calls, \(.input_tokens) in, \(.output_tokens) out)"' 2>/dev/null
+        fi
+    fi
+}

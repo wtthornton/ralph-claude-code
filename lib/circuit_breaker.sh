@@ -57,6 +57,17 @@ EOF
     fi
     [[ -f "$CB_HISTORY_FILE" ]] || echo '[]' > "$CB_HISTORY_FILE"
 
+    # LOGFIX-8: Fix state inconsistency — if OPEN but total_opens=0, correct it
+    local _current_state _total_opens
+    _current_state=$(jq -r '.state' "$CB_STATE_FILE" 2>/dev/null || echo "$CB_STATE_CLOSED")
+    _total_opens=$(jq -r '.total_opens // 0' "$CB_STATE_FILE" 2>/dev/null || echo "0")
+    if [[ "$_current_state" == "$CB_STATE_OPEN" && "$_total_opens" -eq 0 ]]; then
+        local tmp
+        tmp=$(mktemp "${CB_STATE_FILE}.XXXXXX")
+        jq '.total_opens = 1' "$CB_STATE_FILE" > "$tmp" && mv "$tmp" "$CB_STATE_FILE"
+        rm -f "$tmp" 2>/dev/null
+    fi
+
     # Startup recovery: handle OPEN state
     local current_state
     current_state=$(jq -r '.state' "$CB_STATE_FILE" 2>/dev/null || echo "$CB_STATE_CLOSED")

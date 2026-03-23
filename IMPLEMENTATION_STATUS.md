@@ -1,8 +1,8 @@
 # Implementation Status Summary
 
 **Last Updated**: 2026-03-23
-**Version**: v2.0.2
-**Overall Status**: All 66 epic stories complete across 15 epics (Phases 0-11). SDK v2.0.2 delivered (Pydantic v2, async, pluggable state backend, correlation IDs, TaskPacket/EvidenceBundle). Current: v2.0.2.
+**Version**: v2.2.0
+**Overall Status**: 125/132 stories complete across 35 epics (Phases 0-16). SDK v2.0.2 + bash v2.2.0. Current: v2.2.0. Phase 16 LOGFIX epic 8/8 done. Phase 14 mostly done (OTEL, COSTROUTE, CTXMGMT, AGENTMEM, FAILSPEC complete). Phase 15 ENABLE epic 4/7 done.
 
 > **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count.
 
@@ -267,6 +267,41 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 
 ## Recent Completions
 
+### v2.2.0 (2026-03-23)
+- **LOGFIX Epic (Phase 16) — 8/8 Done:** Production log issue fixes sourced from TheStudio, tapps-brain, TappMCP log analysis
+  - **LOGFIX-1**: Fixed graceful exit logged as crash (exit code 2) — cleanup trap now checks status.json before reporting crash
+  - **LOGFIX-2**: Hardened concurrent instance lock — auto-terminates stale PID instead of manual kill advice
+  - **LOGFIX-3**: Stream extraction failures on timeout downgraded from ERROR to WARN — prevents misleading error logs
+  - **LOGFIX-4**: Fast-trip circuit breaker — 3 consecutive instant failures (0 tools, <30s) now trips immediately
+  - **LOGFIX-5**: Error count categorization — expected tool scope errors vs system errors reported separately
+  - **LOGFIX-6**: Stall detection for persistent TESTS_STATUS: DEFERRED — warns at 5, trips CB at 10 consecutive loops
+  - **LOGFIX-7**: Fixed permission denied warning — distinguishes built-in tool scope denials from ALLOWED_TOOLS issues
+  - **LOGFIX-8**: Circuit breaker state consistency — total_opens now incremented on OPEN transition in on-stop.sh hook
+- **Files Modified:** `ralph_loop.sh`, `lib/circuit_breaker.sh`, `templates/hooks/on-stop.sh`
+
+### v2.1.0 (2026-03-23)
+- 13 stories completed, 3 bugs fixed — largest single-session delivery
+- **Bug Fixes:**
+  - **#224**: Fixed exit confidence false-positive completions — completion_indicators now reset on productive work between exit signals
+  - **#154**: Fixed ALLOWED_TOOLS wildcard glob expansion — added `noglob` protection during pattern parsing and validation
+  - **#221**: Added `--no-gpg-sign` blocking to validate-command.sh + test coverage for `--no-verify` variants
+- **ENABLE Epic (Phase 15) — 4/7 Done:**
+  - **ENABLE-1**: `.ralphrc` added to required artifacts in `check_existing_ralph()` — projects without `.ralphrc` now correctly detected as partial
+  - **ENABLE-2**: Strict validation for `--from` (must be beads/github/prd) and `--prd` (file must exist) in both wizard and CI mode
+  - **ENABLE-3**: Per-source import reporting with task counts, failure reasons, and summary table
+  - **ENABLE-4**: Timestamped backups before `--force` overwrites; `.gitignore` merge (append Ralph entries) instead of overwrite
+- **OTEL Epic — 4/4 Done (completed):**
+  - **OTEL-3**: Per-trace cost attribution with configurable rates (Haiku/Sonnet/Opus), budget alerts at threshold, costs.jsonl tracking
+  - **OTEL-4**: OTLP HTTP exporter with offset tracking (no re-export), batch mode, configurable headers
+- **COSTROUTE Epic — 4/4 Done (completed):**
+  - **COSTROUTE-3**: Cacheable prompt structure (stable prefix + dynamic suffix), prefix hash tracking for cache validation
+  - **COSTROUTE-4**: `ralph --cost-dashboard` with per-model breakdown, budget progress bar, JSON output mode
+- **CTXMGMT Epic — 2/3 Done:**
+  - **CTXMGMT-1**: Progressive context loading — only loads current epic section + N items, summarizes completed sections
+  - **CTXMGMT-2**: Task decomposition signals — detects oversized tasks (file count, timeout, complexity, no-progress), injects hints
+- **New Files:** `lib/context_management.sh`, `tests/unit/test_context_management.bats`, `tests/unit/test_cost_optimization.bats`
+- **New Tests:** 58+ new test cases across 7 test files
+
 ### v2.0.2 (2026-03-23)
 - SDK integration polish: 7 fixes for TheStudio bridge-layer compatibility
 - **POLISH-1**: Exported `ComplexityBand`, `TrustTier`, `RiskFlag`, `IntentSpecInput`, `TaskPacketInput` from `__init__.py`
@@ -401,14 +436,19 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 | #79 | 6.6 | Daytona Sandbox Integration |
 | #80 | 6.7 | Cloudflare Sandbox Integration |
 
+### Fixed in v2.1.0 (close as done)
+| Issue | Title | Fixed Via |
+|-------|-------|-----------|
+| #224 | Exit confidence threshold false-positive completions | Bug fix: completion_indicators decay on progress |
+| #154 | Bash wildcard patterns in ALLOWED_TOOLS | Bug fix: noglob during pattern parsing |
+| #221 | Block --no-verify for AI agents | Bug fix: expanded validate-command.sh + tests |
+| #110 | Token cost tracking | COSTROUTE-4 (cost dashboard) |
+
 ### Genuinely Open Issues (active backlog)
 | Issue | Priority | Title |
 |-------|----------|-------|
-| #224 | Bug | Exit confidence threshold false-positive completions |
-| #154 | Bug | Bash wildcard patterns in ALLOWED_TOOLS |
 | #225 | P2 | No E2E integration tests |
 | #223 | P2 | Rate limiter counts invocations only |
-| #221 | P2 | Block --no-verify for AI agents |
 | #163 | P3 | Monorepo-aware features |
 | #156 | P3 | Windows native support |
 | #157 | P3 | Nix flake support |
@@ -417,7 +457,6 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 | #152 | P3 | Integration tests for task import |
 | #138 | P3 | Automate version/test badges |
 | #123 | P4 | Session storage format consistency |
-| #110 | P4 | Token cost tracking |
 | #102 | P4 | Plan limit exhaustion handling |
 | #87 | P4 | Beads integration |
 | #82 | P4 | Update README with feature docs |
@@ -428,16 +467,18 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 
 | Category | Count |
 |----------|-------|
-| GitHub Issues (genuinely open) | ~17 |
+| GitHub Issues (genuinely open) | ~13 |
 | GitHub Issues (stale, need closing) | ~30 |
-| Closed Issues | 28+ |
-| Total Tests | 736+ |
+| Closed Issues | 32+ |
+| Total Tests | 794+ |
 | Test Pass Rate | 100% |
-| Epic Stories | 66/66 Done |
+| Epic Stories | 125/132 Done |
 
 ---
 
-**Status**: ✅ 66/66 stories complete (100%). All 15 epics and 12 phases delivered. SDK v2.0.0 shipped. Current: v2.0.2.
+**Status**: ✅ 125/132 stories complete (95%). 35 epics across 16 phases. SDK v2.0.2 + bash v2.2.0.
+**v2.2.0**: 8 production bug fixes from TheStudio/tapps-brain/TappMCP log analysis. LOGFIX epic complete. Critical: graceful exit no longer logged as crash, stale instances auto-killed, stream extraction noise reduced. Medium: fast-trip CB, error categorization, deferred test stall detection, permission denial messages, CB state consistency.
+**v2.1.0**: 13 stories + 3 bug fixes in single session. OTEL epic complete (cost attribution, OTLP export). COSTROUTE epic complete (cache optimization, cost dashboard). CTXMGMT 2/3 (progressive loading, decomposition signals). ENABLE 4/7 (state detection, CLI validation, import reporting, force safety). New: `lib/context_management.sh`, `ralph --cost-dashboard`. 58+ new tests.
 **Removed** (cumulative): `lib/response_analyzer.sh` (-1042 lines), `lib/file_protection.sh` (-58 lines), simplified `lib/circuit_breaker.sh` (-285 lines). Total: ~1,385 lines of bash removed.
 **Added** (cumulative): 4 sub-agent definitions, 2 skills, hook-based analysis, Python SDK (4 modules + tests), 4 lib modules (metrics, notifications, backup, github_issues, sandbox), Dockerfile.sandbox, 3 documentation files, JSON config template, 7 new BATS test files.
 **v1.8.0**: All phases complete — SDK integration (Phase 6), JSON config + SDK install + docs (Phase 7), metrics/notifications/backup (Phase 8), comprehensive validation tests (Phase 9), GitHub issue integration (Phase 10), Docker sandbox (Phase 11).

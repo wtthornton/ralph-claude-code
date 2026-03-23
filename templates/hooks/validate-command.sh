@@ -26,8 +26,8 @@ case "$COMMAND" in
 esac
 
 # Block --no-verify flag (prevents skipping git hooks)
-# Catches: git commit --no-verify, git push --no-verify, git commit -n (short form)
-if echo "$COMMAND" | grep -qE 'git\s+(commit|push|merge|rebase|cherry-pick)\s.*--no-verify' 2>/dev/null; then
+# Catches: git commit --no-verify, git push --no-verify, git --no-verify commit, etc.
+if echo "$COMMAND" | grep -qE 'git\s+.*--no-verify' 2>/dev/null; then
   echo "BLOCKED: --no-verify not allowed (do not skip git hooks): $COMMAND" >&2
   exit 2
 fi
@@ -37,6 +37,12 @@ case "$COMMAND" in
     exit 2
     ;;
 esac
+
+# Block --no-gpg-sign flag (prevents skipping commit signing)
+if echo "$COMMAND" | grep -qE 'git\s+(commit|merge|tag)\s.*--no-gpg-sign' 2>/dev/null; then
+  echo "BLOCKED: --no-gpg-sign not allowed (do not skip commit signing): $COMMAND" >&2
+  exit 2
+fi
 
 # Block destructive file operations
 case "$COMMAND" in

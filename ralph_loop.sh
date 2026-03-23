@@ -21,9 +21,11 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/notifications.sh" ]] && source "$SCRIPT_DIR/lib/notifications.sh"
 [[ -f "$SCRIPT_DIR/lib/backup.sh" ]] && source "$SCRIPT_DIR/lib/backup.sh"
 [[ -f "$SCRIPT_DIR/lib/audit.sh" ]] && source "$SCRIPT_DIR/lib/audit.sh"
+[[ -f "$SCRIPT_DIR/lib/context_management.sh" ]] && source "$SCRIPT_DIR/lib/context_management.sh"
+[[ -f "$SCRIPT_DIR/lib/tracing.sh" ]] && source "$SCRIPT_DIR/lib/tracing.sh"
 
 # Version
-RALPH_VERSION="2.0.2"
+RALPH_VERSION="2.2.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -76,6 +78,15 @@ CLAUDE_AUTO_UPDATE="${CLAUDE_AUTO_UPDATE:-true}"  # Auto-update Claude CLI at st
 # GUARD-2: Consecutive timeout circuit breaker (Phase 13)
 MAX_CONSECUTIVE_TIMEOUTS="${MAX_CONSECUTIVE_TIMEOUTS:-5}"
 CONSECUTIVE_TIMEOUT_COUNT=0
+
+# LOGFIX-4: Fast-trip circuit breaker on broken invocations (0 tools, <30s)
+MAX_CONSECUTIVE_FAST_FAILURES="${MAX_CONSECUTIVE_FAST_FAILURES:-3}"
+CONSECUTIVE_FAST_FAILURE_COUNT=0
+LAST_TOOL_COUNT=0  # Exported from execute_claude_code for fast-trip detection
+
+# LOGFIX-6: Stall detection for persistent deferred tests
+CB_MAX_DEFERRED_TESTS="${CB_MAX_DEFERRED_TESTS:-5}"
+CONSECUTIVE_DEFERRED_TEST_COUNT=0
 
 # ADAPTIVE-1: Adaptive timeout configuration (Phase 13)
 ADAPTIVE_TIMEOUT_ENABLED="${ADAPTIVE_TIMEOUT_ENABLED:-true}"
@@ -674,8 +685,29 @@ ralph_log_permission_denials_from_raw_output() {
 
     [[ $_denial_count -gt 0 ]] || return 0
 
+    # LOGFIX-7: Distinguish between bash command denials (fixable via ALLOWED_TOOLS)
+    # and built-in tool denials (Glob, Grep, Read, Write, Edit — filesystem scope)
+    local _builtin_pattern="^(Glob|Grep|Read|Write|Edit|NotebookEdit)$"
+    local _has_bash_denials=false _has_builtin_denials=false
+    local IFS_bak="$IFS"
+    IFS=","
+    for _cmd in $_denied_cmds; do
+        _cmd=$(echo "$_cmd" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+        if echo "$_cmd" | grep -qE "$_builtin_pattern"; then
+            _has_builtin_denials=true
+        else
+            _has_bash_denials=true
+        fi
+    done
+    IFS="$IFS_bak"
+
     log_status "WARN" "Permission denied for $_denial_count command(s): $_denied_cmds"
-    log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required tools"
+    if [[ "$_has_bash_denials" == "true" ]]; then
+        log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required bash tools"
+    fi
+    if [[ "$_has_builtin_denials" == "true" ]]; then
+        log_status "INFO" "Built-in tool denials (Glob/Grep/Read) are filesystem scope restrictions, not ALLOWED_TOOLS issues"
+    fi
 }
 
 # CAPTURE-2: Multi-result stream merging — JSONL is the primary path since CLI v2.1+
@@ -683,6 +715,7 @@ ralph_log_permission_denials_from_raw_output() {
 # Sub-agent results (with parent_tool_use_id/subagent) are excluded from result count.
 ralph_extract_result_from_stream() {
     local output_file=$1
+    local extraction_context="${2:-normal}"  # LOGFIX-3: "normal" or "timeout"
     [[ -f "$output_file" ]] || return 0
     local _tl_count
     # Count top-level JSON objects by counting "type" keys (streaming — no memory load)
@@ -699,7 +732,12 @@ ralph_extract_result_from_stream() {
     _toplevel_count=$((_toplevel_count + 0))
 
     if [[ "$_toplevel_count" -eq 0 ]]; then
-        log_status "ERROR" "Stream extraction failed: no valid result object in stream"
+        # LOGFIX-3: Downgrade to WARN when failure is caused by a known timeout
+        if [[ "$extraction_context" == "timeout" ]]; then
+            log_status "WARN" "Stream extraction incomplete (timeout): no valid result object in stream"
+        else
+            log_status "ERROR" "Stream extraction failed: no valid result object in stream"
+        fi
         return 1
     fi
 
@@ -723,7 +761,12 @@ ralph_extract_result_from_stream() {
         echo "$_extracted_result" > "$output_file"
         log_status "INFO" "Stream extraction: isolated result object from JSONL stream (extraction_method=stream)"
     else
-        log_status "ERROR" "Stream extraction failed: no valid result object in stream"
+        # LOGFIX-3: Downgrade to WARN when failure is caused by a known timeout
+        if [[ "$extraction_context" == "timeout" ]]; then
+            log_status "WARN" "Stream extraction incomplete (timeout): could not isolate result object"
+        else
+            log_status "ERROR" "Stream extraction failed: no valid result object in stream"
+        fi
         return 1
     fi
 }
@@ -783,10 +826,11 @@ ralph_log_failed_mcp_servers_from_output() {
 # Run all lightweight pre-analyze steps on Claude output
 ralph_prepare_claude_output_for_analysis() {
     local output_file=$1
+    local extraction_context="${2:-normal}"  # LOGFIX-3: "normal" or "timeout"
     # Log from full stream before extraction removes system / multi-line context
     ralph_log_permission_denials_from_raw_output "$output_file"
     ralph_log_failed_mcp_servers_from_output "$output_file"
-    ralph_extract_result_from_stream "$output_file"
+    ralph_extract_result_from_stream "$output_file" "$extraction_context"
 }
 
 # =============================================================================
@@ -907,7 +951,9 @@ update_exit_signals_from_status() {
        elif $progress == "true" then .test_only_loops = []
        else . end) |
       (if $complete == "true" then .done_signals += [$loop] else . end) |
-      (if $exit_sig == "true" then .completion_indicators += [$loop] else . end) |
+      (if $exit_sig == "true" then .completion_indicators += [$loop]
+       elif $progress == "true" then .completion_indicators = []
+       else . end) |
       .test_only_loops = .test_only_loops[-5:] |
       .done_signals = .done_signals[-5:] |
       .completion_indicators = .completion_indicators[-5:]
@@ -1080,9 +1126,11 @@ should_exit_gracefully() {
     
     # 3. Safety circuit breaker - force exit after 5 consecutive EXIT_SIGNAL=true responses
     # Note: completion_indicators only accumulates when Claude explicitly sets EXIT_SIGNAL=true
-    # (not based on confidence score). This safety breaker catches cases where Claude signals
-    # completion 5+ times but the normal exit path (completion_indicators >= 2 + EXIT_SIGNAL=true)
-    # didn't trigger for some reason. Threshold of 5 prevents API waste while being higher than
+    # (not based on confidence score), and resets to [] when productive work (files_modified > 0
+    # or tasks_completed > 0) occurs with exit_signal=false. This decay prevents false positives
+    # where Claude says "done" early, does more work, then says "done" again for a different reason.
+    # This safety breaker catches cases where Claude signals completion 5+ times without any
+    # intervening productive work. Threshold of 5 prevents API waste while being higher than
     # the normal threshold (2) to avoid false positives.
     if [[ $recent_completion_indicators -ge 5 ]]; then
         log_status "WARN" "🚨 SAFETY CIRCUIT BREAKER: Force exit after 5 consecutive EXIT_SIGNAL=true responses ($recent_completion_indicators)" >&2
@@ -1514,6 +1562,11 @@ validate_allowed_tools() {
         return 0  # Empty is valid (uses defaults)
     fi
 
+    # Disable glob expansion to preserve wildcard patterns like Bash(git add *)
+    local _old_glob
+    _old_glob=$(set +o | grep noglob)
+    set -o noglob
+
     # Split by comma
     local IFS=','
     read -ra tools <<< "$tools_input"
@@ -1543,6 +1596,8 @@ validate_allowed_tools() {
         done
 
         if [[ "$valid" == "false" ]]; then
+            # Restore glob setting before returning
+            eval "$_old_glob"
             echo "Error: Invalid tool in --allowed-tools: '$tool'"
             echo "Valid tools: ${VALID_TOOL_PATTERNS[*]}"
             echo "Note: Bash(...) patterns with any content are allowed (e.g., 'Bash(git *)')"
@@ -1550,6 +1605,8 @@ validate_allowed_tools() {
         fi
     done
 
+    # Restore glob setting
+    eval "$_old_glob"
     return 0
 }
 
@@ -2007,6 +2064,10 @@ build_claude_command() {
     # Add allowed tools (each tool as separate array element)
     if [[ -n "$CLAUDE_ALLOWED_TOOLS" ]]; then
         CLAUDE_CMD_ARGS+=("--allowedTools")
+        # Disable glob expansion to preserve wildcard patterns like Bash(git add *)
+        local _old_glob
+        _old_glob=$(set +o | grep noglob)
+        set -o noglob
         # Split by comma and add each tool
         local IFS=','
         read -ra tools_array <<< "$CLAUDE_ALLOWED_TOOLS"
@@ -2017,6 +2078,8 @@ build_claude_command() {
                 CLAUDE_CMD_ARGS+=("$tool")
             fi
         done
+        # Restore glob setting
+        eval "$_old_glob"
     fi
 
     # Add session continuity flag
@@ -2683,10 +2746,21 @@ END {
         _tool_count=$(grep -c '"type":"tool_use"' "$output_file" 2>/dev/null | tr -d '[:space:]') || _tool_count=0
         _agent_count=$(grep -c '"subtype":"task_started"' "$output_file" 2>/dev/null | tr -d '[:space:]') || _agent_count=0
         _error_count=$(grep -c '"is_error":true' "$output_file" 2>/dev/null | tr -d '[:space:]') || _error_count=0
+        # LOGFIX-4: Export tool count for fast-trip detection in main loop
+        LAST_TOOL_COUNT=${_tool_count:-0}
+        # LOGFIX-5: Categorize errors into expected (tool scope) vs system (real failures)
+        local _expected_errors=0 _system_errors=0
         if [[ ${_error_count:-0} -gt 0 ]]; then
-            log_status "WARN" "Execution stats: Tools=${_tool_count:-0} Agents=${_agent_count:-0} Errors=${_error_count:-0}"
+            # Expected errors: permission denials, file-too-large, scope restrictions
+            _expected_errors=$(grep -B1 '"is_error":true' "$output_file" 2>/dev/null \
+                | grep -ciE 'permission|denied|too large|exceeds.*token|exceeds.*limit|outside.*allowed|not allowed' \
+                || echo 0)
+            _expected_errors=$(echo "$_expected_errors" | tr -d '[:space:]')
+            _system_errors=$(( ${_error_count:-0} - ${_expected_errors:-0} ))
+            [[ $_system_errors -lt 0 ]] && _system_errors=0
+            log_status "WARN" "Execution stats: Tools=${_tool_count:-0} Agents=${_agent_count:-0} Errors=${_error_count:-0} (${_expected_errors} scope, ${_system_errors} system)"
         else
-            log_status "INFO" "Execution stats: Tools=${_tool_count:-0} Agents=${_agent_count:-0} Errors=${_error_count:-0}"
+            log_status "INFO" "Execution stats: Tools=${_tool_count:-0} Agents=${_agent_count:-0} Errors=0"
         fi
 
         # Extract session ID from stream-json output for session continuity
@@ -2906,6 +2980,36 @@ EOF
             log_status "WARN" "Exit signal update failed; continuing with stale signals"
         fi
 
+        # LOGFIX-6: Track consecutive TESTS_STATUS: DEFERRED to detect environment stalls
+        local _tests_status
+        _tests_status=$(jq -r '.tests_status // "UNKNOWN"' "${RALPH_DIR}/status.json" 2>/dev/null || echo "UNKNOWN")
+        if [[ "$_tests_status" == "DEFERRED" ]]; then
+            CONSECUTIVE_DEFERRED_TEST_COUNT=$((CONSECUTIVE_DEFERRED_TEST_COUNT + 1))
+            if [[ "$CONSECUTIVE_DEFERRED_TEST_COUNT" -ge $((CB_MAX_DEFERRED_TESTS * 2)) ]]; then
+                log_status "ERROR" "Tests deferred for $CONSECUTIVE_DEFERRED_TEST_COUNT consecutive loops — possible environment issue. Tripping circuit breaker."
+                local total_opens
+                total_opens=$(jq -r '.total_opens // 0' "$CB_STATE_FILE" 2>/dev/null || echo "0")
+                total_opens=$((total_opens + 1))
+                cat > "$CB_STATE_FILE" << CBEOF
+{
+    "state": "$CB_STATE_OPEN",
+    "last_change": "$(get_iso_timestamp)",
+    "opened_at": "$(get_iso_timestamp)",
+    "consecutive_no_progress": $CONSECUTIVE_DEFERRED_TEST_COUNT,
+    "total_opens": $total_opens,
+    "reason": "persistent_test_deferral: $CONSECUTIVE_DEFERRED_TEST_COUNT consecutive DEFERRED loops"
+}
+CBEOF
+                reset_session "persistent_test_deferral"
+                update_status "$loop_count" "$(_read_call_count)" "circuit_breaker_open" "halted" "persistent_test_deferral"
+                break
+            elif [[ "$CONSECUTIVE_DEFERRED_TEST_COUNT" -ge "$CB_MAX_DEFERRED_TESTS" ]]; then
+                log_status "WARN" "Tests deferred for $CONSECUTIVE_DEFERRED_TEST_COUNT consecutive loops — possible environment issue"
+            fi
+        else
+            CONSECUTIVE_DEFERRED_TEST_COUNT=0
+        fi
+
         # Log analysis summary (non-critical)
         if ! log_status_summary; then
             log_status "WARN" "Analysis summary logging failed; non-critical, continuing"
@@ -2987,7 +3091,7 @@ EOF
                     log_status "DEBUG" "Recorded productive timeout latency: ${timeout_duration}s (will push adaptive timeout higher)"
                 fi
 
-                ralph_prepare_claude_output_for_analysis "$output_file"
+                ralph_prepare_claude_output_for_analysis "$output_file" "timeout"
 
                 # Save session ID (fallback already populated by Step 1 if stream was truncated)
                 if [[ "$CLAUDE_USE_CONTINUE" == "true" ]]; then
@@ -3104,10 +3208,19 @@ cleanup() {
             log_status "INFO" "Ralph stopped by signal (exit code: $trap_exit_code)"
             update_status "$loop_count" "$(_read_call_count)" "stopped" "signal" "exit_code_$trap_exit_code"
         elif [[ $trap_exit_code -ne 0 ]]; then
-            log_status "ERROR" "Ralph loop crashed (exit code: $trap_exit_code)"
-            update_status "$loop_count" "$(_read_call_count)" "crashed" "error" "exit_code_$trap_exit_code"
-            # Record crash for startup detection
-            echo "$trap_exit_code" > "$RALPH_DIR/.last_crash_code"
+            # LOGFIX-1: Check if status was already set to graceful_exit/completed
+            # before reporting a crash. The break from the exit gate can leave a
+            # non-zero $? from intermediate commands (hook rejections, etc.)
+            local current_status
+            current_status=$(jq -r '.status' "$STATUS_FILE" 2>/dev/null || echo "unknown")
+            if [[ "$current_status" == "graceful_exit" || "$current_status" == "completed" ]]; then
+                log_status "INFO" "Ralph exited gracefully (ignoring intermediate exit code: $trap_exit_code)"
+            else
+                log_status "ERROR" "Ralph loop crashed (exit code: $trap_exit_code)"
+                update_status "$loop_count" "$(_read_call_count)" "crashed" "error" "exit_code_$trap_exit_code"
+                # Record crash for startup detection
+                echo "$trap_exit_code" > "$RALPH_DIR/.last_crash_code"
+            fi
         else
             # Normal exit (code 0) — check if status was properly updated
             local current_status
@@ -3145,14 +3258,41 @@ acquire_instance_lock() {
     if ! flock -n 99; then
         local existing_pid
         existing_pid=$(cat "$LOCKFILE" 2>/dev/null | head -1)
-        echo "[ERROR] Another Ralph instance is already running (PID: ${existing_pid:-unknown})" >&2
-        echo "[ERROR] Project: $(pwd)" >&2
-        echo "[ERROR] Lock: $LOCKFILE" >&2
-        echo "" >&2
-        echo "If the process is gone, the lock auto-releases. Otherwise:" >&2
-        echo "  kill ${existing_pid:-<pid>}    # Stop the other instance" >&2
-        echo "  ralph --status        # Check current state" >&2
-        exit 1
+
+        # LOGFIX-2: Auto-terminate stale instances instead of just advising manual kill
+        if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+            log_status "WARN" "Terminating existing Ralph instance (PID: $existing_pid)"
+            kill "$existing_pid" 2>/dev/null || true
+            # Wait up to 5 seconds for graceful shutdown
+            local wait_count=0
+            while kill -0 "$existing_pid" 2>/dev/null && [[ $wait_count -lt 5 ]]; do
+                sleep 1
+                ((wait_count++)) || true
+            done
+            # Force kill if still alive
+            if kill -0 "$existing_pid" 2>/dev/null; then
+                log_status "WARN" "Force-killing stale Ralph instance (PID: $existing_pid)"
+                kill -9 "$existing_pid" 2>/dev/null || true
+                sleep 1
+            fi
+            # Retry acquiring the lock
+            if ! flock -n 99; then
+                echo "[ERROR] Could not acquire lock after terminating PID $existing_pid" >&2
+                echo "[ERROR] Project: $(pwd)" >&2
+                echo "[ERROR] Lock: $LOCKFILE" >&2
+                exit 1
+            fi
+            log_status "INFO" "Lock acquired after terminating previous instance"
+        else
+            echo "[ERROR] Another Ralph instance holds the lock (PID: ${existing_pid:-unknown})" >&2
+            echo "[ERROR] Project: $(pwd)" >&2
+            echo "[ERROR] Lock: $LOCKFILE" >&2
+            echo "" >&2
+            echo "If the process is gone, the lock auto-releases. Otherwise:" >&2
+            echo "  kill ${existing_pid:-<pid>}    # Stop the other instance" >&2
+            echo "  ralph --status        # Check current state" >&2
+            exit 1
+        fi
     fi
 
     # Write PID for informational display only (flock manages actual locking)
@@ -3389,6 +3529,10 @@ main() {
 
         log_status "LOOP" "=== Starting Loop #$loop_count (total: #$persistent_loops) ==="
 
+        # OTEL-1/3: Start trace for this iteration
+        export LOOP_COUNT="$loop_count"
+        declare -f ralph_trace_start &>/dev/null && ralph_trace_start
+
         # FAILSPEC-4: Audit log — loop iteration start
         ralph_audit "loop_start" "ralph_loop" "begin_iteration" "loop_count=$loop_count,total=$persistent_loops" "started" 2>/dev/null
 
@@ -3496,6 +3640,8 @@ main() {
             update_status "$loop_count" "$(_read_call_count)" "completed" "success"
             # GUARD-2: Reset consecutive timeout counter on successful completion
             CONSECUTIVE_TIMEOUT_COUNT=0
+            # LOGFIX-4: Reset fast failure counter on success
+            CONSECUTIVE_FAST_FAILURE_COUNT=0
 
             # Brief pause between successful executions (reduced from 5s in v1.8.5)
             sleep 2
@@ -3547,10 +3693,60 @@ main() {
             fi
         else
             update_status "$loop_count" "$(_read_call_count)" "failed" "error"
+
+            # LOGFIX-4: Fast-trip circuit breaker on broken invocations
+            # Detect rapid failures with 0 tool calls (e.g., missing stdin, bad prompt)
+            local _exec_duration=30
+            if [[ -n "${invocation_start_epoch:-}" ]]; then
+                _exec_duration=$(( $(date +%s) - invocation_start_epoch ))
+            fi
+            if [[ ${LAST_TOOL_COUNT:-0} -eq 0 && $_exec_duration -lt 30 ]]; then
+                CONSECUTIVE_FAST_FAILURE_COUNT=$((CONSECUTIVE_FAST_FAILURE_COUNT + 1))
+                log_status "WARN" "Fast failure detected: 0 tools, ${_exec_duration}s ($CONSECUTIVE_FAST_FAILURE_COUNT/$MAX_CONSECUTIVE_FAST_FAILURES)"
+                if [[ "$CONSECUTIVE_FAST_FAILURE_COUNT" -ge "$MAX_CONSECUTIVE_FAST_FAILURES" ]]; then
+                    log_status "ERROR" "Fast-trip: $MAX_CONSECUTIVE_FAST_FAILURES consecutive instant failures (0 tools, <30s each)"
+                    log_status "ERROR" "Likely cause: prompt construction failure or CLI misconfiguration"
+                    local total_opens
+                    total_opens=$(jq -r '.total_opens // 0' "$CB_STATE_FILE" 2>/dev/null || echo "0")
+                    total_opens=$((total_opens + 1))
+                    cat > "$CB_STATE_FILE" << CBEOF
+{
+    "state": "$CB_STATE_OPEN",
+    "last_change": "$(get_iso_timestamp)",
+    "opened_at": "$(get_iso_timestamp)",
+    "consecutive_no_progress": $CONSECUTIVE_FAST_FAILURE_COUNT,
+    "total_opens": $total_opens,
+    "reason": "fast_trip: $MAX_CONSECUTIVE_FAST_FAILURES consecutive instant failures (0 tools)"
+}
+CBEOF
+                    reset_session "fast_trip_circuit_breaker"
+                    update_status "$loop_count" "$(_read_call_count)" "circuit_breaker_open" "halted" "fast_trip"
+                    break
+                fi
+            else
+                CONSECUTIVE_FAST_FAILURE_COUNT=0
+            fi
+
             log_status "WARN" "Execution failed, waiting 30 seconds before retry..."
             sleep 30
         fi
         
+        # OTEL-3/4: Record trace cost and export spans at end of iteration
+        if declare -f ralph_trace_record_cost &>/dev/null; then
+            # Extract model from status.json or default to sonnet
+            local _trace_model="sonnet"
+            if [[ -f "${RALPH_DIR}/status.json" ]]; then
+                local _sm
+                _sm=$(jq -r '.model // empty' "${RALPH_DIR}/status.json" 2>/dev/null || true)
+                [[ -n "$_sm" ]] && _trace_model="$_sm"
+            fi
+            # Token counts are not yet tracked in status.json;
+            # record with zeros so cost_file tracks iterations.
+            # When token extraction is added upstream, pass real values here.
+            ralph_trace_record_cost "$_trace_model" "0" "0"
+        fi
+        declare -f ralph_otlp_export &>/dev/null && ralph_otlp_export
+
         log_status "LOOP" "=== Completed Loop #$loop_count ==="
     done
 }
@@ -3611,6 +3807,10 @@ GitHub Issues (Phase 10 — v1.7.0):
     --batch                 Process multiple issues sequentially
     --batch-issues NUMS     Comma-separated issue numbers for batch
     --stop-on-failure       Stop batch processing on first failure
+
+Cost Optimization (Phase 14):
+    --cost-dashboard        Show unified cost dashboard and exit
+    --costs                 Alias for --cost-dashboard
 
 Sandbox (Phase 11 — v1.8.0):
     --sandbox               Run loop inside Docker container
@@ -3817,6 +4017,12 @@ while [[ $# -gt 0 ]]; do
         --stats-last)
             ralph_show_stats --last "$2"
             shift 2
+            exit 0
+            ;;
+        --cost-dashboard|--costs)
+            source "$SCRIPT_DIR/lib/tracing.sh" 2>/dev/null || true
+            source "$SCRIPT_DIR/lib/metrics.sh" 2>/dev/null || true
+            ralph_show_cost_dashboard "${@:2}"
             exit 0
             ;;
         --rollback)

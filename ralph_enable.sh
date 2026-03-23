@@ -117,7 +117,15 @@ parse_arguments() {
         case "$1" in
             --from)
                 if [[ -n "$2" && ! "$2" =~ ^-- ]]; then
-                    TASK_SOURCE="$2"
+                    case "$2" in
+                        beads|github|prd)
+                            TASK_SOURCE="$2"
+                            ;;
+                        *)
+                            echo "Error: --from must be 'beads', 'github', or 'prd' (got: '$2')" >&2
+                            exit $ENABLE_INVALID_ARGS
+                            ;;
+                    esac
                     shift 2
                 else
                     echo "Error: --from requires a source (beads, github, prd)" >&2
@@ -126,6 +134,10 @@ parse_arguments() {
                 ;;
             --prd)
                 if [[ -n "$2" && ! "$2" =~ ^-- ]]; then
+                    if [[ ! -f "$2" ]]; then
+                        echo "Error: PRD file not found: $2" >&2
+                        exit $ENABLE_FILE_NOT_FOUND
+                    fi
                     PRD_FILE="$2"
                     shift 2
                 else
@@ -398,38 +410,80 @@ phase_file_generation() {
 
     # Import tasks if sources selected
     local imported_tasks=""
+    local import_summary=()
     if [[ -n "$SELECTED_SOURCES" ]]; then
         echo "Importing tasks..."
 
         if echo "$SELECTED_SOURCES" | grep -qw "beads"; then
             local beads_tasks
-            if beads_tasks=$(fetch_beads_tasks); then
-                imported_tasks="${imported_tasks}${beads_tasks}
+            if beads_tasks=$(fetch_beads_tasks 2>/dev/null); then
+                local beads_count
+                beads_count=$(echo "$beads_tasks" | grep -cE '^\s*-\s' 2>/dev/null) || beads_count=0
+                if [[ $beads_count -gt 0 ]]; then
+                    imported_tasks="${imported_tasks}${beads_tasks}
 "
-                print_success "Imported tasks from beads"
+                    import_summary+=("beads: ${beads_count} tasks")
+                    print_success "Imported $beads_count tasks from beads"
+                else
+                    import_summary+=("beads: 0 tasks (source empty)")
+                    print_warning "No tasks found in beads"
+                fi
+            else
+                import_summary+=("beads: failed")
+                print_error "Failed to import from beads"
             fi
         fi
 
         if echo "$SELECTED_SOURCES" | grep -qw "github"; then
             local github_tasks
-            if github_tasks=$(fetch_github_tasks "$CONFIG_GITHUB_LABEL"); then
-                imported_tasks="${imported_tasks}${github_tasks}
+            if github_tasks=$(fetch_github_tasks "$CONFIG_GITHUB_LABEL" 2>/dev/null); then
+                local github_count
+                github_count=$(echo "$github_tasks" | grep -cE '^\s*-\s' 2>/dev/null) || github_count=0
+                if [[ $github_count -gt 0 ]]; then
+                    imported_tasks="${imported_tasks}${github_tasks}
 "
-                print_success "Imported tasks from GitHub"
+                    import_summary+=("github: ${github_count} tasks")
+                    print_success "Imported $github_count tasks from GitHub"
+                else
+                    import_summary+=("github: 0 tasks (no matching issues)")
+                    print_warning "No tasks found in GitHub"
+                fi
+            else
+                import_summary+=("github: failed (is 'gh' installed?)")
+                print_error "Failed to import from GitHub"
             fi
         fi
 
         if echo "$SELECTED_SOURCES" | grep -qw "prd"; then
             if [[ -n "$CONFIG_PRD_FILE" && -f "$CONFIG_PRD_FILE" ]]; then
                 local prd_tasks
-                if prd_tasks=$(extract_prd_tasks "$CONFIG_PRD_FILE"); then
-                    imported_tasks="${imported_tasks}${prd_tasks}
+                if prd_tasks=$(extract_prd_tasks "$CONFIG_PRD_FILE" 2>/dev/null); then
+                    local prd_count
+                    prd_count=$(echo "$prd_tasks" | grep -cE '^\s*-\s' 2>/dev/null) || prd_count=0
+                    if [[ $prd_count -gt 0 ]]; then
+                        imported_tasks="${imported_tasks}${prd_tasks}
 "
-                    print_success "Extracted tasks from PRD: $CONFIG_PRD_FILE"
+                        import_summary+=("prd: ${prd_count} tasks from $(basename "$CONFIG_PRD_FILE")")
+                        print_success "Extracted $prd_count tasks from PRD: $CONFIG_PRD_FILE"
+                    else
+                        import_summary+=("prd: 0 tasks (no actionable items found)")
+                        print_warning "No tasks found in PRD: $CONFIG_PRD_FILE"
+                    fi
+                else
+                    import_summary+=("prd: failed to parse")
+                    print_error "Failed to extract tasks from PRD: $CONFIG_PRD_FILE"
                 fi
+            else
+                import_summary+=("prd: skipped (no file specified)")
             fi
         fi
 
+        # Print import summary
+        echo ""
+        echo "Import summary:"
+        for item in "${import_summary[@]}"; do
+            echo "  - $item"
+        done
         echo ""
     fi
 

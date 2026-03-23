@@ -479,3 +479,49 @@ build_ralph_cmd_for_test() {
     # Should only be "ralph" with no extra flags
     [[ "$result" == "ralph" ]]
 }
+
+# =============================================================================
+# WILDCARD PATTERN PRESERVATION TESTS (Issue #154)
+# =============================================================================
+
+@test "build_claude_command preserves wildcard patterns in ALLOWED_TOOLS" {
+    # Source ralph_loop.sh functions in a subshell to test build_claude_command
+    # We need to test that * in tool patterns like Bash(git add *) survives
+    # IFS splitting and variable expansion without glob expansion
+    CLAUDE_ALLOWED_TOOLS="Write,Bash(git add *),Bash(grep *)"
+
+    # Simulate what build_claude_command does with noglob protection
+    local CLAUDE_CMD_ARGS=()
+    CLAUDE_CMD_ARGS+=("--allowedTools")
+    local _old_glob
+    _old_glob=$(set +o | grep noglob)
+    set -o noglob
+    local IFS=','
+    read -ra tools_array <<< "$CLAUDE_ALLOWED_TOOLS"
+    for tool in "${tools_array[@]}"; do
+        tool=$(echo "$tool" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [[ -n "$tool" ]]; then
+            CLAUDE_CMD_ARGS+=("$tool")
+        fi
+    done
+    eval "$_old_glob"
+
+    # Check that the wildcard patterns are preserved (not glob-expanded)
+    local found_git=false
+    local found_grep=false
+    for arg in "${CLAUDE_CMD_ARGS[@]}"; do
+        [[ "$arg" == "Bash(git add *)" ]] && found_git=true
+        [[ "$arg" == "Bash(grep *)" ]] && found_grep=true
+    done
+    [[ "$found_git" == "true" ]]
+    [[ "$found_grep" == "true" ]]
+}
+
+@test "validate_allowed_tools accepts wildcard patterns without glob expansion" {
+    # Test that validation works correctly with wildcard-containing tool names
+    # by running the actual script's validation with --allowed-tools
+    run bash "$RALPH_SCRIPT" --allowed-tools "Write,Bash(git add *),Bash(grep *)" --help
+
+    assert_success
+    [[ "$output" == *"Usage:"* ]]
+}

@@ -233,6 +233,26 @@ teardown() {
     assert_success
 }
 
+@test "HOOKS-5: validate-command.sh blocks git commit --no-verify" {
+    run bash -c 'echo "{\"tool_input\": {\"command\": \"git commit --no-verify -m \\\"test\\\"\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/validate-command.sh"'
+    [[ "$status" -eq 2 ]]
+}
+
+@test "HOOKS-5: validate-command.sh blocks git push --no-verify" {
+    run bash -c 'echo "{\"tool_input\": {\"command\": \"git push --no-verify origin main\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/validate-command.sh"'
+    [[ "$status" -eq 2 ]]
+}
+
+@test "HOOKS-5: validate-command.sh blocks git commit -n (short form)" {
+    run bash -c 'echo "{\"tool_input\": {\"command\": \"git commit -n -m \\\"test\\\"\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/validate-command.sh"'
+    [[ "$status" -eq 2 ]]
+}
+
+@test "HOOKS-5: validate-command.sh blocks --no-gpg-sign" {
+    run bash -c 'echo "{\"tool_input\": {\"command\": \"git commit --no-gpg-sign -m \\\"test\\\"\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/validate-command.sh"'
+    [[ "$status" -eq 2 ]]
+}
+
 @test "HOOKS-5: protect-ralph-files.sh exists" {
     [[ -f "$PROJECT_ROOT/templates/hooks/protect-ralph-files.sh" ]]
 }

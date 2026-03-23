@@ -57,6 +57,32 @@ Ralph loop #$((loop_count + 1)). Tasks: $done_tasks/$total_tasks complete, $rema
 Circuit breaker: $cb_state.$([ -n "$last_status" ] && echo " Last loop: $last_status.")
 Read .ralph/fix_plan.md and do the FIRST unchecked item. IMPORTANT: Only run tests at epic boundaries (last task in a ## section). Otherwise set TESTS_STATUS: DEFERRED — do NOT run any test commands.
 EOF
+
+  # CTXMGMT-2: Check if current task needs decomposition
+  if [[ "${RALPH_PROGRESSIVE_CONTEXT:-false}" == "true" ]]; then
+    # Source context_management.sh from Ralph's lib directory
+    _ctx_lib_loaded=false
+    for _lib_path in "$HOME/.ralph/lib/context_management.sh" \
+                     "${RALPH_INSTALL_DIR:-/nonexistent}/lib/context_management.sh"; do
+      if [[ -f "$_lib_path" ]]; then
+        source "$_lib_path"
+        _ctx_lib_loaded=true
+        break
+      fi
+    done
+
+    if [[ "$_ctx_lib_loaded" == "true" ]] && declare -f ralph_detect_decomposition_needed &>/dev/null; then
+      current_task=$(grep -m1 -E '^\s*- \[ \]' "$RALPH_DIR/fix_plan.md" 2>/dev/null || echo "")
+      if [[ -n "$current_task" ]]; then
+        decomp_result=$(ralph_detect_decomposition_needed "$current_task" "${loop_count:-0}" 2>/dev/null || echo '{"decompose":false}')
+        if echo "$decomp_result" | jq -r '.decompose' 2>/dev/null | grep -q "true"; then
+          reasons=$(echo "$decomp_result" | jq -r '.reasons // ""' 2>/dev/null)
+          echo "" >&2
+          echo "DECOMPOSITION SIGNAL: Current task may be too large ($reasons). Consider breaking into sub-tasks." >&2
+        fi
+      fi
+    fi
+  fi
 fi
 
 exit 0

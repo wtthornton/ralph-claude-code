@@ -1318,3 +1318,191 @@ EOF
     # Must call reset_session before break
     echo "$exit_block" | grep -q 'reset_session'
 }
+
+# =============================================================================
+# COMPLETION INDICATOR DECAY TESTS (Issue #224)
+# =============================================================================
+# These tests verify that completion_indicators reset (decay) when productive
+# work happens between exit signals, preventing false-positive completions
+# where Claude says "done" early, does more work, then says "done" again.
+
+# Helper: inline version of update_exit_signals_from_status (from ralph_loop.sh)
+# Needed because ralph_loop.sh can't be sourced directly (has main execution).
+update_exit_signals_from_status() {
+    local status_file="${RALPH_DIR}/status.json"
+    local exit_signals_file="${EXIT_SIGNALS_FILE}"
+
+    if [[ ! -f "$status_file" ]]; then
+        return 1
+    fi
+
+    local exit_signal status tasks_completed files_modified work_type loop_number
+    local _status_tsv
+    _status_tsv=$(jq -r '[
+      (.exit_signal // "false"),
+      (.status // "UNKNOWN"),
+      (.tasks_completed // 0 | tostring),
+      (.files_modified // 0 | tostring),
+      (.work_type // "UNKNOWN"),
+      (.loop_count // 0 | tostring)
+    ] | @tsv' "$status_file" 2>/dev/null || echo "false	UNKNOWN	0	0	UNKNOWN	0")
+    IFS=$'\t' read -r exit_signal status tasks_completed files_modified work_type loop_number <<< "$_status_tsv"
+
+    local is_test_only="false"
+    [[ "$work_type" == "TESTING" ]] && is_test_only="true"
+
+    local has_completion_signal="false"
+    [[ "$status" == "COMPLETE" ]] && has_completion_signal="true"
+
+    local has_progress="false"
+    [[ "$files_modified" -gt 0 || "$tasks_completed" -gt 0 ]] && has_progress="true"
+
+    local signals
+    signals=$(jq \
+        --argjson loop "$loop_number" \
+        --arg test_only "$is_test_only" \
+        --arg complete "$has_completion_signal" \
+        --arg exit_sig "$exit_signal" \
+        --arg progress "$has_progress" '
+      (if $test_only == "true" then .test_only_loops += [$loop]
+       elif $progress == "true" then .test_only_loops = []
+       else . end) |
+      (if $complete == "true" then .done_signals += [$loop] else . end) |
+      (if $exit_sig == "true" then .completion_indicators += [$loop]
+       elif $progress == "true" then .completion_indicators = []
+       else . end) |
+      .test_only_loops = .test_only_loops[-5:] |
+      .done_signals = .done_signals[-5:] |
+      .completion_indicators = .completion_indicators[-5:]
+    ' "$exit_signals_file" 2>/dev/null || echo '{"test_only_loops":[],"done_signals":[],"completion_indicators":[]}')
+
+    echo "$signals" > "$exit_signals_file"
+    return 0
+}
+
+# Test 54: Completion indicators reset on productive work
+@test "completion_indicators reset when progress detected between exit signals" {
+    # Setup: status.json with exit_signal=false but progress=true
+    cat > "$RALPH_DIR/status.json" << 'EOF'
+{
+    "exit_signal": false,
+    "status": "IN_PROGRESS",
+    "tasks_completed": 2,
+    "files_modified": 5,
+    "work_type": "IMPLEMENTATION",
+    "loop_count": 3
+}
+EOF
+
+    # Pre-seed completion_indicators (simulating a previous EXIT_SIGNAL=true)
+    echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": [1]}' > "$EXIT_SIGNALS_FILE"
+
+    # Run update — should reset completion_indicators since there's progress and exit_signal=false
+    update_exit_signals_from_status
+
+    # Check that completion_indicators was reset
+    local indicators
+    indicators=$(jq '.completion_indicators | length' "$EXIT_SIGNALS_FILE")
+    assert_equal "$indicators" "0"
+}
+
+# Test 55: Completion indicators still accumulate on true exit signals
+@test "completion_indicators accumulate when exit_signal is true" {
+    cat > "$RALPH_DIR/status.json" << 'EOF'
+{
+    "exit_signal": true,
+    "status": "COMPLETE",
+    "tasks_completed": 0,
+    "files_modified": 0,
+    "work_type": "TESTING",
+    "loop_count": 4
+}
+EOF
+
+    echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": [1]}' > "$EXIT_SIGNALS_FILE"
+
+    update_exit_signals_from_status
+
+    local indicators
+    indicators=$(jq '.completion_indicators | length' "$EXIT_SIGNALS_FILE")
+    assert_equal "$indicators" "2"
+}
+
+# Test 56: Full scenario - exit signal, productive work, exit signal should not trigger exit
+@test "productive work between exit signals prevents false-positive completion" {
+    # Loop 1: Claude says "done" (exit_signal=true)
+    cat > "$RALPH_DIR/status.json" << 'EOF'
+{
+    "exit_signal": true,
+    "status": "COMPLETE",
+    "tasks_completed": 1,
+    "files_modified": 0,
+    "work_type": "IMPLEMENTATION",
+    "loop_count": 1
+}
+EOF
+    echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}' > "$EXIT_SIGNALS_FILE"
+    update_exit_signals_from_status
+
+    local indicators
+    indicators=$(jq '.completion_indicators | length' "$EXIT_SIGNALS_FILE")
+    assert_equal "$indicators" "1"
+
+    # Loop 2: Productive work happens (exit_signal=false, files_modified > 0)
+    cat > "$RALPH_DIR/status.json" << 'EOF'
+{
+    "exit_signal": false,
+    "status": "IN_PROGRESS",
+    "tasks_completed": 1,
+    "files_modified": 3,
+    "work_type": "IMPLEMENTATION",
+    "loop_count": 2
+}
+EOF
+    update_exit_signals_from_status
+
+    # completion_indicators should be reset by productive work
+    indicators=$(jq '.completion_indicators | length' "$EXIT_SIGNALS_FILE")
+    assert_equal "$indicators" "0"
+
+    # Loop 3: Claude says "done" again (exit_signal=true)
+    cat > "$RALPH_DIR/status.json" << 'EOF'
+{
+    "exit_signal": true,
+    "status": "COMPLETE",
+    "tasks_completed": 0,
+    "files_modified": 0,
+    "work_type": "IMPLEMENTATION",
+    "loop_count": 3
+}
+EOF
+    update_exit_signals_from_status
+
+    # Only 1 indicator now (not 2), so should NOT trigger exit
+    indicators=$(jq '.completion_indicators | length' "$EXIT_SIGNALS_FILE")
+    assert_equal "$indicators" "1"
+}
+
+# Test 57: No progress and no exit signal leaves completion_indicators unchanged
+@test "completion_indicators unchanged when no progress and no exit signal" {
+    cat > "$RALPH_DIR/status.json" << 'EOF'
+{
+    "exit_signal": false,
+    "status": "UNKNOWN",
+    "tasks_completed": 0,
+    "files_modified": 0,
+    "work_type": "UNKNOWN",
+    "loop_count": 5
+}
+EOF
+
+    # Pre-seed with existing indicators
+    echo '{"test_only_loops": [], "done_signals": [], "completion_indicators": [1, 2]}' > "$EXIT_SIGNALS_FILE"
+
+    update_exit_signals_from_status
+
+    # No progress and no exit signal — indicators should remain unchanged
+    local indicators
+    indicators=$(jq '.completion_indicators | length' "$EXIT_SIGNALS_FILE")
+    assert_equal "$indicators" "2"
+}

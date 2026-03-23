@@ -1,6 +1,6 @@
 # Ralph Claude Code — Epic & Story Index
 
-> **Generated:** 2026-03-21 | **Updated:** 2026-03-22 | **Total Epics:** 33 | **Total Stories:** 117 (104 Done, 13 Open)
+> **Generated:** 2026-03-21 | **Updated:** 2026-03-23 | **Total Epics:** 35 | **Total Stories:** 132 (125 Done, 7 Open)
 
 ---
 
@@ -64,21 +64,37 @@ Phase 13 (DONE)
 │ Pre-QA Deploy│
 └──────────────┘
 
-OPEN (2026 Best Practices Modernization)
+MOSTLY DONE (2026 Best Practices Modernization)
 Phase 14
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
 │RALPH-FAILSPEC│   │ RALPH-OTEL   │   │RALPH-COSTROUTE│  │RALPH-CTXMGMT │
-│ 4/4 Done     │   │ 0/4 Open     │   │ 0/4 Open      │  │ 0/3 Open     │
+│ 4/4 Done     │   │ 4/4 Done     │   │ 4/4 Done      │  │ 2/3 Done     │
 │ Critical     │   │ High         │   │ High          │   │ High         │
-│ Compliance   │   │ Observability│   │ Cost Savings  │   │ Context Mgmt │
+│ Compliance   │   │ Observability│   │ Cost 30-70%↓  │   │ Context Mgmt │
 └──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘
 
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
 │RALPH-AGENTMEM│   │RALPH-SANDBOXV2│  │ RALPH-EVALS  │
-│ 0/3 Open     │   │ 0/3 Open     │   │ 0/3 Open     │
+│ 3/3 Done     │   │ 0/3 Open     │   │ 0/3 Open     │
 │ Medium       │   │ Medium       │   │ Medium       │
 │ Memory       │   │ Security     │   │ Agent Evals  │
 └──────────────┘   └──────────────┘   └──────────────┘
+
+Phase 15 (NEW)
+┌──────────────┐
+│ RALPH-ENABLE │
+│ 4/7 Done     │
+│ High         │
+│ Wizard UX    │
+└──────────────┘
+
+Phase 16 (NEW — Production Log Fixes)
+┌──────────────┐
+│ RALPH-LOGFIX │
+│ 8/8 Done     │
+│ Critical     │
+│ Prod Bugs    │
+└──────────────┘
 ```
 
 ---
@@ -483,8 +499,8 @@ Phase 14 (OPEN)
 |---|-----|-------|----------|--------|--------|
 | 1 | [OTEL-1](story-otel-1-trace-generation.md) | OTel Trace Generation with GenAI Semantic Conventions | High | Medium | **Done** |
 | 2 | [OTEL-2](story-otel-2-trace-propagation.md) | Trace ID Propagation Across Sub-Agents and Hooks | High | Small | **Done** |
-| 3 | [OTEL-3](story-otel-3-cost-attribution.md) | Per-Trace Cost Attribution and Budget Alerts | Medium | Small | **Open** |
-| 4 | [OTEL-4](story-otel-4-otlp-exporter.md) | OTLP Exporter for External Backends | Medium | Medium | **Open** |
+| 3 | [OTEL-3](story-otel-3-cost-attribution.md) | Per-Trace Cost Attribution and Budget Alerts | Medium | Small | **Done** |
+| 4 | [OTEL-4](story-otel-4-otlp-exporter.md) | OTLP Exporter for External Backends | Medium | Medium | **Done** |
 
 ### RALPH-COSTROUTE: Cost-Aware Model Routing
 **Priority:** High | **Status:** Done | **Target:** v2.1.0 | **Dependencies:** None
@@ -494,18 +510,32 @@ Phase 14 (OPEN)
 |---|-----|-------|----------|--------|--------|
 | 1 | [COSTROUTE-1](story-costroute-1-complexity-classifier.md) | Task Complexity Classifier | High | Medium | **Done** |
 | 2 | [COSTROUTE-2](story-costroute-2-dynamic-model-selection.md) | Dynamic Model Selection Based on Complexity | High | Medium | **Done** |
-| 3 | [COSTROUTE-3](story-costroute-3-prompt-cache-optimization.md) | Prompt Structure Optimization for Cache Hits | High | Small | **Open** |
-| 4 | [COSTROUTE-4](story-costroute-4-token-budget.md) | Token Budget and Cost Dashboard | Medium | Small | **Open** |
+| 3 | [COSTROUTE-3](story-costroute-3-prompt-cache-optimization.md) | Prompt Structure Optimization for Cache Hits | High | Small | **Done** |
+| 4 | [COSTROUTE-4](story-costroute-4-token-budget.md) | Token Budget and Cost Dashboard | Medium | Small | **Done** |
 
 ### RALPH-CTXMGMT: Context Window Management
-**Priority:** High | **Status:** Open | **Target:** v2.1.0 | **Dependencies:** None
+**Priority:** High | **Status:** Mostly Done | **Target:** v2.1.0 | **Dependencies:** None
 **Research:** Success rate drops after 35 min; doubling duration quadruples failure rate
 
 | # | ID | Story | Priority | Effort | Status |
 |---|-----|-------|----------|--------|--------|
-| 1 | [CTXMGMT-1](story-ctxmgmt-1-progressive-loading.md) | Progressive Context Loading Strategy | High | Medium | **Open** |
-| 2 | [CTXMGMT-2](story-ctxmgmt-2-task-decomposition.md) | Task Decomposition Signals | High | Small | **Open** |
+| 1 | [CTXMGMT-1](story-ctxmgmt-1-progressive-loading.md) | Progressive Context Loading Strategy | High | Medium | **Done** |
+| 2 | [CTXMGMT-2](story-ctxmgmt-2-task-decomposition.md) | Task Decomposition Signals | High | Small | **Done** |
 | 3 | [CTXMGMT-3](story-ctxmgmt-3-continue-as-new.md) | Continue-As-New Pattern for Long Sessions | Medium | Medium | **Open** |
+
+### RALPH-ENABLE: Enable Wizard Hardening & UX Improvements
+**Priority:** High | **Status:** Mostly Done | **Target:** v2.1.0 | **Dependencies:** None
+**Source:** Interactive `ralph enable` review focused on reliability, safety, and first-run UX.
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [ENABLE-1](story-enable-1-state-detection-alignment.md) | Align Enabled-State Detection with Required Artifacts | Critical | Small | **Done** |
+| 2 | [ENABLE-2](story-enable-2-cli-input-validation.md) | Strict CLI Validation for `--from` and `--prd` | High | Small | **Done** |
+| 3 | [ENABLE-3](story-enable-3-import-failure-transparency.md) | Source-Level Import Result Reporting | High | Medium | **Done** |
+| 4 | [ENABLE-4](story-enable-4-force-safety-and-backups.md) | Harden `--force` Behavior and Preserve User Files | High | Medium | **Done** |
+| 5 | [ENABLE-5](story-enable-5-task-normalization-dedup.md) | Normalize, Deduplicate, and Cap Imported Tasks | Medium | Medium | **Open** |
+| 6 | [ENABLE-6](story-enable-6-dry-run-and-json-output.md) | Add `--dry-run` and `--json` for Automation | Medium | Medium | **Open** |
+| 7 | [ENABLE-7](story-enable-7-wizard-ux-improvements.md) | Improve Prompt UX and Final Summary Guidance | Medium | Small | **Open** |
 
 ### RALPH-AGENTMEM: Cross-Session Agent Memory
 **Priority:** Medium | **Status:** Done | **Target:** v2.2.0 | **Dependencies:** RALPH-OTEL
@@ -536,6 +566,26 @@ Phase 14 (OPEN)
 | 1 | [EVALS-1](story-evals-1-golden-files.md) | Golden-File Test Infrastructure | Medium | Medium | **Open** |
 | 2 | [EVALS-2](story-evals-2-deterministic-suite.md) | Deterministic Agent Eval Suite | Medium | Medium | **Open** |
 | 3 | [EVALS-3](story-evals-3-stochastic-suite.md) | Stochastic Eval Suite with Three-Valued Outcomes | Medium | Medium | **Open** |
+
+---
+
+## Phase 16 — Done (Production Log Issue Fixes)
+
+**Source:** Log review of TheStudio, tapps-brain, TappMCP production Ralph instances (2026-03-23).
+
+### RALPH-LOGFIX: Production Log Issue Fixes
+**Priority:** Critical | **Status:** Done | **Target:** v2.2.0 | **Dependencies:** None
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | LOGFIX-1 | Fix Graceful Exit Logged as Crash (exit code 2) | Critical | Small | **Done** |
+| 2 | LOGFIX-2 | Harden Concurrent Instance Lock (auto-kill stale PID) | High | Small | **Done** |
+| 3 | LOGFIX-3 | Downgrade Stream Extraction to WARN on Timeout | High | Trivial | **Done** |
+| 4 | LOGFIX-4 | Fast-Trip Circuit Breaker on Broken Invocations | Medium | Small | **Done** |
+| 5 | LOGFIX-5 | Categorize Error Counts (expected vs system) | Medium | Small | **Done** |
+| 6 | LOGFIX-6 | Stall Detection for Persistent Deferred Tests | Medium | Small | **Done** |
+| 7 | LOGFIX-7 | Fix Permission Denied Warning Message | Medium | Trivial | **Done** |
+| 8 | LOGFIX-8 | Circuit Breaker State Consistency | Low | Trivial | **Done** |
 
 ---
 

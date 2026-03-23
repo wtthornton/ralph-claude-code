@@ -191,3 +191,113 @@ _complexity_debug() {
         echo "[complexity] $*" >&2
     fi
 }
+
+# =============================================================================
+# COSTROUTE-3: Prompt Cache Optimization
+# =============================================================================
+
+# RALPH_PROMPT_CACHE_ENABLED — Enable prompt structure optimization (default: false)
+RALPH_PROMPT_CACHE_ENABLED="${RALPH_PROMPT_CACHE_ENABLED:-false}"
+
+# ralph_build_cacheable_prompt — Structure prompt for maximum cache hits
+#
+# Reorders prompt sections so stable content comes first (cacheable prefix)
+# and dynamic content (loop count, task progress) comes last.
+#
+# Structure:
+#   [STABLE PREFIX — cached across iterations]
+#   1. System identity (from PROMPT.md header)
+#   2. Build/run instructions (from AGENT.md — rarely changes)
+#   3. Tool permissions and constraints
+#   4. RALPH_STATUS format specification
+#   [DYNAMIC SUFFIX — changes each iteration]
+#   5. Current progress (loop N, tasks done X/Y)
+#   6. Active task from fix_plan.md
+#   7. Previous iteration context (last recommendation)
+#
+# Usage: prompt=$(ralph_build_cacheable_prompt)
+#
+ralph_build_cacheable_prompt() {
+    [[ "$RALPH_PROMPT_CACHE_ENABLED" != "true" ]] && return 1
+
+    local ralph_dir="${RALPH_DIR:-.ralph}"
+    local prompt_file="$ralph_dir/PROMPT.md"
+    local agent_file="$ralph_dir/AGENT.md"
+    local plan_file="$ralph_dir/fix_plan.md"
+    local status_file="$ralph_dir/status.json"
+
+    [[ ! -f "$prompt_file" ]] && return 1
+
+    local output=""
+
+    # === STABLE PREFIX (cacheable) ===
+    output+="$(cat "$prompt_file" 2>/dev/null)
+
+"
+
+    if [[ -f "$agent_file" ]]; then
+        output+="---
+## Build & Run Instructions
+$(cat "$agent_file" 2>/dev/null)
+
+"
+    fi
+
+    # === CACHE BOUNDARY ===
+    output+="---
+## Current Iteration Context
+"
+
+    # Dynamic: Loop count and progress
+    local loop_count=0
+    local last_recommendation=""
+    if [[ -f "$status_file" ]] && command -v jq &>/dev/null; then
+        loop_count=$(jq -r '.loop_count // 0' "$status_file" 2>/dev/null || echo "0")
+        last_recommendation=$(jq -r '.recommendation // ""' "$status_file" 2>/dev/null || echo "")
+    fi
+
+    output+="Loop iteration: $loop_count
+"
+
+    # Dynamic: Task progress
+    if [[ -f "$plan_file" ]]; then
+        local total done remaining
+        total=$(grep -cE '^\s*- \[[xX ]\]' "$plan_file" 2>/dev/null) || total=0
+        done=$(grep -cE '^\s*- \[[xX]\]' "$plan_file" 2>/dev/null) || done=0
+        remaining=$((total - done))
+        output+="Tasks: $done/$total complete, $remaining remaining
+"
+    fi
+
+    # Dynamic: Last recommendation
+    if [[ -n "$last_recommendation" ]]; then
+        output+="Previous iteration note: $last_recommendation
+"
+    fi
+
+    echo "$output"
+}
+
+# ralph_get_stable_prefix_hash — Hash the stable prefix for cache key tracking
+#
+# Returns a short hash of the prompt prefix. If the hash changes between
+# iterations, it means the cache was likely invalidated.
+#
+ralph_get_stable_prefix_hash() {
+    local ralph_dir="${RALPH_DIR:-.ralph}"
+    local prompt_file="$ralph_dir/PROMPT.md"
+    local agent_file="$ralph_dir/AGENT.md"
+
+    local combined=""
+    [[ -f "$prompt_file" ]] && combined+=$(cat "$prompt_file")
+    [[ -f "$agent_file" ]] && combined+=$(cat "$agent_file")
+
+    # Use md5sum or shasum (cross-platform)
+    if command -v md5sum &>/dev/null; then
+        echo "$combined" | md5sum | cut -c1-8
+    elif command -v shasum &>/dev/null; then
+        echo "$combined" | shasum | cut -c1-8
+    else
+        echo "${#combined}"  # Fallback: just length
+    fi
+}

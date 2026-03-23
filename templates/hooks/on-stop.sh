@@ -125,10 +125,13 @@ if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
       && mv "$local_tmp" "$RALPH_DIR/.circuit_breaker_state"
   else
     # No progress — single jq call to read threshold, increment, and conditionally open
+    # LOGFIX-8: Also increment total_opens when transitioning to OPEN
     threshold=${CB_NO_PROGRESS_THRESHOLD:-3}
     jq --argjson threshold "$threshold" '
       .consecutive_no_progress = ((.consecutive_no_progress // 0) + 1) |
-      if .consecutive_no_progress >= $threshold then .state = "OPEN" else . end
+      if .consecutive_no_progress >= $threshold then
+        .state = "OPEN" | .total_opens = ((.total_opens // 0) + 1) | .opened_at = (now | todate)
+      else . end
     ' "$RALPH_DIR/.circuit_breaker_state" > "$local_tmp" 2>/dev/null \
       && mv "$local_tmp" "$RALPH_DIR/.circuit_breaker_state"
 

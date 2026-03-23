@@ -332,3 +332,52 @@ EOF
     assert_success
     [[ "$output" =~ "successfully" ]]
 }
+
+# =============================================================================
+# ENABLE-2: STRICT CLI VALIDATION FOR --from AND --prd (6 tests)
+# =============================================================================
+
+@test "ENABLE-2: ralph enable --from rejects invalid source" {
+    run bash "$RALPH_ENABLE" --from invalid_source
+
+    assert_equal "$status" 3
+    [[ "$output" == *"must be"* ]]
+}
+
+@test "ENABLE-2: ralph enable --from accepts valid sources" {
+    # Just test that it doesn't fail on argument parsing (will fail later on other things)
+    for source in beads github prd; do
+        run bash "$RALPH_ENABLE" --from "$source" --non-interactive 2>&1 || true
+        # Should NOT exit with code 3 (invalid args)
+        [[ "$status" -ne 3 ]]
+    done
+}
+
+@test "ENABLE-2: ralph enable --prd rejects nonexistent file" {
+    run bash "$RALPH_ENABLE" --prd /nonexistent/file.md
+
+    assert_equal "$status" 4
+    [[ "$output" == *"not found"* ]]
+}
+
+@test "ENABLE-2: ralph enable-ci --from rejects invalid source" {
+    run bash "$RALPH_ENABLE_CI" --from invalid_source
+
+    assert_equal "$status" 3
+    [[ "$output" == *"must be"* ]]
+}
+
+@test "ENABLE-2: ralph enable-ci --from accepts valid sources including none" {
+    for source in beads github prd none; do
+        run bash "$RALPH_ENABLE_CI" --from "$source" --force 2>&1 || true
+        # Should NOT exit with code 3 (invalid args)
+        [[ "$status" -ne 3 ]]
+    done
+}
+
+@test "ENABLE-2: ralph enable-ci --prd rejects nonexistent file" {
+    run bash "$RALPH_ENABLE_CI" --prd /nonexistent/file.md
+
+    assert_equal "$status" 4
+    [[ "$output" == *"not found"* ]]
+}
