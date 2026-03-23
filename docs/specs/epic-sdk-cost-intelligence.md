@@ -31,17 +31,21 @@ Three cost-related gaps between the CLI and SDK lead to budget waste and inaccur
 ## Research Context (March 2026)
 
 **Claude API pricing (March 2026)**:
-| Model | Input (per 1M tokens) | Output (per 1M tokens) | Prompt Cache Read | Prompt Cache Write |
-|-------|----------------------|----------------------|-------------------|-------------------|
-| Claude Opus 4.6 | $15.00 | $75.00 | $1.50 | $18.75 |
-| Claude Sonnet 4.6 | $3.00 | $15.00 | $0.30 | $3.75 |
-| Claude Haiku 4.5 | $0.80 | $4.00 | $0.08 | $1.00 |
+| Model | Input (per 1M tokens) | Output (per 1M tokens) | Cache Write (1.25× input) | Cache Read (0.1× input) |
+|-------|----------------------|----------------------|--------------------------|------------------------|
+| Claude Opus 4.6 | $5.00 | $25.00 | $6.25 | $0.50 |
+| Claude Sonnet 4.6 | $3.00 | $15.00 | $3.75 | $0.30 |
+| Claude Haiku 4.5 | $1.00 | $5.00 | $1.25 | $0.10 |
+
+*Batch API: 50% discount on all rates. 1-hour cache write: 2.0× input price.*
 
 **Cost optimization patterns for AI agents (2026)**:
 - **Tiered model routing**: Route by task complexity — trivial tasks to smallest capable model, complex tasks to most capable. CrewAI and LangGraph both support per-step model configuration.
 - **Budget guardrails**: Pre-check remaining budget before each iteration. Fail fast rather than burn budget on a doomed run.
 - **Token-aware rate limiting**: Track cumulative tokens (input + output) per hour rather than just invocation count. Anthropic's rate limits are per-model and based on both RPM (requests per minute) and TPM (tokens per minute).
 - **Retry escalation**: Start with cheaper models and escalate to more capable ones on failure. The CLI's retry escalation pattern (Haiku → Sonnet → Opus) optimizes the cost-success tradeoff.
+- **Real-world savings**: Organizations report **30-70% cost reductions** from model routing while maintaining quality (some achieving up to 98% on specific workloads). IDC predicts 70% of top AI enterprises will use multi-model routing by 2028.
+- **Four non-negotiable guardrails** (2026 consensus): Hard budget ceiling per run, rate limiter with backoff, loop detector, and named human escalation contact. Teams using 50%/80%/100% budget alerts with 3× rate-of-change detectors catch misconfigured loops within hours.
 
 ## Stories
 

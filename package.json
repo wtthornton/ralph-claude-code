@@ -1,6 +1,6 @@
 {
   "name": "ralph-claude-code",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "> **Autonomous AI development loop with intelligent exit detection and rate limiting**",
   "main": "index.js",
   "directories": {
@@ -12,7 +12,9 @@
     "test": "bats tests/unit/ tests/integration/",
     "test:unit": "bats tests/unit/",
     "test:integration": "bats tests/integration/",
-    "test:e2e": "bats tests/e2e/"
+    "test:e2e": "bats tests/e2e/",
+    "test:evals:deterministic": "bats tests/evals/deterministic/",
+    "test:evals:stochastic": "bash tests/evals/stochastic/run_stochastic_suite.sh"
   },
   "repository": {
     "type": "git",

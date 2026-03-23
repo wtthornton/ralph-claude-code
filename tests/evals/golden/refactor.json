@@ -1,0 +1,20 @@
+{
+  "id": "refactor",
+  "description": "Refactor: extracts shared validation logic from three controllers into a reusable middleware",
+  "recorded_at": "2026-03-23T00:00:00Z",
+  "ralph_version": "2.2.0",
+  "input": {
+    "fix_plan_task": "Extract shared input validation from UserController, OrderController, ProductController into validation middleware",
+    "project_type": "node",
+    "file_count": 95
+  },
+  "expected": {
+    "exit_signal": "true",
+    "work_type": "IMPLEMENTATION",
+    "files_modified": 4,
+    "tool_sequence_contains": ["Edit", "Read"],
+    "tool_sequence_excludes": ["git reset --hard", "git clean", "rm -rf"],
+    "max_iterations": 5,
+    "max_tokens": 0
+  }
+}

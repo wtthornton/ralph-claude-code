@@ -45,6 +45,8 @@ PRD_FILE=""
 GITHUB_LABEL=""
 NON_INTERACTIVE=false
 SHOW_HELP=false
+DRY_RUN=false
+JSON_OUTPUT=false
 
 # Version
 VERSION="0.11.0"
@@ -65,6 +67,8 @@ Options:
     --label <label>     GitHub label filter (when --from github)
     --force             Overwrite existing .ralph/ configuration
     --skip-tasks        Skip task import, use default templates
+    --dry-run           Preview planned changes without writing files
+    --json              Emit machine-readable JSON output (for CI/automation)
     --non-interactive   Run with defaults (no prompts)
     -h, --help          Show this help message
     -v, --version       Show version
@@ -88,6 +92,12 @@ Examples:
 
     # Force overwrite existing configuration
     ralph enable --force
+
+    # Preview changes without writing files
+    ralph enable --dry-run
+
+    # Machine-readable JSON output for CI
+    ralph enable --dry-run --json
 
 What this command does:
     1. Detects your project type (TypeScript, Python, etc.)
@@ -156,6 +166,17 @@ parse_arguments() {
                 ;;
             --force)
                 FORCE_OVERWRITE=true
+                shift
+                ;;
+            --dry-run)
+                DRY_RUN=true
+                NON_INTERACTIVE=true
+                shift
+                ;;
+            --json)
+                JSON_OUTPUT=true
+                NON_INTERACTIVE=true
+                ENABLE_USE_COLORS=false
                 shift
                 ;;
             --skip-tasks)
@@ -361,8 +382,9 @@ phase_configuration() {
         CONFIG_PROJECT_NAME="$DETECTED_PROJECT_NAME"
     fi
 
-    # API call limit
+    # API call limit (with recommendation)
     if [[ "$NON_INTERACTIVE" != "true" ]]; then
+        print_info "Recommended: 100 calls/hour for most projects (50 for small, 200 for large)"
         CONFIG_MAX_CALLS=$(prompt_number "Max API calls per hour" "100" "10" "500")
     else
         CONFIG_MAX_CALLS=100
@@ -478,6 +500,36 @@ phase_file_generation() {
             fi
         fi
 
+        # Normalize, deduplicate, and cap combined tasks
+        if [[ -n "$imported_tasks" ]]; then
+            local raw_count
+            raw_count=$(echo "$imported_tasks" | grep -cE '^\s*-\s*\[' 2>/dev/null) || raw_count=0
+
+            # Normalize
+            imported_tasks=$(normalize_tasks "$imported_tasks" "combined")
+
+            # Deduplicate
+            imported_tasks=$(deduplicate_tasks "$imported_tasks")
+            local dedup_removed="$DEDUP_REMOVED_COUNT"
+
+            # Cap total tasks
+            imported_tasks=$(cap_tasks "$imported_tasks" "$RALPH_MAX_TASKS_TOTAL")
+            local cap_removed="$CAP_REMOVED_COUNT"
+
+            local final_count
+            final_count=$(echo "$imported_tasks" | grep -cE '^\s*-\s*\[' 2>/dev/null) || final_count=0
+
+            import_summary+=("───────────────────────────")
+            import_summary+=("raw: ${raw_count} tasks")
+            if [[ "$dedup_removed" -gt 0 ]]; then
+                import_summary+=("deduped: ${dedup_removed} duplicates removed")
+            fi
+            if [[ "$cap_removed" -gt 0 ]]; then
+                import_summary+=("capped: ${cap_removed} tasks omitted (limit: $RALPH_MAX_TASKS_TOTAL)")
+            fi
+            import_summary+=("final: ${final_count} tasks imported")
+        fi
+
         # Print import summary
         echo ""
         echo "Import summary:"
@@ -485,6 +537,57 @@ phase_file_generation() {
             echo "  - $item"
         done
         echo ""
+    fi
+
+    # Dry-run: show plan and exit without writing
+    if [[ "$DRY_RUN" == "true" ]]; then
+        local task_count
+        task_count=$(echo "$imported_tasks" | grep -cE '^\s*-\s*\[' 2>/dev/null) || task_count=0
+
+        if [[ "$JSON_OUTPUT" == "true" ]]; then
+            local json_plan
+            json_plan=$(jq -n \
+                --arg name "$CONFIG_PROJECT_NAME" \
+                --arg type "$DETECTED_PROJECT_TYPE" \
+                --arg framework "$DETECTED_FRAMEWORK" \
+                --arg sources "${SELECTED_SOURCES:-none}" \
+                --argjson tasks "$task_count" \
+                --argjson force "$FORCE_OVERWRITE" \
+                '{
+                    dry_run: true,
+                    detection: {
+                        project_name: $name,
+                        project_type: $type,
+                        framework: (if $framework == "" then null else $framework end)
+                    },
+                    config: {
+                        task_sources: $sources,
+                        force: $force,
+                        tasks_imported: $tasks
+                    },
+                    write_plan: [
+                        ".ralph/PROMPT.md",
+                        ".ralph/AGENT.md",
+                        ".ralph/fix_plan.md",
+                        ".ralphrc",
+                        ".ralph/specs/",
+                        ".ralph/logs/"
+                    ]
+                }')
+            echo "$json_plan"
+        else
+            echo ""
+            echo "Dry-run — the following files would be created:"
+            echo "  .ralph/PROMPT.md"
+            echo "  .ralph/AGENT.md"
+            echo "  .ralph/fix_plan.md (${task_count} tasks)"
+            echo "  .ralphrc"
+            echo "  .ralph/specs/"
+            echo "  .ralph/logs/"
+            echo ""
+            echo "No files were written."
+        fi
+        exit $ENABLE_SUCCESS
     fi
 
     # Set up enable environment
@@ -569,15 +672,68 @@ phase_verification() {
 
     echo ""
 
+    # Count tasks in generated fix_plan
+    local task_count=0
+    if [[ -f ".ralph/fix_plan.md" ]]; then
+        task_count=$(grep -cE '^\s*-\s*\[\s*\]' ".ralph/fix_plan.md" 2>/dev/null) || task_count=0
+    fi
+
+    # JSON output mode
+    if [[ "$JSON_OUTPUT" == "true" ]]; then
+        local files_created=()
+        [[ -f ".ralph/PROMPT.md" ]] && files_created+=('".ralph/PROMPT.md"')
+        [[ -f ".ralph/fix_plan.md" ]] && files_created+=('".ralph/fix_plan.md"')
+        [[ -f ".ralph/AGENT.md" ]] && files_created+=('".ralph/AGENT.md"')
+        [[ -f ".ralphrc" ]] && files_created+=('".ralphrc"')
+
+        local json_arr
+        json_arr=$(printf '%s,' "${files_created[@]}")
+        json_arr="[${json_arr%,}]"
+
+        jq -n \
+            --argjson success "$all_good" \
+            --argjson files "$json_arr" \
+            --argjson tasks "$task_count" \
+            --arg name "$CONFIG_PROJECT_NAME" \
+            --arg type "$DETECTED_PROJECT_TYPE" \
+            '{
+                success: ($success == "true"),
+                project: { name: $name, type: $type },
+                files_created: $files,
+                tasks_imported: $tasks
+            }'
+        if [[ "$all_good" != "true" ]]; then
+            exit $ENABLE_ERROR
+        fi
+        exit $ENABLE_SUCCESS
+    fi
+
     if [[ "$all_good" == "true" ]]; then
         print_success "Ralph enabled successfully!"
         echo ""
+
+        # Files summary
+        local files_created=0
+        local files_skipped=0
+        [[ -f ".ralph/PROMPT.md" ]] && files_created=$((files_created + 1))
+        [[ -f ".ralph/fix_plan.md" ]] && files_created=$((files_created + 1))
+        [[ -f ".ralph/AGENT.md" ]] && files_created=$((files_created + 1))
+        [[ -f ".ralphrc" ]] && files_created=$((files_created + 1))
+
+        print_summary "Result" \
+            "Files created=${files_created}" \
+            "Tasks imported=${task_count}" \
+            "Project=${CONFIG_PROJECT_NAME}" \
+            "Type=${DETECTED_PROJECT_TYPE}"
+
         echo "Next steps:"
         echo ""
-        print_bullet "Review and customize .ralph/PROMPT.md" "1."
-        print_bullet "Edit tasks in .ralph/fix_plan.md" "2."
-        print_bullet "Update build commands in .ralph/AGENT.md" "3."
-        print_bullet "Start Ralph: ralph --monitor" "4."
+        print_bullet "Review .ralph/PROMPT.md — customize objectives for your project" "1."
+        print_bullet "Edit .ralph/fix_plan.md — prioritize and refine imported tasks" "2."
+        print_bullet "Check .ralph/AGENT.md — verify build/test/run commands" "3."
+        print_bullet "Start Ralph:  ralph --monitor" "4."
+        echo ""
+        print_info "Tip: run 'ralph --dry-run' to preview a loop without API calls"
         echo ""
 
         if [[ "$NON_INTERACTIVE" != "true" ]]; then
@@ -606,12 +762,14 @@ main() {
         exit 0
     fi
 
-    # Welcome banner
-    echo ""
-    echo -e "\033[1m╔════════════════════════════════════════════════════════════╗\033[0m"
-    echo -e "\033[1m║          Ralph Enable - Existing Project Wizard            ║\033[0m"
-    echo -e "\033[1m╚════════════════════════════════════════════════════════════╝\033[0m"
-    echo ""
+    # Welcome banner (suppressed in JSON mode)
+    if [[ "$JSON_OUTPUT" != "true" ]]; then
+        echo ""
+        echo -e "\033[1m╔════════════════════════════════════════════════════════════╗\033[0m"
+        echo -e "\033[1m║          Ralph Enable - Existing Project Wizard            ║\033[0m"
+        echo -e "\033[1m╚════════════════════════════════════════════════════════════╝\033[0m"
+        echo ""
+    fi
 
     # Run phases
     phase_environment_detection

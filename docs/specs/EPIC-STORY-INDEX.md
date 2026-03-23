@@ -1,6 +1,6 @@
 # Ralph Claude Code — Epic & Story Index
 
-> **Generated:** 2026-03-21 | **Updated:** 2026-03-23 | **Total Epics:** 35 | **Total Stories:** 132 (125 Done, 7 Open)
+> **Generated:** 2026-03-21 | **Updated:** 2026-03-23 | **Total Epics:** 40 | **Total Stories:** 148 (148 Done, 0 Open)
 
 ---
 
@@ -64,37 +64,54 @@ Phase 13 (DONE)
 │ Pre-QA Deploy│
 └──────────────┘
 
-MOSTLY DONE (2026 Best Practices Modernization)
-Phase 14
+COMPLETED (2026 Best Practices Modernization)
+Phase 14 (DONE)
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
 │RALPH-FAILSPEC│   │ RALPH-OTEL   │   │RALPH-COSTROUTE│  │RALPH-CTXMGMT │
-│ 4/4 Done     │   │ 4/4 Done     │   │ 4/4 Done      │  │ 2/3 Done     │
+│ 4/4 Done     │   │ 4/4 Done     │   │ 4/4 Done      │  │ 3/3 Done     │
 │ Critical     │   │ High         │   │ High          │   │ High         │
 │ Compliance   │   │ Observability│   │ Cost 30-70%↓  │   │ Context Mgmt │
 └──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘
 
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
 │RALPH-AGENTMEM│   │RALPH-SANDBOXV2│  │ RALPH-EVALS  │
-│ 3/3 Done     │   │ 0/3 Open     │   │ 0/3 Open     │
+│ 3/3 Done     │   │ 3/3 Done     │   │ 3/3 Done     │
 │ Medium       │   │ Medium       │   │ Medium       │
 │ Memory       │   │ Security     │   │ Agent Evals  │
 └──────────────┘   └──────────────┘   └──────────────┘
 
-Phase 15 (NEW)
+Phase 15 (DONE)
 ┌──────────────┐
 │ RALPH-ENABLE │
-│ 4/7 Done     │
+│ 7/7 Done     │
 │ High         │
 │ Wizard UX    │
 └──────────────┘
 
-Phase 16 (NEW — Production Log Fixes)
+Phase 16 (DONE — Production Log Fixes)
 ┌──────────────┐
 │ RALPH-LOGFIX │
 │ 8/8 Done     │
 │ Critical     │
 │ Prod Bugs    │
 └──────────────┘
+
+Phase 17 (DONE — SDK v2.1.0 Enhancements)
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│RALPH-SDK     │   │RALPH-SDK     │   │RALPH-SDK     │
+│  -SAFETY     │   │  -CONTEXT    │   │  -COST       │
+│ 3/3 Done     │   │ 3/3 Done     │   │ 3/3 Done     │
+│ P0-P1        │   │ P0-P2        │   │ P1-P2        │
+│ Stall Detect │   │ Context Mgmt │   │ Cost Intel   │
+└──────────────┘   └──────────────┘   └──────────────┘
+
+┌──────────────┐   ┌──────────────┐
+│RALPH-SDK     │   │RALPH-SDK     │
+│  -OUTPUT     │   │  -LIFECYCLE  │
+│ 4/4 Done     │   │ 3/3 Done     │
+│ P1-P2        │   │ P1-P3        │
+│ Structured   │   │ Resilience   │
+└──────────────┘   └──────────────┘
 ```
 
 ---
@@ -514,17 +531,17 @@ Phase 14 (OPEN)
 | 4 | [COSTROUTE-4](story-costroute-4-token-budget.md) | Token Budget and Cost Dashboard | Medium | Small | **Done** |
 
 ### RALPH-CTXMGMT: Context Window Management
-**Priority:** High | **Status:** Mostly Done | **Target:** v2.1.0 | **Dependencies:** None
+**Priority:** High | **Status:** Done | **Target:** v2.1.0 | **Dependencies:** None
 **Research:** Success rate drops after 35 min; doubling duration quadruples failure rate
 
 | # | ID | Story | Priority | Effort | Status |
 |---|-----|-------|----------|--------|--------|
 | 1 | [CTXMGMT-1](story-ctxmgmt-1-progressive-loading.md) | Progressive Context Loading Strategy | High | Medium | **Done** |
 | 2 | [CTXMGMT-2](story-ctxmgmt-2-task-decomposition.md) | Task Decomposition Signals | High | Small | **Done** |
-| 3 | [CTXMGMT-3](story-ctxmgmt-3-continue-as-new.md) | Continue-As-New Pattern for Long Sessions | Medium | Medium | **Open** |
+| 3 | [CTXMGMT-3](story-ctxmgmt-3-continue-as-new.md) | Continue-As-New Pattern for Long Sessions | Medium | Medium | **Done** |
 
 ### RALPH-ENABLE: Enable Wizard Hardening & UX Improvements
-**Priority:** High | **Status:** Mostly Done | **Target:** v2.1.0 | **Dependencies:** None
+**Priority:** High | **Status:** Done | **Target:** v2.1.0 | **Dependencies:** None
 **Source:** Interactive `ralph enable` review focused on reliability, safety, and first-run UX.
 
 | # | ID | Story | Priority | Effort | Status |
@@ -533,9 +550,9 @@ Phase 14 (OPEN)
 | 2 | [ENABLE-2](story-enable-2-cli-input-validation.md) | Strict CLI Validation for `--from` and `--prd` | High | Small | **Done** |
 | 3 | [ENABLE-3](story-enable-3-import-failure-transparency.md) | Source-Level Import Result Reporting | High | Medium | **Done** |
 | 4 | [ENABLE-4](story-enable-4-force-safety-and-backups.md) | Harden `--force` Behavior and Preserve User Files | High | Medium | **Done** |
-| 5 | [ENABLE-5](story-enable-5-task-normalization-dedup.md) | Normalize, Deduplicate, and Cap Imported Tasks | Medium | Medium | **Open** |
-| 6 | [ENABLE-6](story-enable-6-dry-run-and-json-output.md) | Add `--dry-run` and `--json` for Automation | Medium | Medium | **Open** |
-| 7 | [ENABLE-7](story-enable-7-wizard-ux-improvements.md) | Improve Prompt UX and Final Summary Guidance | Medium | Small | **Open** |
+| 5 | [ENABLE-5](story-enable-5-task-normalization-dedup.md) | Normalize, Deduplicate, and Cap Imported Tasks | Medium | Medium | **Done** |
+| 6 | [ENABLE-6](story-enable-6-dry-run-and-json-output.md) | Add `--dry-run` and `--json` for Automation | Medium | Medium | **Done** |
+| 7 | [ENABLE-7](story-enable-7-wizard-ux-improvements.md) | Improve Prompt UX and Final Summary Guidance | Medium | Small | **Done** |
 
 ### RALPH-AGENTMEM: Cross-Session Agent Memory
 **Priority:** Medium | **Status:** Done | **Target:** v2.2.0 | **Dependencies:** RALPH-OTEL
@@ -548,24 +565,24 @@ Phase 14 (OPEN)
 | 3 | [AGENTMEM-3](story-agentmem-3-memory-decay.md) | Memory Decay and Relevance Scoring | Medium | Small | **Done** |
 
 ### RALPH-SANDBOXV2: Sandbox Hardening
-**Priority:** Medium | **Status:** Open | **Target:** v2.2.0 | **Dependencies:** RALPH-SANDBOX (Phase 11)
+**Priority:** Medium | **Status:** Done | **Target:** v2.2.0 | **Dependencies:** RALPH-SANDBOX (Phase 11)
 **Security:** Rootless Docker, network egress blocking (OpenAI Codex pattern), gVisor option
 
 | # | ID | Story | Priority | Effort | Status |
 |---|-----|-------|----------|--------|--------|
-| 1 | [SANDBOXV2-1](story-sandboxv2-1-rootless-egress.md) | Rootless Docker Mode and Network Egress Control | Medium | Medium | **Open** |
-| 2 | [SANDBOXV2-2](story-sandboxv2-2-resource-reporting.md) | Resource Usage Reporting | Medium | Small | **Open** |
-| 3 | [SANDBOXV2-3](story-sandboxv2-3-gvisor.md) | gVisor Runtime Support | Low | Medium | **Open** |
+| 1 | [SANDBOXV2-1](story-sandboxv2-1-rootless-egress.md) | Rootless Docker Mode and Network Egress Control | Medium | Medium | **Done** |
+| 2 | [SANDBOXV2-2](story-sandboxv2-2-resource-reporting.md) | Resource Usage Reporting | Medium | Small | **Done** |
+| 3 | [SANDBOXV2-3](story-sandboxv2-3-gvisor.md) | gVisor Runtime Support | Low | Medium | **Done** |
 
 ### RALPH-EVALS: Agent Evaluation Framework
-**Priority:** Medium | **Status:** Open | **Target:** v2.2.0 | **Dependencies:** RALPH-OTEL
+**Priority:** Medium | **Status:** Done | **Target:** v2.2.0 | **Dependencies:** RALPH-OTEL
 **Research:** AgentAssay 3-valued outcomes, golden-file testing, deterministic + stochastic suites
 
 | # | ID | Story | Priority | Effort | Status |
 |---|-----|-------|----------|--------|--------|
-| 1 | [EVALS-1](story-evals-1-golden-files.md) | Golden-File Test Infrastructure | Medium | Medium | **Open** |
-| 2 | [EVALS-2](story-evals-2-deterministic-suite.md) | Deterministic Agent Eval Suite | Medium | Medium | **Open** |
-| 3 | [EVALS-3](story-evals-3-stochastic-suite.md) | Stochastic Eval Suite with Three-Valued Outcomes | Medium | Medium | **Open** |
+| 1 | [EVALS-1](story-evals-1-golden-files.md) | Golden-File Test Infrastructure | Medium | Medium | **Done** |
+| 2 | [EVALS-2](story-evals-2-deterministic-suite.md) | Deterministic Agent Eval Suite | Medium | Medium | **Done** |
+| 3 | [EVALS-3](story-evals-3-stochastic-suite.md) | Stochastic Eval Suite with Three-Valued Outcomes | Medium | Medium | **Done** |
 
 ---
 
@@ -586,6 +603,85 @@ Phase 14 (OPEN)
 | 6 | LOGFIX-6 | Stall Detection for Persistent Deferred Tests | Medium | Small | **Done** |
 | 7 | LOGFIX-7 | Fix Permission Denied Warning Message | Medium | Trivial | **Done** |
 | 8 | LOGFIX-8 | Circuit Breaker State Consistency | Low | Trivial | **Done** |
+
+---
+
+## Phase 17 — Open (SDK v2.1.0 Enhancements)
+
+**Source:** SDK upgrade evaluation comparing CLI v2.2.0 capabilities against SDK v2.0.2 gaps. Research integrated from 4 agents: Claude API pricing, prompt caching, Temporal patterns, circuit breaker best practices — all validated against 2026 sources.
+
+```
+Phase 17 (DONE — SDK v2.1.0)
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│RALPH-SDK     │   │RALPH-SDK     │   │RALPH-SDK     │
+│  -SAFETY     │   │  -CONTEXT    │   │  -COST       │
+│ 3/3 Done     │   │ 3/3 Done     │   │ 3/3 Done     │
+│ P0-P1        │   │ P0-P2        │   │ P1-P2        │
+│ Stall Detect │   │ Context Mgmt │   │ Cost Intel   │
+└──────────────┘   └──────────────┘   └──────────────┘
+       │                  │
+       ▼                  ▼
+┌──────────────┐   ┌──────────────┐
+│RALPH-SDK     │   │RALPH-SDK     │
+│  -OUTPUT     │   │  -LIFECYCLE  │
+│ 4/4 Done     │   │ 3/3 Done     │
+│ P1-P2        │   │ P1-P3        │
+│ Structured   │   │ Resilience   │
+└──────────────┘   └──────────────┘
+       ▲                  ▲
+       └──────────────────┘ (LIFECYCLE depends on SAFETY)
+```
+
+### RALPH-SDK-SAFETY: SDK Loop Safety
+**Priority:** P0–P1 | **Status:** Done | **Target:** SDK v2.1.0 | **Dependencies:** None
+**Impact:** Stall detection, decomposition hints, completion decay — matching CLI v2.2.0 safety
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [SDK-SAFETY-1](story-sdk-safety-1-stall-detection.md) | Stall Detection (fast-trip, deferred-test, consecutive timeout) | P0 | 1–2 days | **Done** |
+| 2 | [SDK-SAFETY-2](story-sdk-safety-2-task-decomposition.md) | Task Decomposition Detection | P1 | 1 day | **Done** |
+| 3 | [SDK-SAFETY-3](story-sdk-safety-3-completion-decay.md) | Completion Indicator Decay | P1 | 0.5 day | **Done** |
+
+### RALPH-SDK-CONTEXT: SDK Context Management
+**Priority:** P0–P2 | **Status:** Done | **Target:** SDK v2.1.0 | **Dependencies:** None
+**Impact:** Progressive loading, prompt cache optimization, session lifecycle — token efficiency
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [SDK-CONTEXT-1](story-sdk-context-1-progressive-loading.md) | Progressive Context Loading | P0 | 1–2 days | **Done** |
+| 2 | [SDK-CONTEXT-2](story-sdk-context-2-prompt-cache.md) | Prompt Cache Optimization | P2 | 1 day | **Done** |
+| 3 | [SDK-CONTEXT-3](story-sdk-context-3-session-lifecycle.md) | Session Lifecycle Management and Continue-As-New | P2 | 2 days | **Done** |
+
+### RALPH-SDK-COST: SDK Cost Intelligence
+**Priority:** P1–P2 | **Status:** Done | **Target:** SDK v2.1.0 | **Dependencies:** None
+**Impact:** Cost tracking, model routing, token rate limiting — 30-70% cost reduction
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [SDK-COST-1](story-sdk-cost-1-cost-tracking.md) | Cost Tracking and Budget Guardrails | P1 | 2 days | **Done** |
+| 2 | [SDK-COST-2](story-sdk-cost-2-model-routing.md) | Dynamic Model Routing | P1 | 1 day | **Done** |
+| 3 | [SDK-COST-3](story-sdk-cost-3-token-rate-limiting.md) | Token-Based Rate Limiting | P2 | 1 day | **Done** |
+
+### RALPH-SDK-OUTPUT: SDK Structured Output
+**Priority:** P1–P2 | **Status:** Done | **Target:** SDK v2.1.0 | **Dependencies:** None
+**Impact:** files_changed extraction, error categories, heartbeat snapshots, metrics collection
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [SDK-OUTPUT-1](story-sdk-output-1-files-changed.md) | Structured `files_changed` on TaskResult | P1 | 0.5 day | **Done** |
+| 2 | [SDK-OUTPUT-2](story-sdk-output-2-error-categorization.md) | Error Categorization | P2 | 1 day | **Done** |
+| 3 | [SDK-OUTPUT-3](story-sdk-output-3-progress-snapshot.md) | Structured Heartbeat / Progress Snapshot | P2 | 0.5 day | **Done** |
+| 4 | [SDK-OUTPUT-4](story-sdk-output-4-metrics-collection.md) | Metrics Collection | P2 | 1–2 days | **Done** |
+
+### RALPH-SDK-LIFECYCLE: SDK Lifecycle & Resilience
+**Priority:** P1–P3 | **Status:** Done | **Target:** SDK v2.2.0 | **Dependencies:** RALPH-SDK-SAFETY
+**Impact:** Cancel semantics, adaptive timeout, permission denial detection
+
+| # | ID | Story | Priority | Effort | Status |
+|---|-----|-------|----------|--------|--------|
+| 1 | [SDK-LIFECYCLE-1](story-sdk-lifecycle-1-cancel-semantics.md) | Cancel Semantics Documentation and Hardening | P1 | 0.5 day | **Done** |
+| 2 | [SDK-LIFECYCLE-2](story-sdk-lifecycle-2-adaptive-timeout.md) | Adaptive Timeout | P3 | 1 day | **Done** |
+| 3 | [SDK-LIFECYCLE-3](story-sdk-lifecycle-3-permission-denial.md) | Permission Denial Detection | P3 | 1 day | **Done** |
 
 ---
 

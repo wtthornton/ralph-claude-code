@@ -481,6 +481,119 @@ prioritize_tasks() {
 }
 
 # =============================================================================
+# DEDUPLICATION AND CAPPING
+# =============================================================================
+
+# Default caps (configurable via .ralphrc or environment)
+RALPH_MAX_TASKS_PER_SOURCE=${RALPH_MAX_TASKS_PER_SOURCE:-50}
+RALPH_MAX_TASKS_TOTAL=${RALPH_MAX_TASKS_TOTAL:-100}
+
+# deduplicate_tasks - Remove duplicate and near-duplicate tasks
+#
+# Parameters:
+#   $1 (tasks) - Tasks in markdown checkbox format (multi-line)
+#
+# Outputs:
+#   Deduplicated tasks, one per line
+#   Sets DEDUP_REMOVED_COUNT (exported) with number of duplicates removed
+#
+# Deduplication strategy:
+#   1. Exact match after lowercasing and stripping punctuation/whitespace
+#   2. Strips leading "- [ ]" prefix, issue IDs like [#123] or [issue-001]
+#
+deduplicate_tasks() {
+    local tasks=$1
+    DEDUP_REMOVED_COUNT=0
+
+    if [[ -z "$tasks" ]]; then
+        return 0
+    fi
+
+    # Use awk for single-pass dedup on normalized keys
+    echo "$tasks" | awk '
+    BEGIN { removed = 0 }
+    {
+        line = $0
+        # Skip empty lines and comment lines
+        if (line ~ /^[[:space:]]*$/ || line ~ /^#/) { print line; next }
+
+        # Build normalized key: lowercase, strip checkbox prefix, strip IDs, strip punctuation
+        key = tolower(line)
+        # Remove checkbox prefix "- [ ] " or "- [x] "
+        gsub(/^[[:space:]]*-[[:space:]]*\[[[:space:]]*[xX ]?[[:space:]]*\][[:space:]]*/, "", key)
+        # Remove issue IDs like [#123] or [issue-001]
+        gsub(/\[#?[a-zA-Z0-9_-]+\][[:space:]]*/, "", key)
+        # Remove punctuation and collapse whitespace
+        gsub(/[^a-z0-9 ]/, "", key)
+        gsub(/[[:space:]]+/, " ", key)
+        # Trim
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+
+        if (key == "") { print line; next }
+
+        if (!(key in seen)) {
+            seen[key] = 1
+            print line
+        } else {
+            removed++
+        }
+    }
+    END { print "###DEDUP_REMOVED=" removed > "/dev/stderr" }
+    ' 2>/tmp/ralph_dedup_count
+
+    # Parse removed count
+    if [[ -f /tmp/ralph_dedup_count ]]; then
+        DEDUP_REMOVED_COUNT=$(sed -n 's/###DEDUP_REMOVED=//p' /tmp/ralph_dedup_count 2>/dev/null || echo "0")
+        rm -f /tmp/ralph_dedup_count
+    fi
+}
+
+# cap_tasks - Enforce per-source and total task caps
+#
+# Parameters:
+#   $1 (tasks) - Tasks in markdown checkbox format (multi-line)
+#   $2 (cap) - Maximum number of tasks to keep
+#
+# Outputs:
+#   Capped tasks. If any were removed, appends a comment line.
+#   Sets CAP_REMOVED_COUNT (exported) with number of tasks capped
+#
+cap_tasks() {
+    local tasks=$1
+    local cap="${2:-$RALPH_MAX_TASKS_TOTAL}"
+    CAP_REMOVED_COUNT=0
+
+    if [[ -z "$tasks" ]]; then
+        return 0
+    fi
+
+    local total_tasks
+    total_tasks=$(echo "$tasks" | grep -cE '^\s*-\s*\[' 2>/dev/null) || total_tasks=0
+
+    if [[ "$total_tasks" -le "$cap" ]]; then
+        echo "$tasks"
+        return 0
+    fi
+
+    CAP_REMOVED_COUNT=$((total_tasks - cap))
+
+    # Keep comment/header lines plus the first $cap task lines
+    local task_count=0
+    echo "$tasks" | while IFS= read -r line; do
+        if echo "$line" | grep -qE '^\s*-\s*\['; then
+            task_count=$((task_count + 1))
+            if [[ "$task_count" -le "$cap" ]]; then
+                echo "$line"
+            fi
+        else
+            echo "$line"
+        fi
+    done
+
+    echo "# NOTE: $CAP_REMOVED_COUNT additional tasks omitted (cap: $cap)"
+}
+
+# =============================================================================
 # COMBINED IMPORT
 # =============================================================================
 
@@ -492,7 +605,8 @@ prioritize_tasks() {
 #   $3 (github_label) - GitHub label filter (optional)
 #
 # Outputs:
-#   Combined tasks in markdown format
+#   Combined, normalized, deduplicated, and capped tasks in markdown format
+#   Sets IMPORT_RAW_COUNT, IMPORT_DEDUP_COUNT, IMPORT_FINAL_COUNT
 #
 # Returns:
 #   0 - Success
@@ -505,12 +619,16 @@ import_tasks_from_sources() {
 
     local all_tasks=""
     local source_count=0
+    IMPORT_RAW_COUNT=0
+    IMPORT_DEDUP_COUNT=0
+    IMPORT_FINAL_COUNT=0
 
-    # Import from beads
+    # Import from beads (with per-source cap)
     if echo "$sources" | grep -qw "beads"; then
         local beads_tasks
         if beads_tasks=$(fetch_beads_tasks); then
             if [[ -n "$beads_tasks" ]]; then
+                beads_tasks=$(cap_tasks "$beads_tasks" "$RALPH_MAX_TASKS_PER_SOURCE")
                 all_tasks="${all_tasks}
 # Tasks from beads
 ${beads_tasks}
@@ -520,11 +638,12 @@ ${beads_tasks}
         fi
     fi
 
-    # Import from GitHub
+    # Import from GitHub (with per-source cap)
     if echo "$sources" | grep -qw "github"; then
         local github_tasks
         if github_tasks=$(fetch_github_tasks "$github_label"); then
             if [[ -n "$github_tasks" ]]; then
+                github_tasks=$(cap_tasks "$github_tasks" "$RALPH_MAX_TASKS_PER_SOURCE")
                 all_tasks="${all_tasks}
 # Tasks from GitHub
 ${github_tasks}
@@ -534,12 +653,13 @@ ${github_tasks}
         fi
     fi
 
-    # Import from PRD
+    # Import from PRD (with per-source cap)
     if echo "$sources" | grep -qw "prd"; then
         if [[ -n "$prd_file" && -f "$prd_file" ]]; then
             local prd_tasks
             if prd_tasks=$(extract_prd_tasks "$prd_file"); then
                 if [[ -n "$prd_tasks" ]]; then
+                    prd_tasks=$(cap_tasks "$prd_tasks" "$RALPH_MAX_TASKS_PER_SOURCE")
                     all_tasks="${all_tasks}
 # Tasks from PRD
 ${prd_tasks}
@@ -554,8 +674,25 @@ ${prd_tasks}
         return 1
     fi
 
-    # Normalize and output
-    normalize_tasks "$all_tasks" "combined"
+    # Step 1: Normalize
+    local normalized
+    normalized=$(normalize_tasks "$all_tasks" "combined")
+
+    # Count raw tasks
+    IMPORT_RAW_COUNT=$(echo "$normalized" | grep -cE '^\s*-\s*\[' 2>/dev/null) || IMPORT_RAW_COUNT=0
+
+    # Step 2: Deduplicate
+    local deduped
+    deduped=$(deduplicate_tasks "$normalized")
+    IMPORT_DEDUP_COUNT=$DEDUP_REMOVED_COUNT
+
+    # Step 3: Apply total cap
+    local final
+    final=$(cap_tasks "$deduped" "$RALPH_MAX_TASKS_TOTAL")
+
+    IMPORT_FINAL_COUNT=$(echo "$final" | grep -cE '^\s*-\s*\[' 2>/dev/null) || IMPORT_FINAL_COUNT=0
+
+    echo "$final"
     return 0
 }
 
@@ -574,4 +711,6 @@ export -f extract_prd_tasks
 export -f convert_prd_with_claude
 export -f normalize_tasks
 export -f prioritize_tasks
+export -f deduplicate_tasks
+export -f cap_tasks
 export -f import_tasks_from_sources

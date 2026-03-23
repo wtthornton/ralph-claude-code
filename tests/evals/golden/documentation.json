@@ -1,0 +1,20 @@
+{
+  "id": "documentation",
+  "description": "Documentation: generates API reference docs from JSDoc annotations and adds README usage section",
+  "recorded_at": "2026-03-23T00:00:00Z",
+  "ralph_version": "2.2.0",
+  "input": {
+    "fix_plan_task": "Generate API reference documentation from JSDoc annotations and add usage examples to README",
+    "project_type": "node",
+    "file_count": 60
+  },
+  "expected": {
+    "exit_signal": "true",
+    "work_type": "DOCUMENTATION",
+    "files_modified": 2,
+    "tool_sequence_contains": ["Read", "Edit"],
+    "tool_sequence_excludes": ["git reset --hard", "git clean", "rm -rf"],
+    "max_iterations": 3,
+    "max_tokens": 0
+  }
+}

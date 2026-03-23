@@ -47,7 +47,7 @@ bats tests/unit/test_cli_parsing.bats
 |--------|---------|
 | `circuit_breaker.sh` | Simplified three-state pattern (CLOSED/HALF_OPEN/OPEN) — reads state written by `on-stop.sh` hook, handles cooldown/auto-recovery |
 | `enable_core.sh` | Shared logic for ralph_enable and ralph_enable_ci (idempotency, detection, template generation) |
-| `task_sources.sh` | Task import from beads, GitHub Issues, or PRD documents |
+| `task_sources.sh` | Task import from beads, GitHub Issues, or PRD documents. Includes deduplication, normalization, per-source/total caps |
 | `wizard_utils.sh` | Interactive prompt utilities (confirm, select, text input) |
 | `date_utils.sh` | Cross-platform date/epoch utilities |
 | `timeout_utils.sh` | Cross-platform timeout command detection (`timeout` on Linux, `gtimeout` on macOS) |
@@ -55,25 +55,28 @@ bats tests/unit/test_cli_parsing.bats
 | `notifications.sh` | Local notifications — terminal, OS native, webhook POST, sound (Phase 8) |
 | `backup.sh` | State backup/rollback — auto-snapshots, `ralph --rollback`, max 10 backups (Phase 8) |
 | `github_issues.sh` | GitHub Issue integration — import, assess, filter, batch, lifecycle (Phase 10) |
-| `sandbox.sh` | Docker sandbox — `ralph --sandbox`, container management, signal forwarding (Phase 11) |
+| `sandbox.sh` | Docker sandbox — `ralph --sandbox`, container management, signal forwarding (Phase 11). V2: rootless Docker detection, `--network none` egress control, gVisor runtime support, resource usage reporting (Phase 14) |
 | `tracing.sh` | OpenTelemetry traces — GenAI Semantic Conventions, JSONL OTLP format, secret sanitization (Phase 14) |
 | `complexity.sh` | Task complexity classifier — 5-level (TRIVIAL→ARCHITECTURAL), dynamic model routing (Phase 14) |
 | `memory.sh` | Cross-session memory — episodic (what worked/failed), semantic (project index), decay/pruning (Phase 14) |
 | ~~`response_analyzer.sh`~~ | Removed — response analysis handled by `on-stop.sh` hook → `status.json` |
 | ~~`file_protection.sh`~~ | Removed — file protection handled by PreToolUse hooks |
 
-### SDK (sdk/) — v2.0.0
+### SDK (sdk/) — v2.1.0
 
 Python Agent SDK for dual-mode operation. All models are **Pydantic v2 BaseModels**. The agent loop is **fully async** with a `run_sync()` wrapper for CLI. State I/O goes through a **pluggable state backend** (`FileStateBackend` default, `NullStateBackend` for testing/embedding).
 
 | Module | Purpose |
 |--------|---------|
-| `ralph_sdk/agent.py` | Async agent class — RalphAgent, TaskInput (frozen), TaskResult, run_sync() wrapper |
-| `ralph_sdk/config.py` | Pydantic configuration — validation ranges, .ralphrc/.json/env precedence chain |
-| `ralph_sdk/status.py` | Pydantic status models — RalphStatus, CircuitBreakerState, WorkType/RalphLoopStatus enums |
-| `ralph_sdk/state.py` | Pluggable state backend — RalphStateBackend Protocol, FileStateBackend (async aiofiles), NullStateBackend (in-memory) |
-| `ralph_sdk/parsing.py` | 3-strategy response parser — JSON fenced block → JSONL result → text fallback |
-| `ralph_sdk/circuit_breaker.py` | Active circuit breaker — sliding window failure detection, no-progress tracking, cooldown recovery |
+| `ralph_sdk/agent.py` | Async agent class — RalphAgent, TaskInput (frozen), TaskResult, ProgressSnapshot, CancelResult, DecompositionHint, ContinueAsNewState, run_sync() wrapper. Includes adaptive timeout, completion indicator decay, session lifecycle management. |
+| `ralph_sdk/config.py` | Pydantic configuration — validation ranges, .ralphrc/.json/env precedence chain. Includes cost, safety, context, lifecycle, and adaptive timeout settings. |
+| `ralph_sdk/status.py` | Pydantic status models — RalphStatus, CircuitBreakerState, WorkType/RalphLoopStatus/ErrorCategory enums |
+| `ralph_sdk/state.py` | Pluggable state backend — RalphStateBackend Protocol (18 methods), FileStateBackend (async aiofiles), NullStateBackend (in-memory). Includes session metadata, history, and continue-as-new state. |
+| `ralph_sdk/parsing.py` | 3-strategy response parser — JSON fenced block → JSONL result → text fallback. Includes `extract_files_changed()` from tool use records and `detect_permission_denials()`. |
+| `ralph_sdk/circuit_breaker.py` | Active circuit breaker — sliding window failure detection, no-progress tracking, cooldown recovery. V2: FastTripDetector, DeferredTestDetector, ConsecutiveTimeoutDetector (Phase 17). |
+| `ralph_sdk/context.py` | Context management — ContextManager (progressive fix_plan trimming), PromptParts (stable prefix/dynamic suffix), PromptCacheStats, token estimation (Phase 17). |
+| `ralph_sdk/cost.py` | Cost intelligence — CostTracker (per-model pricing, budget alerts), select_model() (complexity-based routing with retry escalation), TokenRateLimiter (hourly window) (Phase 17). |
+| `ralph_sdk/metrics.py` | Metrics collection — MetricsCollector Protocol, JsonlMetricsCollector (monthly JSONL), NullMetricsCollector, MetricEvent model (Phase 17). |
 | `ralph_sdk/converters.py` | TaskPacket conversion — TaskPacketInput/IntentSpecInput mirror models, complexity→max_turns, trust→permissions |
 | `ralph_sdk/evidence.py` | EvidenceBundle output — test/lint extraction (pytest/jest/BATS/ruff/eslint), JSON round-trip |
 | `ralph_sdk/tools.py` | Custom tools — ralph_status, ralph_rate_check, ralph_circuit_state, ralph_task_update |
@@ -123,6 +126,12 @@ The main Ralph agent (Sonnet) handles routine work with task batching (up to 5 s
 
 **Live / JSONL pipeline**: `--live` captures NDJSON via an `awk` stream filter that shows tool names with parameters (file paths, commands, patterns), per-tool elapsed time, sub-agent events, error messages (extracted from `result`/`content` fields on `is_error:true`, truncated to 120 chars), and a summary stats line. Claude's text output is buffered per content block and filtered at block boundaries: text containing stream metadata (`session_id`, `parent_tool_use_id`, `uuid`), raw JSON dumps, or UUID patterns is suppressed; remaining text is collapsed to a single line, truncated to 200 chars, and shown with `>` prefix. JSON string value extraction uses a placeholder technique (`\001`) to protect escaped quotes before finding the closing quote. The loop copies the full stream, retries `-f` on the output file (WSL2/9P), extracts the last `type: "result"` line when `CLAUDE_USE_CONTINUE` is true, then `ralph_prepare_claude_output_for_analysis` logs permission denials and failed MCP init, and `ralph_extract_result_from_stream` isolates the result object from the JSONL stream (filtering subagent results from the multi-result count).
 
+**Continue-As-New (CTXMGMT-3)**: Temporal-inspired pattern for long sessions. After `RALPH_MAX_SESSION_ITERATIONS` (default 20) or `RALPH_MAX_SESSION_AGE_MINUTES` (default 120), the session resets while carrying forward essential state (current task, progress, recommendation). Controlled by `RALPH_CONTINUE_AS_NEW_ENABLED` (default true). Research shows agent success rate drops after ~35 min. The SDK implements the same pattern via `ContinueAsNewState` in `agent.py`.
+
+**Completion indicator decay (SDK-SAFETY-3)**: When productive work occurs (files_modified > 0 or tasks_completed > 0) AND exit_signal is false, completion_indicators are reset to `[]`. This prevents stale "done" signals from combining with later legitimate signals for premature exit.
+
+**Agent evaluation framework (EVALS)**: Golden-file test infrastructure in `tests/evals/`. Deterministic suite (64 BATS tests, no LLM calls, <5 min) verifies exit gate, circuit breaker, tool restrictions, and hooks. Stochastic suite runs N golden-file comparisons with three-valued outcomes (Pass/Fail/Inconclusive) and Wilson score confidence intervals for nightly CI.
+
 **Design documentation**: Reliability epics and stories live in **`docs/specs/`** (e.g. `epic-jsonl-stream-resilience.md`, `epic-multi-task-cascading-failures.md`). Long-term platform integration is drafted in `docs/specs/claude-code-2026-enhancements.md`.
 
 ### State Files (in `.ralph/` within managed projects)
@@ -158,6 +167,7 @@ Environment variables override `.ralphrc` settings.
 - **Prerequisites**: Node.js 18+, jq, git
 - **Quality gate**: 100% test pass rate (code coverage via kcov is informational only due to subprocess tracing limitations)
 - Tests live in `tests/unit/` and `tests/integration/`; helpers in `tests/helpers/`
+- **Agent evals**: `tests/evals/deterministic/` (64 BATS tests, no LLM calls) and `tests/evals/stochastic/` (golden-file comparisons with Wilson score CI). Run via `npm run test:evals:deterministic` and `npm run test:evals:stochastic`.
 
 ## Versioning
 

@@ -241,6 +241,24 @@ select_multiple() {
     local options=("$@")
     local num_options=${#options[@]}
 
+    # Non-TTY fallback: select first available source (not "none") automatically
+    if [[ ! -t 0 ]]; then
+        local result=""
+        for ((i = 0; i < num_options; i++)); do
+            # Skip the "empty task list" / "none" option (typically the last)
+            if echo "${options[$i]}" | grep -qiE '(empty|none|skip)'; then
+                continue
+            fi
+            if [[ -n "$result" ]]; then
+                result="$result,$i"
+            else
+                result="$i"
+            fi
+        done
+        echo "$result"
+        return 0
+    fi
+
     # Track selected state (0 = not selected, 1 = selected)
     declare -a selected
     for ((i = 0; i < num_options; i++)); do

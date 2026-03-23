@@ -25,7 +25,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/tracing.sh" ]] && source "$SCRIPT_DIR/lib/tracing.sh"
 
 # Version
-RALPH_VERSION="2.2.0"
+RALPH_VERSION="2.3.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -103,6 +103,15 @@ RALPH_SESSION_HISTORY_FILE="$RALPH_DIR/.ralph_session_history"  # Session transi
 # Session expiration: 24 hours default balances project continuity with fresh context
 # Too short = frequent context loss; Too long = stale context causes unpredictable behavior
 CLAUDE_SESSION_EXPIRY_HOURS=${CLAUDE_SESSION_EXPIRY_HOURS:-24}
+
+# CTXMGMT-3: Continue-As-New configuration (Temporal pattern for long sessions)
+# After N iterations or M minutes in the same session, reset context carrying only essential state
+RALPH_CONTINUE_AS_NEW_ENABLED=${RALPH_CONTINUE_AS_NEW_ENABLED:-true}
+RALPH_MAX_SESSION_ITERATIONS=${RALPH_MAX_SESSION_ITERATIONS:-20}
+RALPH_MAX_SESSION_AGE_MINUTES=${RALPH_MAX_SESSION_AGE_MINUTES:-120}
+RALPH_CONTINUE_STATE_FILE="$RALPH_DIR/.continue_state.json"
+_session_iteration_count=0
+_session_start_epoch=""
 
 # Valid tool patterns for --allowed-tools validation
 # Tools can be exact matches or pattern matches with wildcards in parentheses
@@ -1651,6 +1660,15 @@ build_loop_context() {
         fi
     fi
 
+    # CTXMGMT-3: Inject carried state from Continue-As-New reset
+    if [[ -f "$RALPH_CONTINUE_STATE_FILE" ]]; then
+        local continued_context
+        continued_context=$(ralph_inject_continue_state)
+        if [[ -n "$continued_context" ]]; then
+            context+="$continued_context "
+        fi
+    fi
+
     # Limit total length to ~500 chars
     echo "${context:0:500}"
 }
@@ -1837,6 +1855,132 @@ reset_session() {
     log_session_transition "active" "reset" "$reason" "${loop_count:-0}"
 
     log_status "INFO" "Session reset: $reason"
+}
+
+# =============================================================================
+# CTXMGMT-3: Continue-As-New — Temporal pattern for long session context reset
+# After N iterations or M minutes, reset context carrying only essential state.
+# Research: agent success rate drops after ~35 min; doubling duration 4x failure rate.
+# =============================================================================
+
+# ralph_should_continue_as_new - Check if session should be reset for context freshness
+#
+# Returns:
+#   0 - Session should be reset (exceeded iteration or age threshold)
+#   1 - Session is within limits
+#
+ralph_should_continue_as_new() {
+    if [[ "$RALPH_CONTINUE_AS_NEW_ENABLED" != "true" ]]; then
+        return 1
+    fi
+
+    # Check iteration count
+    if [[ "$_session_iteration_count" -ge "$RALPH_MAX_SESSION_ITERATIONS" ]]; then
+        log_status "INFO" "Continue-As-New: session reached $_session_iteration_count iterations (max: $RALPH_MAX_SESSION_ITERATIONS)"
+        return 0
+    fi
+
+    # Check session age
+    if [[ -n "$_session_start_epoch" ]]; then
+        local now age_minutes
+        now=$(date +%s)
+        age_minutes=$(( (now - _session_start_epoch) / 60 ))
+        if [[ "$age_minutes" -ge "$RALPH_MAX_SESSION_AGE_MINUTES" ]]; then
+            log_status "INFO" "Continue-As-New: session age ${age_minutes}m exceeds ${RALPH_MAX_SESSION_AGE_MINUTES}m"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# ralph_continue_as_new - Save essential state and reset session
+#
+# Saves current task, progress summary, and key findings to a state file,
+# then resets the session. The next iteration starts fresh with state
+# injected via on-session-start.sh.
+#
+ralph_continue_as_new() {
+    local current_task="" progress="" recommendation=""
+
+    # Extract current task from fix_plan (first unchecked item)
+    if [[ -f "$FIX_PLAN_FILE" ]]; then
+        current_task=$(grep -m1 '^\s*-\s*\[\s*\]' "$FIX_PLAN_FILE" 2>/dev/null | sed 's/^[[:space:]]*-[[:space:]]*\[[[:space:]]*\][[:space:]]*//' || echo "")
+    fi
+
+    # Extract progress from status.json
+    if [[ -f "$STATUS_FILE" ]]; then
+        progress=$(jq -r '"\(.tasks_completed // 0) tasks done, \(.files_modified // 0) files modified"' "$STATUS_FILE" 2>/dev/null || echo "unknown")
+        recommendation=$(jq -r '.recommendation // ""' "$STATUS_FILE" 2>/dev/null || echo "")
+    fi
+
+    # Count completed vs remaining tasks
+    local completed_tasks=0 remaining_tasks=0
+    if [[ -f "$FIX_PLAN_FILE" ]]; then
+        completed_tasks=$(grep -cE '^\s*-\s*\[x\]' "$FIX_PLAN_FILE" 2>/dev/null) || completed_tasks=0
+        remaining_tasks=$(grep -cE '^\s*-\s*\[\s*\]' "$FIX_PLAN_FILE" 2>/dev/null) || remaining_tasks=0
+    fi
+
+    # Save essential state
+    jq -n \
+        --arg task "$current_task" \
+        --arg progress "$progress" \
+        --arg recommendation "$recommendation" \
+        --argjson loop "$loop_count" \
+        --argjson session_iterations "$_session_iteration_count" \
+        --argjson completed "$completed_tasks" \
+        --argjson remaining "$remaining_tasks" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{
+            current_task: $task,
+            progress: $progress,
+            recommendation: $recommendation,
+            continued_from_loop: $loop,
+            session_iterations: $session_iterations,
+            completed_tasks: $completed,
+            remaining_tasks: $remaining,
+            saved_at: $timestamp
+        }' > "$RALPH_CONTINUE_STATE_FILE"
+
+    log_status "INFO" "Continue-As-New: saved state (loop #$loop_count, $completed_tasks done, $remaining_tasks remaining)"
+
+    # Reset session (clears session ID, exit signals)
+    reset_session "continue_as_new"
+
+    # Reset session-local counters
+    _session_iteration_count=0
+    _session_start_epoch=$(date +%s)
+
+    log_status "SUCCESS" "Continue-As-New: session reset, next iteration starts fresh with carried state"
+}
+
+# ralph_inject_continue_state - Inject carried state into session context
+#
+# Called by on-session-start.sh or build_loop_context to provide prior context.
+#
+# Outputs:
+#   Text block describing the carried-over state (empty if no state file)
+#
+ralph_inject_continue_state() {
+    if [[ ! -f "$RALPH_CONTINUE_STATE_FILE" ]]; then
+        return 0
+    fi
+
+    local state_json
+    state_json=$(<"$RALPH_CONTINUE_STATE_FILE")
+
+    echo "## Continued Session"
+    echo "This session continues from a previous session that was reset for context freshness."
+    echo ""
+    echo "Previous session context:"
+    echo "- Current task: $(echo "$state_json" | jq -r '.current_task // "none"')"
+    echo "- Progress: $(echo "$state_json" | jq -r '.progress // "unknown"')"
+    echo "- Completed tasks: $(echo "$state_json" | jq -r '.completed_tasks // 0') done, $(echo "$state_json" | jq -r '.remaining_tasks // 0') remaining"
+    echo "- Recommendation: $(echo "$state_json" | jq -r '.recommendation // "continue with next task"')"
+    echo ""
+
+    # Clean up after injection
+    rm -f "$RALPH_CONTINUE_STATE_FILE"
 }
 
 # =============================================================================
@@ -3516,10 +3660,17 @@ main() {
 
     log_status "INFO" "Starting main loop..."
 
+    # CTXMGMT-3: Initialize session tracking for Continue-As-New
+    _session_start_epoch=$(date +%s)
+    _session_iteration_count=0
+
     while true; do
         loop_count=$((loop_count + 1))
         persistent_loops=$((persistent_loops + 1))
         echo "$persistent_loops" > "$persistent_loop_file"
+
+        # CTXMGMT-3: Track per-session iteration count
+        _session_iteration_count=$((_session_iteration_count + 1))
 
         # Update session last_used timestamp
         update_session_last_used
@@ -3645,6 +3796,11 @@ main() {
 
             # Brief pause between successful executions (reduced from 5s in v1.8.5)
             sleep 2
+
+            # CTXMGMT-3: Check if session should be reset for context freshness
+            if ralph_should_continue_as_new; then
+                ralph_continue_as_new
+            fi
         elif [ $exec_result -eq 3 ]; then
             # Circuit breaker opened
             reset_session "circuit_breaker_trip"

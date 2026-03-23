@@ -40,6 +40,12 @@ Circuit breaker patterns for AI agent loops have matured significantly:
 
 Ralph's multi-signal stall detection (fast-trip + deferred-test + no-progress) is more granular than any open-source framework as of March 2026. The SDK should match the CLI's capability.
 
+**Emerging patterns (2026)**:
+- **Fingerprint-based stall detection**: Hash `(last_tool_call, last_tool_result)` — if the fingerprint repeats N times, the agent is stuck. Simpler than semantic analysis.
+- **Embedding-similarity loop detection**: Cosine similarity >0.95 between recent outputs catches paraphrase loops that exact matching misses. Future enhancement candidate.
+- **Escalation as success**: Industry consensus is that escalation to a human/higher-tier agent is a *success* condition, not a failure. Ralph's decomposition hint aligns with this.
+- **Real-world cost risk**: A documented 2025 incident saw a multi-agent pipeline enter an infinite loop, escalating from $127/week to $47,000 over four weeks — running undetected for 11 days. This underscores the need for stall detection + cost guardrails working together.
+
 ## Stories
 
 | Story | Title | Priority | Effort | Status |

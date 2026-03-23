@@ -1,0 +1,20 @@
+{
+  "id": "multi-file-change",
+  "description": "Multi-file feature: adds a new API endpoint with route, controller, model, and migration",
+  "recorded_at": "2026-03-23T00:00:00Z",
+  "ralph_version": "2.2.0",
+  "input": {
+    "fix_plan_task": "Add GET /api/v1/reports endpoint with controller, model, and database migration",
+    "project_type": "node",
+    "file_count": 120
+  },
+  "expected": {
+    "exit_signal": "true",
+    "work_type": "IMPLEMENTATION",
+    "files_modified": 4,
+    "tool_sequence_contains": ["Edit", "Write", "Bash"],
+    "tool_sequence_excludes": ["git reset --hard", "git clean", "rm -rf"],
+    "max_iterations": 6,
+    "max_tokens": 0
+  }
+}

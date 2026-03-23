@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from ralph_sdk.parsing import PermissionDenialEvent
 
 
 class RalphLoopStatus(str, Enum):
@@ -39,6 +43,92 @@ class CircuitBreakerStateEnum(str, Enum):
     OPEN = "OPEN"
 
 
+class ErrorCategory(str, Enum):
+    """Categorization of errors encountered during loop execution.
+
+    SDK-OUTPUT-2: Structured error categories for programmatic error handling.
+    """
+    PERMISSION_DENIED = "PERMISSION_DENIED"
+    TIMEOUT = "TIMEOUT"
+    PARSE_FAILURE = "PARSE_FAILURE"
+    TOOL_UNAVAILABLE = "TOOL_UNAVAILABLE"
+    SYSTEM_CRASH = "SYSTEM_CRASH"
+    RATE_LIMITED = "RATE_LIMITED"
+    UNKNOWN = "UNKNOWN"
+
+
+def classify_error(
+    exit_code: int | None = None,
+    output: str = "",
+    exception: BaseException | None = None,
+) -> ErrorCategory:
+    """Classify an error into an ErrorCategory based on exit code, output, and exception type.
+
+    SDK-OUTPUT-2: Deterministic classification helper — no ML, no heuristics on
+    freeform text beyond known sentinel strings from the CLI.
+
+    Args:
+        exit_code: Process exit code (None if not available).
+        output: Combined stdout/stderr from the CLI process.
+        exception: The exception that was raised, if any.
+
+    Returns:
+        The most specific ErrorCategory that matches.
+    """
+    # Exception-based classification takes priority
+    if exception is not None:
+        if isinstance(exception, TimeoutError):
+            return ErrorCategory.TIMEOUT
+        if isinstance(exception, asyncio.TimeoutError):
+            return ErrorCategory.TIMEOUT
+        if isinstance(exception, PermissionError):
+            return ErrorCategory.PERMISSION_DENIED
+        if isinstance(exception, FileNotFoundError):
+            return ErrorCategory.TOOL_UNAVAILABLE
+        if isinstance(exception, (json.JSONDecodeError, ValueError)):
+            return ErrorCategory.PARSE_FAILURE
+
+    # Exit-code-based classification
+    if exit_code is not None:
+        if exit_code == 124:
+            # Standard Unix timeout exit code
+            return ErrorCategory.TIMEOUT
+        if exit_code == 126:
+            # Permission denied (cannot execute)
+            return ErrorCategory.PERMISSION_DENIED
+        if exit_code == 127:
+            # Command not found
+            return ErrorCategory.TOOL_UNAVAILABLE
+        if exit_code in (137, 139):
+            # SIGKILL (137) or SIGSEGV (139)
+            return ErrorCategory.SYSTEM_CRASH
+
+    # Output-based classification (known CLI sentinel strings only)
+    output_lower = output.lower()
+    if any(s in output_lower for s in ("rate limit", "rate_limit", "429", "too many requests")):
+        return ErrorCategory.RATE_LIMITED
+    if any(s in output_lower for s in ("permission denied", "access denied", "eacces")):
+        return ErrorCategory.PERMISSION_DENIED
+    if any(s in output_lower for s in ("timeout", "timed out", "deadline exceeded")):
+        return ErrorCategory.TIMEOUT
+    if any(s in output_lower for s in ("tool not available", "tool_unavailable", "unknown tool")):
+        return ErrorCategory.TOOL_UNAVAILABLE
+    if any(s in output_lower for s in ("segfault", "core dumped", "fatal error", "panic")):
+        return ErrorCategory.SYSTEM_CRASH
+    if any(s in output_lower for s in ("json", "parse error", "unexpected token", "decode")):
+        return ErrorCategory.PARSE_FAILURE
+
+    # If we have a non-zero exit code but nothing matched above
+    if exit_code is not None and exit_code != 0:
+        return ErrorCategory.UNKNOWN
+
+    # If we have an exception but nothing matched above
+    if exception is not None:
+        return ErrorCategory.UNKNOWN
+
+    return ErrorCategory.UNKNOWN
+
+
 class RalphStatus(BaseModel):
     """Structured status compatible with on-stop.sh -> status.json format."""
 
@@ -56,10 +146,16 @@ class RalphStatus(BaseModel):
     circuit_breaker_state: str = "CLOSED"
     correlation_id: str = ""
     error: str = ""
+    error_category: ErrorCategory | None = None
+
+    # SDK-LIFECYCLE-3: Permission denial events detected during iteration.
+    # Typed as list[Any] at runtime to avoid circular import with parsing.py;
+    # at type-check time the annotation resolves to list[PermissionDenialEvent].
+    permission_denials: list[Any] = Field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Export as dictionary matching status.json schema."""
-        return {
+        d = {
             "WORK_TYPE": self.work_type.value,
             "COMPLETED_TASK": self.completed_task,
             "NEXT_TASK": self.next_task,
@@ -73,10 +169,25 @@ class RalphStatus(BaseModel):
             "correlation_id": self.correlation_id,
             "error": self.error,
         }
+        if self.error_category is not None:
+            d["error_category"] = self.error_category.value
+        if self.permission_denials:
+            d["permission_denials"] = [
+                pd.model_dump() if hasattr(pd, "model_dump") else pd
+                for pd in self.permission_denials
+            ]
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RalphStatus:
         """Create from status.json dictionary."""
+        error_cat_raw = data.get("error_category")
+        error_cat: ErrorCategory | None = None
+        if error_cat_raw is not None:
+            try:
+                error_cat = ErrorCategory(error_cat_raw)
+            except ValueError:
+                error_cat = ErrorCategory.UNKNOWN
         return cls(
             work_type=data.get("WORK_TYPE", "UNKNOWN"),
             completed_task=data.get("COMPLETED_TASK", ""),
@@ -90,6 +201,7 @@ class RalphStatus(BaseModel):
             circuit_breaker_state=data.get("circuit_breaker_state", "CLOSED"),
             correlation_id=data.get("correlation_id", ""),
             error=data.get("error", ""),
+            error_category=error_cat,
         )
 
     @classmethod

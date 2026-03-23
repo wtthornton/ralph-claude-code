@@ -30,13 +30,13 @@ Three context-related gaps between the CLI and SDK cause token waste and session
 
 ## Research Context (March 2026)
 
-**Prompt caching**: Claude's prompt caching uses `cache_control` breakpoints in the messages array. Content before the breakpoint is cached for 5 minutes (extended to 1 hour with certain plans). For multi-loop agents, the system prompt and tool definitions are ideal cache candidates — they're identical across iterations. The SDK should structure prompts to maximize cache reuse.
+**Prompt caching**: Claude's prompt caching uses `cache_control` breakpoints in the messages array. Content before the breakpoint is cached for 5 minutes (default) or 1 hour (2× write cost). Cache reads cost 0.1× the base input token price — a 90% discount. Cache writes cost 1.25× (5-min) or 2.0× (1-hr) the base input price but pay for themselves after just 1-2 cache reads. For multi-loop agents, the system prompt and tool definitions are ideal cache candidates — they're identical across iterations. Cached tokens also don't count against input tokens per minute (ITPM) rate limits, effectively increasing throughput.
 
-**Context windows**: Claude Opus 4.6 supports 200K tokens (1M with extended thinking). Claude Sonnet 4.6 supports 200K tokens. Even with large windows, loading 50+ completed tasks wastes budget and degrades response quality due to attention dilution.
+**Context windows**: Both Claude Opus 4.6 and Sonnet 4.6 support 1M-token context windows natively with no long-context surcharge (GA March 13, 2026). Opus 4.6 supports up to 128K output tokens per response. Even with large windows, loading 50+ completed tasks wastes budget and degrades response quality due to attention dilution.
 
 **Continue-As-New**: The Temporal pattern of atomically ending a workflow execution and starting a fresh one with carried-over state is directly applicable. When a Ralph session exceeds N iterations, context fills with stale tool outputs and failed attempts. Resetting the session while carrying only essential state (current task, progress summary, key findings) restores agent effectiveness. Research shows agent success rate decreases after ~35 minutes and doubles failure rate with doubled duration.
 
-**Token counting**: Anthropic's tokenizer uses ~4 characters per token as a rough heuristic. The `anthropic` Python SDK includes a `count_tokens()` method for precise counting, but the 4-char heuristic is sufficient for budget awareness during prompt building.
+**Token counting**: Anthropic provides a free `POST /v1/messages/count_tokens` API endpoint (and `client.messages.count_tokens()` SDK method) for precise token counting including tools, images, and documents. The 4-char heuristic (~250 tokens per 1K chars) is sufficient for quick budget estimates during prompt building; the API endpoint should be used when accuracy matters.
 
 ## Stories
 
@@ -67,6 +67,7 @@ Three context-related gaps between the CLI and SDK cause token waste and session
 
 ## Out of Scope
 
-- Anthropic tokenizer integration (4-char heuristic is sufficient)
+- Direct Anthropic `count_tokens` API integration (the SDK uses the 4-char heuristic for budget estimates; embedders can call the API for precise counts)
 - Prompt template design (TheStudio controls prompt content; SDK controls structure)
 - Streaming-based context trimming (would require real-time token counting)
+- Extended thinking token management (thinking blocks are automatically excluded from subsequent turns by the API)

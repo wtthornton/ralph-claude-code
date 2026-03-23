@@ -181,3 +181,235 @@ def _handle_multi_result_jsonl(text: str) -> list[RalphStatus]:
         except json.JSONDecodeError:
             continue
     return results
+
+
+# =============================================================================
+# SDK-LIFECYCLE-3: Permission Denial Detection
+# =============================================================================
+
+# Patterns that indicate a user-fixable permission denial (bash command blocked
+# by ALLOWED_TOOLS).  The user can resolve these by adding the tool to the
+# allowed list.
+_USER_FIXABLE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(
+        r"(?:tool|command)\s+(?:is\s+)?not\s+(?:allowed|permitted|in\s+allowed)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"Bash\(([^)]+)\)\s+(?:is\s+)?(?:not\s+allowed|blocked|denied)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"permission\s+denied.*?(?:Bash|tool)\s*\(",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"not\s+in\s+(?:the\s+)?(?:allowed|permitted)\s+tools?\s+list",
+        re.IGNORECASE,
+    ),
+]
+
+# Patterns that indicate a scope-locked denial (built-in tool filesystem
+# boundary, sandbox restriction).  These cannot be fixed by the user through
+# config alone.
+_SCOPE_LOCKED_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(
+        r"outside\s+(?:the\s+)?(?:allowed|permitted)\s+(?:directory|directories|path|workspace)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:cannot|can't)\s+(?:access|read|write|modify)\s+files?\s+outside",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"filesystem\s+(?:boundary|restriction|sandbox)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"path\s+(?:is\s+)?(?:not\s+allowed|restricted|blocked)",
+        re.IGNORECASE,
+    ),
+]
+
+# General permission denial indicators — used to detect that the message is
+# about a denial in the first place.
+_DENIAL_INDICATORS: list[re.Pattern[str]] = [
+    re.compile(r"permission\s+denied", re.IGNORECASE),
+    re.compile(
+        r"(?:tool|command)\s+(?:was\s+)?(?:denied|blocked|rejected|not\s+allowed)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:cannot|can't|unable\s+to)\s+(?:use|run|execute|invoke)\s+(?:tool|command)",
+        re.IGNORECASE,
+    ),
+]
+
+# Pattern to extract tool name from denial messages.
+_TOOL_NAME_PATTERN = re.compile(
+    r"(?:tool|command)\s+[`'\"]?(\w+(?:\([^)]*\))?)[`'\"]?",
+    re.IGNORECASE,
+)
+
+
+class PermissionDenialEvent(BaseModel):
+    """A detected permission denial from Claude CLI output.
+
+    Attributes:
+        tool_name: The tool or command that was denied (e.g. ``"Bash(npm test)"``).
+        denied_pattern: The pattern category that matched — one of
+            ``"user_fixable"``, ``"scope_locked"``, or ``"unknown"``.
+        is_user_fixable: True if the denial can be resolved by adding the tool
+            to ``ALLOWED_TOOLS``; False for built-in filesystem boundary
+            restrictions.
+        raw_message: The raw line or message fragment containing the denial
+            (truncated to 500 chars).
+    """
+    tool_name: str = ""
+    denied_pattern: str = ""
+    is_user_fixable: bool = False
+    raw_message: str = ""
+
+
+def detect_permission_denials(output: str) -> list[PermissionDenialEvent]:
+    """Parse Claude's JSONL output for permission denial messages.
+
+    Scans both raw text lines and JSONL ``result`` / ``content`` fields for
+    denial indicators, then classifies each as user-fixable or scope-locked.
+
+    Args:
+        output: Raw stdout from the Claude CLI (may be JSONL or plain text).
+
+    Returns:
+        A deduplicated list of :class:`PermissionDenialEvent` instances.
+    """
+    denial_lines: list[str] = []
+
+    # Collect candidate lines from JSONL content/result fields and raw text.
+    for line in output.strip().splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # Try JSONL parsing to extract nested text
+        try:
+            obj = json.loads(stripped)
+            # result objects
+            if obj.get("type") == "result":
+                result_text = obj.get("result", "")
+                if isinstance(result_text, str):
+                    denial_lines.append(result_text)
+            # content block text
+            elif obj.get("type") in (
+                "assistant", "content_block_delta", "content_block_stop",
+            ):
+                content = obj.get("content", "")
+                if isinstance(content, str):
+                    denial_lines.append(content)
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            denial_lines.append(item.get("text", ""))
+            # Also check for error messages
+            if obj.get("is_error"):
+                error_text = obj.get("error", obj.get("result", ""))
+                if isinstance(error_text, str):
+                    denial_lines.append(error_text)
+        except (json.JSONDecodeError, TypeError):
+            # Not JSON — treat as raw text
+            denial_lines.append(stripped)
+
+    events: list[PermissionDenialEvent] = []
+    seen_messages: set[str] = set()
+
+    for text in denial_lines:
+        # Check if this text contains any denial indicator
+        has_denial = any(p.search(text) for p in _DENIAL_INDICATORS)
+        if not has_denial:
+            # Also check user-fixable and scope-locked patterns directly
+            has_denial = (
+                any(p.search(text) for p in _USER_FIXABLE_PATTERNS)
+                or any(p.search(text) for p in _SCOPE_LOCKED_PATTERNS)
+            )
+        if not has_denial:
+            continue
+
+        # Deduplicate on the first 200 characters of the raw message
+        dedup_key = text[:200]
+        if dedup_key in seen_messages:
+            continue
+        seen_messages.add(dedup_key)
+
+        # Classify: user-fixable vs scope-locked
+        is_user_fixable = any(p.search(text) for p in _USER_FIXABLE_PATTERNS)
+        is_scope_locked = any(p.search(text) for p in _SCOPE_LOCKED_PATTERNS)
+
+        if is_scope_locked and not is_user_fixable:
+            denied_pattern = "scope_locked"
+            fixable = False
+        elif is_user_fixable:
+            denied_pattern = "user_fixable"
+            fixable = True
+        else:
+            denied_pattern = "unknown"
+            fixable = False
+
+        # Extract tool name
+        tool_name = ""
+        tool_match = _TOOL_NAME_PATTERN.search(text)
+        if tool_match:
+            tool_name = tool_match.group(1)
+
+        events.append(PermissionDenialEvent(
+            tool_name=tool_name,
+            denied_pattern=denied_pattern,
+            is_user_fixable=fixable,
+            raw_message=text[:500],  # Truncate to avoid huge messages
+        ))
+
+    return events
+
+
+# ---------------------------------------------------------------------------
+# SDK-OUTPUT-1: Structured files_changed extraction from JSONL tool_use
+# ---------------------------------------------------------------------------
+
+# Tool names whose `file_path` input parameter represents a changed file
+_FILE_CHANGE_TOOLS = frozenset({"Write", "Edit", "MultiEdit"})
+
+
+def extract_files_changed(text: str) -> list[str]:
+    """Extract unique file paths from Claude JSONL tool_use records.
+
+    Scans every JSONL line for ``{"type": "tool_use"}`` objects whose
+    ``name`` is one of Write, Edit, or MultiEdit.  Extracts the
+    ``file_path`` parameter from the ``input`` dict.
+
+    Returns a deduplicated list of file paths in first-seen order.
+    No regex heuristics on freeform text — only structured tool_use records.
+    """
+    seen: dict[str, None] = {}  # ordered dict for dedup + order preservation
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        if obj.get("type") != "tool_use":
+            continue
+        tool_name = obj.get("name", "")
+        if tool_name not in _FILE_CHANGE_TOOLS:
+            continue
+
+        tool_input = obj.get("input")
+        if not isinstance(tool_input, dict):
+            continue
+
+        file_path = tool_input.get("file_path")
+        if isinstance(file_path, str) and file_path:
+            seen.setdefault(file_path, None)
+
+    return list(seen)

@@ -20,7 +20,7 @@ import aiofiles.os
 
 @runtime_checkable
 class RalphStateBackend(Protocol):
-    """Protocol defining the 12 async state operations."""
+    """Protocol defining the 18 async state operations."""
 
     # --- Status ---
 
@@ -78,6 +78,32 @@ class RalphStateBackend(Protocol):
 
     async def write_fix_plan(self, content: str) -> None:
         """Write fix_plan.md content."""
+        ...
+
+    # --- Session Lifecycle (SDK-CONTEXT-3) ---
+
+    async def read_session_metadata(self) -> dict[str, Any]:
+        """Read session metadata (created_at, iteration_count, etc.)."""
+        ...
+
+    async def write_session_metadata(self, data: dict[str, Any]) -> None:
+        """Write session metadata atomically."""
+        ...
+
+    async def read_session_history(self) -> list[dict[str, Any]]:
+        """Read list of previous session records."""
+        ...
+
+    async def append_session_history(self, entry: dict[str, Any]) -> None:
+        """Append a session record to history."""
+        ...
+
+    async def read_continue_as_new_state(self) -> dict[str, Any]:
+        """Read continue-as-new state for session rotation."""
+        ...
+
+    async def write_continue_as_new_state(self, data: dict[str, Any]) -> None:
+        """Write continue-as-new state for session rotation."""
         ...
 
 
@@ -195,6 +221,38 @@ class FileStateBackend(RalphStateBackend):
     async def write_fix_plan(self, content: str) -> None:
         await self._write_text(self.ralph_dir / "fix_plan.md", content)
 
+    # --- Session Lifecycle (SDK-CONTEXT-3) ---
+
+    async def read_session_metadata(self) -> dict[str, Any]:
+        return await self._read_json(self.ralph_dir / ".session_metadata.json")
+
+    async def write_session_metadata(self, data: dict[str, Any]) -> None:
+        await self._atomic_write(
+            self.ralph_dir / ".session_metadata.json",
+            json.dumps(data, indent=2) + "\n",
+        )
+
+    async def read_session_history(self) -> list[dict[str, Any]]:
+        data = await self._read_json(self.ralph_dir / ".session_history.json")
+        return data.get("sessions", [])
+
+    async def append_session_history(self, entry: dict[str, Any]) -> None:
+        history = await self.read_session_history()
+        history.append(entry)
+        await self._atomic_write(
+            self.ralph_dir / ".session_history.json",
+            json.dumps({"sessions": history}, indent=2) + "\n",
+        )
+
+    async def read_continue_as_new_state(self) -> dict[str, Any]:
+        return await self._read_json(self.ralph_dir / ".continue_as_new.json")
+
+    async def write_continue_as_new_state(self, data: dict[str, Any]) -> None:
+        await self._atomic_write(
+            self.ralph_dir / ".continue_as_new.json",
+            json.dumps(data, indent=2) + "\n",
+        )
+
 
 class NullStateBackend(RalphStateBackend):
     """In-memory state backend — creates no files on disk.
@@ -210,6 +268,9 @@ class NullStateBackend(RalphStateBackend):
         self._last_reset: int = 0
         self._session_id: str = ""
         self._fix_plan: str = ""
+        self._session_metadata: dict[str, Any] = {}
+        self._session_history: list[dict[str, Any]] = []
+        self._continue_as_new_state: dict[str, Any] = {}
 
     # --- Status ---
 
@@ -256,3 +317,23 @@ class NullStateBackend(RalphStateBackend):
 
     async def write_fix_plan(self, content: str) -> None:
         self._fix_plan = content
+
+    # --- Session Lifecycle (SDK-CONTEXT-3) ---
+
+    async def read_session_metadata(self) -> dict[str, Any]:
+        return dict(self._session_metadata)
+
+    async def write_session_metadata(self, data: dict[str, Any]) -> None:
+        self._session_metadata = dict(data)
+
+    async def read_session_history(self) -> list[dict[str, Any]]:
+        return list(self._session_history)
+
+    async def append_session_history(self, entry: dict[str, Any]) -> None:
+        self._session_history.append(dict(entry))
+
+    async def read_continue_as_new_state(self) -> dict[str, Any]:
+        return dict(self._continue_as_new_state)
+
+    async def write_continue_as_new_state(self, data: dict[str, Any]) -> None:
+        self._continue_as_new_state = dict(data)
