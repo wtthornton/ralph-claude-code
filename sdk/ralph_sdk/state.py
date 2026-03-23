@@ -81,7 +81,7 @@ class RalphStateBackend(Protocol):
         ...
 
 
-class FileStateBackend:
+class FileStateBackend(RalphStateBackend):
     """File-based state backend wrapping current .ralph/ file I/O.
 
     This is the default backend, maintaining full compatibility with the
@@ -196,7 +196,7 @@ class FileStateBackend:
         await self._write_text(self.ralph_dir / "fix_plan.md", content)
 
 
-class NullStateBackend:
+class NullStateBackend(RalphStateBackend):
     """In-memory state backend — creates no files on disk.
 
     Used for testing and for TheStudio embedded mode where state

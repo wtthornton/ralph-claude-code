@@ -3,7 +3,7 @@
 Provides dual-mode operation: standalone CLI + TheStudio embedded.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.0.2"
 
 from ralph_sdk.agent import RalphAgent, TaskInput, TaskResult
 from ralph_sdk.config import RalphConfig
@@ -14,6 +14,13 @@ from ralph_sdk.status import (
     RalphLoopStatus,
     RalphStatus,
     WorkType,
+)
+from ralph_sdk.converters import (
+    ComplexityBand,
+    IntentSpecInput,
+    RiskFlag,
+    TaskPacketInput,
+    TrustTier,
 )
 from ralph_sdk.tools import (
     ralph_status_tool,
@@ -35,6 +42,11 @@ __all__ = [
     "WorkType",
     "CircuitBreakerState",
     "CircuitBreakerStateEnum",
+    "ComplexityBand",
+    "TrustTier",
+    "RiskFlag",
+    "IntentSpecInput",
+    "TaskPacketInput",
     "ralph_status_tool",
     "ralph_rate_check_tool",
     "ralph_circuit_state_tool",

@@ -1,8 +1,8 @@
 # Implementation Status Summary
 
-**Last Updated**: 2026-03-22
-**Version**: v2.0.1
-**Overall Status**: All 66 epic stories complete across 15 epics (Phases 0-11). SDK v2.0.0 delivered (Pydantic v2, async, pluggable state backend, correlation IDs, TaskPacket/EvidenceBundle). Current: v2.0.1.
+**Last Updated**: 2026-03-23
+**Version**: v2.0.2
+**Overall Status**: All 66 epic stories complete across 15 epics (Phases 0-11). SDK v2.0.2 delivered (Pydantic v2, async, pluggable state backend, correlation IDs, TaskPacket/EvidenceBundle). Current: v2.0.2.
 
 > **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count.
 
@@ -267,6 +267,16 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 
 ## Recent Completions
 
+### v2.0.2 (2026-03-23)
+- SDK integration polish: 7 fixes for TheStudio bridge-layer compatibility
+- **POLISH-1**: Exported `ComplexityBand`, `TrustTier`, `RiskFlag`, `IntentSpecInput`, `TaskPacketInput` from `__init__.py`
+- **POLISH-2**: Added `created_at: datetime` field to `EvidenceBundle`
+- **POLISH-3**: `FileStateBackend` and `NullStateBackend` now explicitly inherit from `RalphStateBackend` Protocol
+- **POLISH-4**: Synced `__version__` in `__init__.py` with `pyproject.toml` (both `"2.0.2"`)
+- **POLISH-5**: Added `system_prompt: str | None` parameter to `run_iteration()` — passes through to Claude CLI via `--system-prompt`
+- **POLISH-6**: Added public `cancel()` method to `RalphAgent` for graceful loop cancellation
+- **POLISH-7**: Added `tokens_in`/`tokens_out` fields to `TaskResult` and `EvidenceBundle`, extracted from JSONL result messages
+
 ### v2.0.1 (2026-03-22)
 - Comprehensive code review and bug fix audit: 24 fixes across 16 files
 - **Python SDK**: Fixed sync-call-to-async crash in `status.py`, orphaned subprocess on timeout in `agent.py`, blocking I/O in async `state.py`, enum serialization in `tools.py`, `.ralphrc` export keyword parsing in `config.py`, session ID persistence in `agent.py`
@@ -427,9 +437,10 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 
 ---
 
-**Status**: ✅ 66/66 stories complete (100%). All 15 epics and 12 phases delivered. SDK v2.0.0 shipped. Current: v2.0.1.
+**Status**: ✅ 66/66 stories complete (100%). All 15 epics and 12 phases delivered. SDK v2.0.0 shipped. Current: v2.0.2.
 **Removed** (cumulative): `lib/response_analyzer.sh` (-1042 lines), `lib/file_protection.sh` (-58 lines), simplified `lib/circuit_breaker.sh` (-285 lines). Total: ~1,385 lines of bash removed.
 **Added** (cumulative): 4 sub-agent definitions, 2 skills, hook-based analysis, Python SDK (4 modules + tests), 4 lib modules (metrics, notifications, backup, github_issues, sandbox), Dockerfile.sandbox, 3 documentation files, JSON config template, 7 new BATS test files.
 **v1.8.0**: All phases complete — SDK integration (Phase 6), JSON config + SDK install + docs (Phase 7), metrics/notifications/backup (Phase 8), comprehensive validation tests (Phase 9), GitHub issue integration (Phase 10), Docker sandbox (Phase 11).
 **v2.0.0**: SDK v2 — Pydantic v2 models, async agent loop, pluggable state backend, structured response parsing, active circuit breaker, correlation ID threading, TaskPacket conversion, EvidenceBundle output.
+**v2.0.2**: SDK integration polish — 7 fixes for TheStudio bridge-layer compatibility. Exported converter types, added `created_at` timestamp and `tokens_in`/`tokens_out` to EvidenceBundle/TaskResult, explicit Protocol inheritance for state backends, `system_prompt` pass-through on `run_iteration()`, public `cancel()` method, version sync.
 **v2.0.1**: Comprehensive code review — 24 bug fixes across 16 files. Critical: `create_files.sh` exit gate always triggered (local masking $?), SDK sync-call-to-async crash (`status.py`), orphaned subprocess on timeout (`agent.py`). High: session ID never persisted, blocking I/O in async context (`state.py`), enum not JSON-serializable (`tools.py`), `.ralphrc` export keyword ignored (`config.py`), backup dotfile restoration (`backup.sh`), `((count++))` crash under set -e (`task_sources.sh`), crash-recovery dead code (`ralph_loop.sh`), `ralph-upgrade` missing from uninstall, `on-stop.sh` arithmetic crashes and data corruption, `on-subagent-done.sh` IFS splitting, `validate-command.sh` false positive on `--force-with-lease`. License mismatch fixed (ISC→MIT).

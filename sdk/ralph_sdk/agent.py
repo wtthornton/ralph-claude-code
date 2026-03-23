@@ -134,6 +134,8 @@ class TaskResult(BaseModel):
     error: str = ""
     loop_count: int = 0
     duration_seconds: float = 0.0
+    tokens_in: int = 0
+    tokens_out: int = 0
 
     def to_signal(self) -> dict[str, Any]:
         """Convert to TheStudio-compatible signal format."""
@@ -145,6 +147,8 @@ class TaskResult(BaseModel):
             "error": self.error,
             "loop_count": self.loop_count,
             "duration_seconds": self.duration_seconds,
+            "tokens_in": self.tokens_in,
+            "tokens_out": self.tokens_out,
         }
 
 
@@ -182,6 +186,8 @@ class RalphAgent:
         self.session_id = ""
         self._completion_indicators = 0
         self._running = False
+        self._last_tokens_in = 0
+        self._last_tokens_out = 0
 
         # Correlation ID — auto-generated UUID if not provided
         self.correlation_id = correlation_id or str(uuid.uuid4())
@@ -207,6 +213,14 @@ class RalphAgent:
         for `ralph --sdk` and `python -m ralph_sdk`.
         """
         return asyncio.run(self.run())
+
+    def cancel(self) -> None:
+        """Request graceful cancellation of the running loop.
+
+        Safe to call from another thread or an async timeout handler.
+        The loop will exit after the current iteration completes.
+        """
+        self._running = False
 
     # -------------------------------------------------------------------------
     # Core Loop (async, replicates ralph_loop.sh main())
@@ -293,13 +307,24 @@ class RalphAgent:
             self._running = False
             result.loop_count = self.loop_count
             result.duration_seconds = time.time() - self.start_time
+            result.tokens_in = self._last_tokens_in
+            result.tokens_out = self._last_tokens_out
 
         return result
 
-    async def run_iteration(self, task_input: TaskInput | None = None) -> RalphStatus:
+    async def run_iteration(
+        self,
+        task_input: TaskInput | None = None,
+        system_prompt: str | None = None,
+    ) -> RalphStatus:
         """Execute a single loop iteration via Claude Code CLI.
 
         Uses asyncio.create_subprocess_exec() with asyncio.wait_for() timeout.
+
+        Args:
+            task_input: Task input to process. Loads from .ralph/ if None.
+            system_prompt: Optional system prompt passed through to Claude CLI
+                via --system-prompt flag.
         """
         if task_input is None:
             task_input = TaskInput.from_ralph_dir(str(self.ralph_dir))
@@ -308,7 +333,7 @@ class RalphAgent:
         prompt = self._build_iteration_prompt(task_input)
 
         # Build Claude CLI command
-        cmd = self._build_claude_command(prompt)
+        cmd = self._build_claude_command(prompt, system_prompt=system_prompt)
 
         logger.debug("Invoking: %s", " ".join(cmd[:5]) + "...")
 
@@ -432,13 +457,21 @@ class RalphAgent:
             parts.append(f"\n\n## Build/Run Instructions\n\n{task_input.agent_instructions}")
         return "\n".join(parts)
 
-    def _build_claude_command(self, prompt: str) -> list[str]:
+    def _build_claude_command(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+    ) -> list[str]:
         """Build Claude CLI command (matching bash build_claude_command())."""
         cmd = [self.config.claude_code_cmd]
 
         # Agent mode (v1.0+)
         if self.config.use_agent:
             cmd.extend(["--agent", self.config.agent_name])
+
+        # System prompt (for TheStudio DeveloperRoleConfig injection)
+        if system_prompt:
+            cmd.extend(["--system-prompt", system_prompt])
 
         # Prompt
         cmd.extend(["-p", prompt])
@@ -479,16 +512,21 @@ class RalphAgent:
         return parse_ralph_status(stdout)
 
     def _extract_session_id(self, stdout: str) -> None:
-        """Extract session_id from JSONL result objects."""
+        """Extract session_id and token counts from JSONL result objects."""
+        self._last_tokens_in = 0
+        self._last_tokens_out = 0
         for line in reversed(stdout.strip().splitlines()):
             line = line.strip()
             if not line:
                 continue
             try:
                 obj = json.loads(line)
-                if obj.get("type") == "result" and "session_id" in obj:
-                    self.session_id = obj["session_id"]
-                    # Note: session save is fire-and-forget in sync context
+                if obj.get("type") == "result":
+                    if "session_id" in obj:
+                        self.session_id = obj["session_id"]
+                    # Extract token usage from result message
+                    self._last_tokens_in += obj.get("input_tokens", 0)
+                    self._last_tokens_out += obj.get("output_tokens", 0)
                     return
             except json.JSONDecodeError:
                 continue
