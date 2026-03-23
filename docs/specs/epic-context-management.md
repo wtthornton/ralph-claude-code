@@ -62,9 +62,9 @@ Reference: [Temporal Continue-As-New](https://docs.temporal.io/workflows#continu
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [CTXMGMT-1](story-ctxmgmt-1-progressive-loading.md) | Progressive Context Loading Strategy | High | Medium | **Open** |
-| [CTXMGMT-2](story-ctxmgmt-2-task-decomposition.md) | Task Decomposition Signals | High | Small | **Open** |
-| [CTXMGMT-3](story-ctxmgmt-3-continue-as-new.md) | Continue-As-New Pattern for Long Sessions | Medium | Medium | **Open** |
+| [CTXMGMT-1](story-ctxmgmt-1-progressive-loading.md) | Progressive Context Loading Strategy | High | Medium | **Done** |
+| [CTXMGMT-2](story-ctxmgmt-2-task-decomposition.md) | Task Decomposition Signals | High | Small | **Done** |
+| [CTXMGMT-3](story-ctxmgmt-3-continue-as-new.md) | Continue-As-New Pattern for Long Sessions | Medium | Medium | **Done** |
 
 ## Implementation Order
 
@@ -74,12 +74,12 @@ Reference: [Temporal Continue-As-New](https://docs.temporal.io/workflows#continu
 
 ## Acceptance Criteria (Epic-level)
 
-- [ ] Context loading follows progressive strategy (stable → project → variable)
-- [ ] Tasks flagged as "too large" before execution with decomposition suggestion
-- [ ] Session reset triggers when context utilization exceeds threshold
-- [ ] State preserved across session resets (current task, progress, findings)
-- [ ] All strategies configurable and disableable
-- [ ] No regression in loop behavior for sessions under 35 minutes
+- [x] Context loading follows progressive strategy (stable → project → variable)
+- [x] Tasks flagged as "too large" before execution with decomposition suggestion
+- [x] Session reset triggers when context utilization exceeds threshold
+- [x] State preserved across session resets (current task, progress, findings)
+- [x] All strategies configurable and disableable
+- [x] No regression in loop behavior for sessions under 35 minutes
 
 ## Rollback
 

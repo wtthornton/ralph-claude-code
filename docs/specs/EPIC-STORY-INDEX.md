@@ -13,7 +13,7 @@ Phase 0 (DONE)     Phase 0.5 (DONE)    Phase 1 (DONE)       Phase 2 (DONE)      
 │ RALPH-JSONL  │──▶│ RALPH-LOOP   │──▶│ RALPH-HOOKS  │───▶│RALPH-SUBAGENTS│──▶│ RALPH-SKILLS │──▶│ RALPH-TEAMS  │──▶│RALPH-STREAM  │
 │ 4/4 Done     │   │ 5/5 Done     │   │ 6/6 Done     │    │ 5/5 Done      │   │ 5/5 Done     │   │ 5/5 Done     │   │ 3/3 Done     │
 │ RALPH-MULTI  │   │ Critical     │   │ Critical     │    │ Important     │   │ Important    │   │ Nice-to-have │   │ RALPH-WSL    │
-│ 6/6 Done     │   │ P0 Regrssion │   │ Foundation   │    │ Sub-agents    │   │ -1,368 lines │   │ Experimental │   │ 2/2 Done     │
+│ 6/6 Done     │   │ P0 Regression│   │ Foundation   │    │ Sub-agents    │   │ -1,368 lines │   │ Experimental │   │ 2/2 Done     │
 └──────────────┘   └──────────────┘   └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
 
 COMPLETED (v1.8.0)
@@ -247,18 +247,18 @@ Phase 17 (DONE — SDK v2.1.0 Enhancements)
 
 | Priority | Open | Done | Total |
 |----------|------|------|-------|
-| Critical | 1 | 21 | 22 |
-| High | 8 | 17 | 25 |
+| Critical | 0 | 22 | 22 |
+| High | 0 | 25 | 25 |
 | Important | 0 | 16 | 16 |
-| Medium | 11 | 36 | 47 |
+| Medium | 0 | 47 | 47 |
 | Nice-to-have | 0 | 2 | 2 |
 | Defensive/Low | 0 | 5 | 5 |
-| **Total** | **20** | **97** | **117** |
+| P0–P3 (SDK) | 0 | 31 | 31 |
+| **Total** | **0** | **148** | **148** |
 
 ## Critical Path
 
-Phases 0–13 complete (v1.9.0). 93 stories across 26 epics are done.
-Phase 14 in progress (v2.x.0). FAILSPEC epic complete (4/4). 20 stories across 6 remaining epics — 2026 best practices modernization.
+All phases complete (v2.2.0). 148 stories across 40 epics are done.
 
 ### Product Strategy
 
@@ -275,8 +275,8 @@ Ralph is a **standalone product** with full value on its own. TheStudio is the *
 | Cost Optimization | Model routing + prompt caching | Fleet-wide cost dashboards + policy engine |
 
 ```
-Phase 0–13: ALL DONE (93/93 stories, v1.9.0)
-Phase 14:   IN PROGRESS (4/24 stories, v2.x.0 — FAILSPEC complete)
+Phase 0–13:  ALL DONE (93/93 stories, v1.9.0)
+Phase 14–17: ALL DONE (55/55 stories, v2.2.0)
 ```
 
 ---
@@ -473,15 +473,15 @@ Phase 14:   IN PROGRESS (4/24 stories, v2.x.0 — FAILSPEC complete)
 
 ---
 
-## Phase 14 — Open (2026 Best Practices Modernization)
+## Phase 14 — Complete (2026 Best Practices Modernization)
 
 **Source:** Comprehensive 2026 research review covering: AI agent loop architecture, reliability patterns, security standards, OpenTelemetry, testing frameworks, cost optimization, and EU AI Act compliance. Research drawn from Anthropic, AWS, OpenAI Codex, Google GKE, Langfuse, AgentAssay, FAILURE.md spec, and 30+ industry references.
 
 ```
-Phase 14 (OPEN)
+Phase 14 (DONE)
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
 │RALPH-FAILSPEC│   │ RALPH-OTEL   │   │RALPH-COSTROUTE│  │RALPH-CTXMGMT │
-│ 4/0 Open     │   │ 4/0 Open     │   │ 4/0 Open      │  │ 3/0 Open     │
+│ 4/4 Done     │   │ 4/4 Done     │   │ 4/4 Done      │  │ 3/3 Done     │
 │ Critical     │   │ High         │   │ High          │   │ High         │
 │ Compliance   │   │ Observability│   │ Cost 30-70%↓  │   │ Context Mgmt │
 └──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘
@@ -489,7 +489,7 @@ Phase 14 (OPEN)
                           ▼                  │
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
 │RALPH-AGENTMEM│   │RALPH-SANDBOXV2│  │ RALPH-EVALS  │◀─┘
-│ 3/0 Open     │   │ 3/0 Open     │   │ 3/0 Open     │
+│ 3/3 Done     │   │ 3/3 Done     │   │ 3/3 Done     │
 │ Medium       │   │ Medium       │   │ Medium       │
 │ Cross-session│   │ Security     │   │ Agent testing │
 └──────────────┘   └──────────────┘   └──────────────┘
@@ -606,7 +606,7 @@ Phase 14 (OPEN)
 
 ---
 
-## Phase 17 — Open (SDK v2.1.0 Enhancements)
+## Phase 17 — Complete (SDK v2.1.0 Enhancements)
 
 **Source:** SDK upgrade evaluation comparing CLI v2.2.0 capabilities against SDK v2.0.2 gaps. Research integrated from 4 agents: Claude API pricing, prompt caching, Temporal patterns, circuit breaker best practices — all validated against 2026 sources.
 

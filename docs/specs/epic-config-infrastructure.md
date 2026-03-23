@@ -22,9 +22,9 @@ Ralph's configuration is currently bash-sourced `.ralphrc` files only. As Ralph 
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [CONFIG-1](story-config-1-json-configuration.md) | JSON Configuration File Support | Medium | Medium | **Open** |
-| [CONFIG-2](story-config-2-sdk-installation.md) | Update Installation for SDK Support | Medium | Small | **Open** |
-| [CONFIG-3](story-config-3-cli-sdk-documentation.md) | Create CLI and SDK Documentation | Medium | Medium | **Open** |
+| [CONFIG-1](story-config-1-json-configuration.md) | JSON Configuration File Support | Medium | Medium | **Done** |
+| [CONFIG-2](story-config-2-sdk-installation.md) | Update Installation for SDK Support | Medium | Small | **Done** |
+| [CONFIG-3](story-config-3-cli-sdk-documentation.md) | Create CLI and SDK Documentation | Medium | Medium | **Done** |
 
 ## Implementation Order
 

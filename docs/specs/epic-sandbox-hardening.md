@@ -31,9 +31,9 @@ Ralph's Phase 11 Docker sandbox provides basic container isolation with bind mou
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [SANDBOXV2-1](story-sandboxv2-1-rootless-egress.md) | Rootless Docker Mode and Network Egress Control | Medium | Medium | **Open** |
-| [SANDBOXV2-2](story-sandboxv2-2-resource-reporting.md) | Resource Usage Reporting | Medium | Small | **Open** |
-| [SANDBOXV2-3](story-sandboxv2-3-gvisor.md) | gVisor Runtime Support | Low | Medium | **Open** |
+| [SANDBOXV2-1](story-sandboxv2-1-rootless-egress.md) | Rootless Docker Mode and Network Egress Control | Medium | Medium | **Done** |
+| [SANDBOXV2-2](story-sandboxv2-2-resource-reporting.md) | Resource Usage Reporting | Medium | Small | **Done** |
+| [SANDBOXV2-3](story-sandboxv2-3-gvisor.md) | gVisor Runtime Support | Low | Medium | **Done** |
 
 ## Implementation Order
 
@@ -43,12 +43,12 @@ Ralph's Phase 11 Docker sandbox provides basic container isolation with bind mou
 
 ## Acceptance Criteria (Epic-level)
 
-- [ ] Container runs rootless by default when rootless Docker is available
-- [ ] Network egress blocked by default during execution (configurable allowlist)
-- [ ] Resource usage (CPU, memory, duration) reported per-iteration
-- [ ] gVisor runtime supported as optional stronger isolation
-- [ ] Fallback to standard Docker when rootless/gVisor unavailable
-- [ ] All sandbox modes have BATS tests
+- [x] Container runs rootless by default when rootless Docker is available
+- [x] Network egress blocked by default during execution (configurable allowlist)
+- [x] Resource usage (CPU, memory, duration) reported per-iteration
+- [x] gVisor runtime supported as optional stronger isolation
+- [x] Fallback to standard Docker when rootless/gVisor unavailable
+- [x] All sandbox modes have BATS tests
 
 ## Rollback
 

@@ -25,13 +25,13 @@
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [ENABLE-1](story-enable-1-state-detection-alignment.md) | Align Enabled-State Detection with Required Artifacts | Critical | Small | **Open** |
-| [ENABLE-2](story-enable-2-cli-input-validation.md) | Strict CLI Validation for `--from` and `--prd` | High | Small | **Open** |
-| [ENABLE-3](story-enable-3-import-failure-transparency.md) | Source-Level Import Result Reporting | High | Medium | **Open** |
-| [ENABLE-4](story-enable-4-force-safety-and-backups.md) | Harden `--force` Behavior and Preserve User Files | High | Medium | **Open** |
-| [ENABLE-5](story-enable-5-task-normalization-dedup.md) | Normalize, Deduplicate, and Cap Imported Tasks | Medium | Medium | **Open** |
-| [ENABLE-6](story-enable-6-dry-run-and-json-output.md) | Add `--dry-run` and `--json` for Automation | Medium | Medium | **Open** |
-| [ENABLE-7](story-enable-7-wizard-ux-improvements.md) | Improve Prompt UX and Final Summary Guidance | Medium | Small | **Open** |
+| [ENABLE-1](story-enable-1-state-detection-alignment.md) | Align Enabled-State Detection with Required Artifacts | Critical | Small | **Done** |
+| [ENABLE-2](story-enable-2-cli-input-validation.md) | Strict CLI Validation for `--from` and `--prd` | High | Small | **Done** |
+| [ENABLE-3](story-enable-3-import-failure-transparency.md) | Source-Level Import Result Reporting | High | Medium | **Done** |
+| [ENABLE-4](story-enable-4-force-safety-and-backups.md) | Harden `--force` Behavior and Preserve User Files | High | Medium | **Done** |
+| [ENABLE-5](story-enable-5-task-normalization-dedup.md) | Normalize, Deduplicate, and Cap Imported Tasks | Medium | Medium | **Done** |
+| [ENABLE-6](story-enable-6-dry-run-and-json-output.md) | Add `--dry-run` and `--json` for Automation | Medium | Medium | **Done** |
+| [ENABLE-7](story-enable-7-wizard-ux-improvements.md) | Improve Prompt UX and Final Summary Guidance | Medium | Small | **Done** |
 
 ## Implementation Order
 
@@ -45,15 +45,15 @@
 
 ## Verification Criteria
 
-- [ ] "Already enabled" and verification checks use the same required file set.
-- [ ] Invalid `--from` values return `ENABLE_INVALID_ARGS` with clear remediation.
-- [ ] `--from prd` validates path existence/readability before generation.
-- [ ] Import flow reports per-source attempted/success/failed/empty with reasons.
-- [ ] `--force` does not overwrite `.gitignore` unless explicitly requested.
-- [ ] Force operations create recoverable backups for overwritten Ralph-managed files.
-- [ ] Imported tasks are normalized and deduplicated across sources.
-- [ ] `--dry-run` prints planned operations without writing files.
-- [ ] `--json` emits a machine-readable summary for CI consumption.
+- [x] "Already enabled" and verification checks use the same required file set.
+- [x] Invalid `--from` values return `ENABLE_INVALID_ARGS` with clear remediation.
+- [x] `--from prd` validates path existence/readability before generation.
+- [x] Import flow reports per-source attempted/success/failed/empty with reasons.
+- [x] `--force` does not overwrite `.gitignore` unless explicitly requested.
+- [x] Force operations create recoverable backups for overwritten Ralph-managed files.
+- [x] Imported tasks are normalized and deduplicated across sources.
+- [x] `--dry-run` prints planned operations without writing files.
+- [x] `--json` emits a machine-readable summary for CI consumption.
 
 ## Rollback
 

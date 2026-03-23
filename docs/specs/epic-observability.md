@@ -36,9 +36,9 @@ Ralph's observability emits data in formats that TheStudio's Outcome Ingestor ca
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [OBSERVE-1](story-observe-1-lightweight-metrics.md) | Lightweight Metrics and Analytics | Medium | Medium | **Open** |
-| [OBSERVE-2](story-observe-2-notifications.md) | Local Notification System | Medium | Small | **Open** |
-| [OBSERVE-3](story-observe-3-backup-rollback.md) | State Backup and Rollback | Low | Small | **Open** |
+| [OBSERVE-1](story-observe-1-lightweight-metrics.md) | Lightweight Metrics and Analytics | Medium | Medium | **Done** |
+| [OBSERVE-2](story-observe-2-notifications.md) | Local Notification System | Medium | Small | **Done** |
+| [OBSERVE-3](story-observe-3-backup-rollback.md) | State Backup and Rollback | Low | Small | **Done** |
 
 ## Implementation Order
 

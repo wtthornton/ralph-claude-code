@@ -40,10 +40,10 @@ Production AI agents need machine-readable failure mode definitions. Ralph's cir
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [FAILSPEC-1](story-failspec-1-failure-md.md) | Implement FAILURE.md Specification | Critical | Medium | **Open** |
-| [FAILSPEC-2](story-failspec-2-failsafe-md.md) | Implement FAILSAFE.md Safe Fallback Behaviors | Critical | Small | **Open** |
-| [FAILSPEC-3](story-failspec-3-killswitch-md.md) | Implement KILLSWITCH.md Emergency Stop | Critical | Small | **Open** |
-| [FAILSPEC-4](story-failspec-4-audit-logging.md) | Structured Audit Log for Compliance | High | Medium | **Open** |
+| [FAILSPEC-1](story-failspec-1-failure-md.md) | Implement FAILURE.md Specification | Critical | Medium | **Done** |
+| [FAILSPEC-2](story-failspec-2-failsafe-md.md) | Implement FAILSAFE.md Safe Fallback Behaviors | Critical | Small | **Done** |
+| [FAILSPEC-3](story-failspec-3-killswitch-md.md) | Implement KILLSWITCH.md Emergency Stop | Critical | Small | **Done** |
+| [FAILSPEC-4](story-failspec-4-audit-logging.md) | Structured Audit Log for Compliance | High | Medium | **Done** |
 
 ## Implementation Order
 

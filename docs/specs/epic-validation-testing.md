@@ -26,13 +26,13 @@ Ralph has strong unit test coverage (736+ tests, 100% pass rate) for core functi
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [TEST-1](story-test-1-tmux-integration.md) | Implement tmux Integration Tests | Medium | Medium | **Open** |
-| [TEST-2](story-test-2-monitor-dashboard.md) | Implement Monitor Dashboard Tests | Medium | Medium | **Open** |
-| [TEST-3](story-test-3-status-update.md) | Implement Status Update Tests | Medium | Small | **Open** |
-| [TEST-4](story-test-4-cli-enhancements.md) | Implement CLI Enhancement Tests | Medium | Medium | **Open** |
-| [TEST-5](story-test-5-sdk-integration.md) | Implement SDK Integration Tests | Medium | Large | **Open** |
-| [TEST-6](story-test-6-backward-compatibility.md) | Implement Backward Compatibility Tests | Medium | Medium | **Open** |
-| [TEST-7](story-test-7-e2e-full-loop.md) | Implement E2E Full Loop Tests | Medium | Large | **Open** |
+| [TEST-1](story-test-1-tmux-integration.md) | Implement tmux Integration Tests | Medium | Medium | **Done** |
+| [TEST-2](story-test-2-monitor-dashboard.md) | Implement Monitor Dashboard Tests | Medium | Medium | **Done** |
+| [TEST-3](story-test-3-status-update.md) | Implement Status Update Tests | Medium | Small | **Done** |
+| [TEST-4](story-test-4-cli-enhancements.md) | Implement CLI Enhancement Tests | Medium | Medium | **Done** |
+| [TEST-5](story-test-5-sdk-integration.md) | Implement SDK Integration Tests | Medium | Large | **Done** |
+| [TEST-6](story-test-6-backward-compatibility.md) | Implement Backward Compatibility Tests | Medium | Medium | **Done** |
+| [TEST-7](story-test-7-e2e-full-loop.md) | Implement E2E Full Loop Tests | Medium | Large | **Done** |
 
 ## Implementation Order
 

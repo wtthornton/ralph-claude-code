@@ -62,14 +62,14 @@ Ralph's multi-signal stall detection (fast-trip + deferred-test + no-progress) i
 
 ## Acceptance Criteria (Epic-level)
 
-- [ ] SDK detects fast-trip failures (0-tool runs <30s) and trips CB after configurable threshold
-- [ ] SDK detects deferred-test stalls and trips CB after configurable threshold
-- [ ] SDK detects consecutive timeouts and trips CB after configurable threshold
-- [ ] Completion indicators decay when productive work is detected
-- [ ] SDK provides decomposition hints when tasks exceed complexity thresholds
-- [ ] All thresholds are configurable via `RalphConfig`
-- [ ] Existing circuit breaker behavior (sliding window, cooldown, auto-recovery) is not regressed
-- [ ] pytest tests verify all stall detection paths
+- [x] SDK detects fast-trip failures (0-tool runs <30s) and trips CB after configurable threshold
+- [x] SDK detects deferred-test stalls and trips CB after configurable threshold
+- [x] SDK detects consecutive timeouts and trips CB after configurable threshold
+- [x] Completion indicators decay when productive work is detected
+- [x] SDK provides decomposition hints when tasks exceed complexity thresholds
+- [x] All thresholds are configurable via `RalphConfig`
+- [x] Existing circuit breaker behavior (sliding window, cooldown, auto-recovery) is not regressed
+- [x] pytest tests verify all stall detection paths
 
 ## Out of Scope
 

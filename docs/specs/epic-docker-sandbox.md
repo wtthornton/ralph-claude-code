@@ -47,8 +47,8 @@ These capabilities are available when Ralph runs inside TheStudio's execution pl
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [SANDBOX-1](story-sandbox-1-sandbox-interface.md) | Sandbox Interface and Docker Integration | Medium | Large | **Open** |
-| [SANDBOX-2](story-sandbox-2-docker-execution.md) | Docker Sandbox Execution Runner | Medium | Medium | **Open** |
+| [SANDBOX-1](story-sandbox-1-sandbox-interface.md) | Sandbox Interface and Docker Integration | Medium | Large | **Done** |
+| [SANDBOX-2](story-sandbox-2-docker-execution.md) | Docker Sandbox Execution Runner | Medium | Medium | **Done** |
 
 ## Implementation Order
 

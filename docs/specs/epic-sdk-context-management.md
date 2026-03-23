@@ -54,16 +54,16 @@ Three context-related gaps between the CLI and SDK cause token waste and session
 
 ## Acceptance Criteria (Epic-level)
 
-- [ ] SDK trims fix plans to current section + N unchecked items
-- [ ] Elided sections show summary markers (e.g., `(15 completed items above)`)
-- [ ] Token estimation available for budget-aware prompt building
-- [ ] Prompt is split into stable prefix and dynamic suffix for cache optimization
-- [ ] Sessions expire after configurable TTL (default 24 hours)
-- [ ] Session rotation occurs automatically on expiry
-- [ ] Continue-As-New resets context after N iterations, carrying essential state
-- [ ] Session history (previous session IDs with timestamps) is tracked
-- [ ] All settings configurable via `RalphConfig`
-- [ ] pytest tests verify progressive loading, cache split, and session rotation
+- [x] SDK trims fix plans to current section + N unchecked items
+- [x] Elided sections show summary markers (e.g., `(15 completed items above)`)
+- [x] Token estimation available for budget-aware prompt building
+- [x] Prompt is split into stable prefix and dynamic suffix for cache optimization
+- [x] Sessions expire after configurable TTL (default 24 hours)
+- [x] Session rotation occurs automatically on expiry
+- [x] Continue-As-New resets context after N iterations, carrying essential state
+- [x] Session history (previous session IDs with timestamps) is tracked
+- [x] All settings configurable via `RalphConfig`
+- [x] pytest tests verify progressive loading, cache split, and session rotation
 
 ## Out of Scope
 

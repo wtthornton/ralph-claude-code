@@ -62,16 +62,16 @@ Three lifecycle-related gaps between the CLI and SDK affect shutdown reliability
 
 ## Acceptance Criteria (Epic-level)
 
-- [ ] `RalphAgent.cancel()` sends SIGTERM to Claude subprocess
-- [ ] `cancel()` returns `CancelResult` with partial output collected so far
-- [ ] `cancel()` completes within a configurable grace period (default 10s)
-- [ ] Cancel behavior is documented in docstrings and README
-- [ ] Timeout adapts based on historical iteration durations (P95 × multiplier)
-- [ ] Minimum sample count required before adaptive mode activates
-- [ ] Timeout clamped to configurable min/max range
-- [ ] Permission denials are detected and exposed as `PermissionDenialEvent` on status
-- [ ] User-fixable denials distinguished from scope-locked denials
-- [ ] pytest tests verify cancel, adaptive timeout, and permission detection
+- [x] `RalphAgent.cancel()` sends SIGTERM to Claude subprocess
+- [x] `cancel()` returns `CancelResult` with partial output collected so far
+- [x] `cancel()` completes within a configurable grace period (default 10s)
+- [x] Cancel behavior is documented in docstrings and README
+- [x] Timeout adapts based on historical iteration durations (P95 × multiplier)
+- [x] Minimum sample count required before adaptive mode activates
+- [x] Timeout clamped to configurable min/max range
+- [x] Permission denials are detected and exposed as `PermissionDenialEvent` on status
+- [x] User-fixable denials distinguished from scope-locked denials
+- [x] pytest tests verify cancel, adaptive timeout, and permission detection
 
 ## Out of Scope
 

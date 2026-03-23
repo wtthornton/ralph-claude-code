@@ -63,16 +63,16 @@ Three cost-related gaps between the CLI and SDK lead to budget waste and inaccur
 
 ## Acceptance Criteria (Epic-level)
 
-- [ ] SDK tracks per-iteration cost by model (input tokens, output tokens, USD)
-- [ ] Cumulative session cost is queryable
-- [ ] Budget alerts fire at configurable threshold (default 80%)
-- [ ] Budget hard-stop prevents further iterations when exhausted
-- [ ] Per-model pricing is configurable (defaults to March 2026 Claude pricing)
-- [ ] Model selection considers task complexity band (TRIVIAL through ARCHITECTURAL)
-- [ ] Retry escalation moves to more capable models on failure
-- [ ] Rate limiter optionally tracks tokens per hour alongside invocations
-- [ ] `max_tokens_per_hour` configurable in `RalphConfig`
-- [ ] pytest tests verify cost tracking, model selection, and token rate limiting
+- [x] SDK tracks per-iteration cost by model (input tokens, output tokens, USD)
+- [x] Cumulative session cost is queryable
+- [x] Budget alerts fire at configurable threshold (default 80%)
+- [x] Budget hard-stop prevents further iterations when exhausted
+- [x] Per-model pricing is configurable (defaults to March 2026 Claude pricing)
+- [x] Model selection considers task complexity band (TRIVIAL through ARCHITECTURAL)
+- [x] Retry escalation moves to more capable models on failure
+- [x] Rate limiter optionally tracks tokens per hour alongside invocations
+- [x] `max_tokens_per_hour` configurable in `RalphConfig`
+- [x] pytest tests verify cost tracking, model selection, and token rate limiting
 
 ## Out of Scope
 

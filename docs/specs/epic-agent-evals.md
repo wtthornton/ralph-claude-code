@@ -29,9 +29,9 @@ Ralph has 736+ BATS tests for bash code correctness. But there are no **agent-le
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [EVALS-1](story-evals-1-golden-files.md) | Golden-File Test Infrastructure | Medium | Medium | **Open** |
-| [EVALS-2](story-evals-2-deterministic-suite.md) | Deterministic Agent Eval Suite | Medium | Medium | **Open** |
-| [EVALS-3](story-evals-3-stochastic-suite.md) | Stochastic Eval Suite with Three-Valued Outcomes | Medium | Medium | **Open** |
+| [EVALS-1](story-evals-1-golden-files.md) | Golden-File Test Infrastructure | Medium | Medium | **Done** |
+| [EVALS-2](story-evals-2-deterministic-suite.md) | Deterministic Agent Eval Suite | Medium | Medium | **Done** |
+| [EVALS-3](story-evals-3-stochastic-suite.md) | Stochastic Eval Suite with Three-Valued Outcomes | Medium | Medium | **Done** |
 
 ## Implementation Order
 
@@ -41,12 +41,12 @@ Ralph has 736+ BATS tests for bash code correctness. But there are no **agent-le
 
 ## Acceptance Criteria (Epic-level)
 
-- [ ] Golden-file format defined for recording agent runs
-- [ ] Deterministic eval suite verifies tool sequences and exit conditions
-- [ ] Stochastic eval suite uses three-valued outcomes (Pass/Fail/Inconclusive)
-- [ ] Deterministic suite runs in pre-merge CI (<5 min)
-- [ ] Stochastic suite runs nightly with results dashboard
-- [ ] Eval results include confidence intervals and sample counts
+- [x] Golden-file format defined for recording agent runs
+- [x] Deterministic eval suite verifies tool sequences and exit conditions
+- [x] Stochastic eval suite uses three-valued outcomes (Pass/Fail/Inconclusive)
+- [x] Deterministic suite runs in pre-merge CI (<5 min)
+- [x] Stochastic suite runs nightly with results dashboard
+- [x] Eval results include confidence intervals and sample counts
 
 ## Rollback
 

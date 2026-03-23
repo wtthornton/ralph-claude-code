@@ -79,10 +79,10 @@ Reference: [Fast.io — AI Agent Production Logging 2026](https://fast.io/resour
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [OTEL-1](story-otel-1-trace-generation.md) | OTel Trace Generation with GenAI Semantic Conventions | High | Medium | **Open** |
-| [OTEL-2](story-otel-2-trace-propagation.md) | Trace ID Propagation Across Sub-Agents and Hooks | High | Small | **Open** |
-| [OTEL-3](story-otel-3-cost-attribution.md) | Per-Trace Cost Attribution and Budget Alerts | Medium | Small | **Open** |
-| [OTEL-4](story-otel-4-otlp-exporter.md) | OTLP Exporter for External Backends | Medium | Medium | **Open** |
+| [OTEL-1](story-otel-1-trace-generation.md) | OTel Trace Generation with GenAI Semantic Conventions | High | Medium | **Done** |
+| [OTEL-2](story-otel-2-trace-propagation.md) | Trace ID Propagation Across Sub-Agents and Hooks | High | Small | **Done** |
+| [OTEL-3](story-otel-3-cost-attribution.md) | Per-Trace Cost Attribution and Budget Alerts | Medium | Small | **Done** |
+| [OTEL-4](story-otel-4-otlp-exporter.md) | OTLP Exporter for External Backends | Medium | Medium | **Done** |
 
 ## Implementation Order
 

@@ -2,7 +2,9 @@
 
 This folder holds **specifications for the Ralph harness** (the bash loop, parsers, and Claude Code integration). It is **not** where application requirements live—those belong in **`.ralph/specs/`** inside each managed project.
 
-## Epics (status in tables inside each file)
+**Backlog rollup:** [EPIC-STORY-INDEX.md](EPIC-STORY-INDEX.md) is the canonical place for epic/story completion counts. When you close a phase, update that index and the **Stories** table in the matching epic file so they stay aligned.
+
+## Epics (per-file detail; see index for status rollup)
 
 | Document | Topic |
 |----------|--------|
@@ -21,4 +23,4 @@ Legacy long-form notes live in **[`old/`](old/)** (retained for history).
 
 ## Implementation
 
-Stories reference files such as `lib/response_analyzer.sh`, `ralph_loop.sh`, and `templates/`. When behavior changes, update the matching story/epic **Status** and keep [README.md](../../README.md), [CLAUDE.md](../../CLAUDE.md), and [docs/user-guide/](../user-guide/) in sync.
+Stories reference files such as `lib/response_analyzer.sh`, `ralph_loop.sh`, and `templates/`. When behavior changes, update the matching story/epic **Status**, refresh [EPIC-STORY-INDEX.md](EPIC-STORY-INDEX.md) if the phase completion changed, and keep [README.md](../../README.md), [CLAUDE.md](../../CLAUDE.md), and [docs/user-guide/](../user-guide/) in sync.

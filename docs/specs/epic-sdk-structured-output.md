@@ -48,15 +48,15 @@ Four output-related gaps between the CLI and SDK cause integration fragility and
 
 ## Acceptance Criteria (Epic-level)
 
-- [ ] `TaskResult.files_changed` is a `list[str]` populated from tool use records or git diff
-- [ ] File extraction does not rely on regex heuristics against freeform text
-- [ ] Errors are categorized as `PERMISSION_DENIED`, `TIMEOUT`, `PARSE_FAILURE`, `TOOL_UNAVAILABLE`, `SYSTEM_CRASH`, or `UNKNOWN`
-- [ ] Error category is returned alongside `RalphStatus`
-- [ ] `RalphAgent.get_progress()` returns a `ProgressSnapshot` with loop_count, work_type, current_task, elapsed_seconds, circuit_breaker_state
-- [ ] `MetricsCollector` protocol defines `record()` and `query()` methods
-- [ ] `JsonlMetricsCollector` writes monthly JSONL files (matches CLI format)
-- [ ] `NullMetricsCollector` is a no-op implementation for testing
-- [ ] pytest tests verify all output structures
+- [x] `TaskResult.files_changed` is a `list[str]` populated from tool use records or git diff
+- [x] File extraction does not rely on regex heuristics against freeform text
+- [x] Errors are categorized as `PERMISSION_DENIED`, `TIMEOUT`, `PARSE_FAILURE`, `TOOL_UNAVAILABLE`, `SYSTEM_CRASH`, or `UNKNOWN`
+- [x] Error category is returned alongside `RalphStatus`
+- [x] `RalphAgent.get_progress()` returns a `ProgressSnapshot` with loop_count, work_type, current_task, elapsed_seconds, circuit_breaker_state
+- [x] `MetricsCollector` protocol defines `record()` and `query()` methods
+- [x] `JsonlMetricsCollector` writes monthly JSONL files (matches CLI format)
+- [x] `NullMetricsCollector` is a no-op implementation for testing
+- [x] pytest tests verify all output structures
 
 ## Out of Scope
 

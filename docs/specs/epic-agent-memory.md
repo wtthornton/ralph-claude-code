@@ -40,9 +40,9 @@ Ralph currently has only working memory. Adding episodic and semantic memory wou
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| [AGENTMEM-1](story-agentmem-1-episodic-memory.md) | Episodic Memory Store | Medium | Medium | **Open** |
-| [AGENTMEM-2](story-agentmem-2-semantic-memory.md) | Codebase Pattern Memory (Semantic) | Medium | Medium | **Open** |
-| [AGENTMEM-3](story-agentmem-3-memory-decay.md) | Memory Decay and Relevance Scoring | Medium | Small | **Open** |
+| [AGENTMEM-1](story-agentmem-1-episodic-memory.md) | Episodic Memory Store | Medium | Medium | **Done** |
+| [AGENTMEM-2](story-agentmem-2-semantic-memory.md) | Codebase Pattern Memory (Semantic) | Medium | Medium | **Done** |
+| [AGENTMEM-3](story-agentmem-3-memory-decay.md) | Memory Decay and Relevance Scoring | Medium | Small | **Done** |
 
 ## Implementation Order
 
@@ -52,13 +52,13 @@ Ralph currently has only working memory. Adding episodic and semantic memory wou
 
 ## Acceptance Criteria (Epic-level)
 
-- [ ] Past session outcomes persisted to `.ralph/memory/`
-- [ ] Failed approaches recorded with enough context to avoid repetition
-- [ ] Project facts indexed and available to the agent without re-exploration
-- [ ] Memory injected into agent context at session start
-- [ ] Old/irrelevant memories decay over time
-- [ ] Memory does not exceed configurable size limit
-- [ ] Memory is project-scoped (not shared across projects)
+- [x] Past session outcomes persisted to `.ralph/memory/`
+- [x] Failed approaches recorded with enough context to avoid repetition
+- [x] Project facts indexed and available to the agent without re-exploration
+- [x] Memory injected into agent context at session start
+- [x] Old/irrelevant memories decay over time
+- [x] Memory does not exceed configurable size limit
+- [x] Memory is project-scoped (not shared across projects)
 
 ## Rollback
 
