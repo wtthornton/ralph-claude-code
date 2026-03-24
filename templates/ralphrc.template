@@ -41,6 +41,13 @@ CLAUDE_OUTPUT_FORMAT="json"
 # Dangerous commands excluded by default: git clean, git rm, git reset (can delete .ralph/)
 # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
 # Granular git patterns (not Bash(git *)) limit destructive commands; Bash(git -C *) covers repo-root flags.
+#
+# AGENT MODE INTERACTION (Issue #154):
+# When RALPH_USE_AGENT=true (default since v1.8.4), agent mode uses a BLOCKLIST
+# (disallowedTools in .claude/agents/ralph.md) instead of this ALLOWLIST.
+# Customizing ALLOWED_TOOLS below will automatically disable agent mode and fall
+# back to legacy mode where --allowedTools is honored. To control permissions in
+# agent mode, edit disallowedTools in .claude/agents/ralph.md instead.
 ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *)"
 
 # =============================================================================
@@ -112,6 +119,14 @@ DRY_RUN=false
 # ADVANCED SETTINGS
 # =============================================================================
 
+# Model to use for Ralph loops (default: uses Claude Code's default)
+# Examples: claude-sonnet-4-6, claude-opus-4-6
+# CLAUDE_MODEL=""
+
+# Effort level for Ralph loops (default: uses agent definition or Claude default)
+# Options: low, medium, high
+# CLAUDE_EFFORT=""
+
 # Auto-update Claude CLI at startup (checks npm registry, attempts npm update -g)
 # Recommended: true for local workstations and home servers (keeps CLI current automatically)
 # Recommended: false for Docker containers (version is pinned at image build, container is ephemeral)
@@ -127,6 +142,9 @@ RALPH_VERBOSE=false
 # Agent mode (v1.0+): use --agent ralph instead of -p with --allowedTools
 # When true, uses .claude/agents/ralph.md agent definition (requires CLI v2.1+)
 # Falls back to legacy -p mode if CLI does not support --agent
+# NOTE (Issue #154): Agent mode is also auto-disabled when ALLOWED_TOOLS is
+# customized above, because agent mode uses a blocklist (disallowedTools) which
+# is incompatible with the allowlist approach. See TOOL PERMISSIONS section.
 RALPH_USE_AGENT=true
 RALPH_AGENT_NAME="ralph"
 

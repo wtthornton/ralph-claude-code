@@ -35,7 +35,6 @@ LOG_DIR="$RALPH_DIR/logs"
 DOCS_DIR="$RALPH_DIR/docs/generated"
 STATUS_FILE="$RALPH_DIR/status.json"
 PROGRESS_FILE="$RALPH_DIR/progress.json"
-CLAUDE_CODE_CMD="claude"
 SLEEP_DURATION=3600     # 1 hour in seconds
 LIVE_OUTPUT=false       # Show Claude Code output in real-time (streaming)
 LIVE_LOG_FILE="$RALPH_DIR/live.log"  # Fixed file for live output monitoring
@@ -55,6 +54,8 @@ _env_VERBOSE_PROGRESS="${VERBOSE_PROGRESS:-}"
 _env_CB_COOLDOWN_MINUTES="${CB_COOLDOWN_MINUTES:-}"
 _env_CB_AUTO_RESET="${CB_AUTO_RESET:-}"
 _env_CLAUDE_CODE_CMD="${CLAUDE_CODE_CMD:-}"
+_env_CLAUDE_MODEL="${CLAUDE_MODEL:-}"
+_env_CLAUDE_EFFORT="${CLAUDE_EFFORT:-}"
 _env_CLAUDE_AUTO_UPDATE="${CLAUDE_AUTO_UPDATE:-}"
 _env_DRY_RUN="${DRY_RUN:-}"
 _env_LOG_MAX_SIZE_MB="${LOG_MAX_SIZE_MB:-}"
@@ -62,6 +63,9 @@ _env_LOG_MAX_FILES="${LOG_MAX_FILES:-}"
 _env_LOG_MAX_OUTPUT_FILES="${LOG_MAX_OUTPUT_FILES:-}"
 
 # Now set defaults (only if not already set by environment)
+CLAUDE_CODE_CMD="${CLAUDE_CODE_CMD:-claude}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-}"
+CLAUDE_EFFORT="${CLAUDE_EFFORT:-}"
 MAX_CALLS_PER_HOUR="${MAX_CALLS_PER_HOUR:-100}"
 VERBOSE_PROGRESS="${VERBOSE_PROGRESS:-false}"
 CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-15}"
@@ -69,7 +73,9 @@ CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-15}"
 # Modern Claude CLI configuration (Phase 1.1)
 CLAUDE_OUTPUT_FORMAT="${CLAUDE_OUTPUT_FORMAT:-json}"
 # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
-CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *)}"
+# Issue #154: Store default so we can detect user customization (needed for agent mode fallback)
+RALPH_DEFAULT_ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *)"
+CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-$RALPH_DEFAULT_ALLOWED_TOOLS}"
 CLAUDE_USE_CONTINUE="${CLAUDE_USE_CONTINUE:-true}"
 CLAUDE_SESSION_FILE="$RALPH_DIR/.claude_session_id" # Session ID persistence file
 CLAUDE_MIN_VERSION="2.0.76"              # Minimum required Claude CLI version
@@ -165,6 +171,8 @@ JSON_CONFIG_LOADED=false
 #   - CB_OUTPUT_DECLINE_THRESHOLD
 #   - RALPH_VERBOSE
 #   - CLAUDE_CODE_CMD (path or command for Claude Code CLI)
+#   - CLAUDE_MODEL (model override for Claude CLI)
+#   - CLAUDE_EFFORT (effort level: low, medium, high)
 #   - CLAUDE_AUTO_UPDATE (auto-update Claude CLI at startup)
 #
 load_ralphrc() {
@@ -203,6 +211,8 @@ load_ralphrc() {
     [[ -n "$_env_CB_COOLDOWN_MINUTES" ]] && CB_COOLDOWN_MINUTES="$_env_CB_COOLDOWN_MINUTES"
     [[ -n "$_env_CB_AUTO_RESET" ]] && CB_AUTO_RESET="$_env_CB_AUTO_RESET"
     [[ -n "$_env_CLAUDE_CODE_CMD" ]] && CLAUDE_CODE_CMD="$_env_CLAUDE_CODE_CMD"
+    [[ -n "$_env_CLAUDE_MODEL" ]] && CLAUDE_MODEL="$_env_CLAUDE_MODEL"
+    [[ -n "$_env_CLAUDE_EFFORT" ]] && CLAUDE_EFFORT="$_env_CLAUDE_EFFORT"
     [[ -n "$_env_CLAUDE_AUTO_UPDATE" ]] && CLAUDE_AUTO_UPDATE="$_env_CLAUDE_AUTO_UPDATE"
     [[ -n "$_env_DRY_RUN" ]] && DRY_RUN="$_env_DRY_RUN"
     [[ -n "$_env_LOG_MAX_SIZE_MB" ]] && LOG_MAX_SIZE_MB="$_env_LOG_MAX_SIZE_MB"
@@ -320,6 +330,8 @@ load_json_config() {
     [[ -n "$_env_CB_COOLDOWN_MINUTES" ]] && CB_COOLDOWN_MINUTES="$_env_CB_COOLDOWN_MINUTES"
     [[ -n "$_env_CB_AUTO_RESET" ]] && CB_AUTO_RESET="$_env_CB_AUTO_RESET"
     [[ -n "$_env_CLAUDE_CODE_CMD" ]] && CLAUDE_CODE_CMD="$_env_CLAUDE_CODE_CMD"
+    [[ -n "$_env_CLAUDE_MODEL" ]] && CLAUDE_MODEL="$_env_CLAUDE_MODEL"
+    [[ -n "$_env_CLAUDE_EFFORT" ]] && CLAUDE_EFFORT="$_env_CLAUDE_EFFORT"
     [[ -n "$_env_CLAUDE_AUTO_UPDATE" ]] && CLAUDE_AUTO_UPDATE="$_env_CLAUDE_AUTO_UPDATE"
     [[ -n "$_env_DRY_RUN" ]] && DRY_RUN="$_env_DRY_RUN"
     [[ -n "$_env_LOG_MAX_SIZE_MB" ]] && LOG_MAX_SIZE_MB="$_env_LOG_MAX_SIZE_MB"
@@ -545,9 +557,8 @@ setup_tmux_session() {
     if [[ "$CLAUDE_TIMEOUT_MINUTES" != "15" ]]; then
         ralph_cmd="$ralph_cmd --timeout $CLAUDE_TIMEOUT_MINUTES"
     fi
-    # Forward --allowed-tools if non-default
-    # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
-    if [[ "$CLAUDE_ALLOWED_TOOLS" != "Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)" ]]; then
+    # Forward --allowed-tools if non-default (Issue #154: use constant instead of hardcoded string)
+    if [[ "$CLAUDE_ALLOWED_TOOLS" != "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
         ralph_cmd="$ralph_cmd --allowed-tools '$CLAUDE_ALLOWED_TOOLS'"
     fi
     # Forward --no-continue if session continuity disabled
@@ -712,7 +723,12 @@ ralph_log_permission_denials_from_raw_output() {
 
     log_status "WARN" "Permission denied for $_denial_count command(s): $_denied_cmds"
     if [[ "$_has_bash_denials" == "true" ]]; then
-        log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required bash tools"
+        # Issue #154: Guide user to the right config depending on mode
+        if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support && [[ "$CLAUDE_ALLOWED_TOOLS" == "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
+            log_status "WARN" "Agent mode active — edit disallowedTools in .claude/agents/ralph.md (or customize ALLOWED_TOOLS in .ralphrc to auto-switch to legacy mode)"
+        else
+            log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required bash tools"
+        fi
     fi
     if [[ "$_has_builtin_denials" == "true" ]]; then
         log_status "INFO" "Built-in tool denials (Glob/Grep/Read) are filesystem scope restrictions, not ALLOWED_TOOLS issues"
@@ -1113,7 +1129,12 @@ should_exit_gracefully() {
         perm_denials=$(jq -r '.consecutive_permission_denials // 0' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "0")
         if [[ "$perm_denials" -ge "${CB_PERMISSION_DENIAL_THRESHOLD:-2}" ]]; then
             log_status "WARN" "🚫 Permission denied in $perm_denials consecutive loops"
-            log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required tools"
+            # Issue #154: Guide user to the right config depending on mode
+            if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support && [[ "$CLAUDE_ALLOWED_TOOLS" == "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
+                log_status "WARN" "Agent mode active — edit disallowedTools in .claude/agents/ralph.md (or customize ALLOWED_TOOLS in .ralphrc to auto-switch to legacy mode)"
+            else
+                log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required tools"
+            fi
             echo "permission_denied"
             return 0
         fi
@@ -1534,7 +1555,15 @@ dry_run_simulate() {
     log_status "INFO" "[DRY-RUN]   Output format: $CLAUDE_OUTPUT_FORMAT"
     log_status "INFO" "[DRY-RUN]   Timeout: ${CLAUDE_TIMEOUT_MINUTES}m"
     log_status "INFO" "[DRY-RUN]   Session continuity: $CLAUDE_USE_CONTINUE"
-    log_status "INFO" "[DRY-RUN]   Allowed tools: $(echo "$CLAUDE_ALLOWED_TOOLS" | tr ',' '\n' | wc -l | tr -d ' ') tools"
+    # Issue #154: Show whether agent mode or legacy mode (with --allowedTools) will be used
+    if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support && [[ "$CLAUDE_ALLOWED_TOOLS" == "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
+        log_status "INFO" "[DRY-RUN]   Mode: agent (--agent ${RALPH_AGENT_NAME:-ralph}) — permissions via .claude/agents/ralph.md"
+    else
+        log_status "INFO" "[DRY-RUN]   Mode: legacy (--allowedTools) — $(echo "$CLAUDE_ALLOWED_TOOLS" | tr ',' '\n' | wc -l | tr -d ' ') tools"
+        if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && [[ "$CLAUDE_ALLOWED_TOOLS" != "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
+            log_status "INFO" "[DRY-RUN]   Note: Agent mode auto-disabled due to custom ALLOWED_TOOLS (Issue #154)"
+        fi
+    fi
 
     if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local task_count
@@ -2167,8 +2196,22 @@ build_claude_command() {
     # Reset global array
     CLAUDE_CMD_ARGS=("$CLAUDE_CODE_CMD")
 
+    # Add model and effort flags (apply to both agent and legacy modes)
+    [[ -n "$CLAUDE_MODEL" ]] && CLAUDE_CMD_ARGS+=("--model" "$CLAUDE_MODEL")
+    [[ -n "$CLAUDE_EFFORT" ]] && CLAUDE_CMD_ARGS+=("--effort" "$CLAUDE_EFFORT")
+
+    # Issue #154: Detect if user has customized ALLOWED_TOOLS beyond the template default.
+    # Agent mode uses permissionMode: bypassPermissions + disallowedTools (blocklist),
+    # which is architecturally incompatible with --allowedTools (allowlist).
+    # If the user customized ALLOWED_TOOLS, fall back to legacy mode where --allowedTools works.
+    local _allowed_tools_customized=false
+    if [[ "$CLAUDE_ALLOWED_TOOLS" != "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
+        _allowed_tools_customized=true
+    fi
+
     # Agent mode (HOOKS-6): use --agent ralph when supported
-    if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support; then
+    # Issue #154: Skip agent mode if user has customized ALLOWED_TOOLS
+    if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support && [[ "$_allowed_tools_customized" == "false" ]]; then
         CLAUDE_CMD_ARGS+=("--agent" "${RALPH_AGENT_NAME:-ralph}")
 
         # Add output format flag
@@ -2189,9 +2232,20 @@ build_claude_command() {
         return 0
     fi
 
-    # Legacy mode (v0.11.x compatible) — fallback when agent mode unavailable
+    # Legacy mode (v0.11.x compatible) — fallback when agent mode unavailable or ALLOWED_TOOLS customized
     if [[ "${RALPH_USE_AGENT:-false}" == "true" ]]; then
-        log_status "WARN" "Agent mode requested but CLI does not support --agent. Falling back to legacy mode."
+        if [[ "$_allowed_tools_customized" == "true" ]]; then
+            # Issue #154: Agent mode uses disallowedTools blocklist in the agent definition,
+            # which is incompatible with the ALLOWED_TOOLS allowlist from .ralphrc.
+            # Fall back to legacy mode where --allowedTools is honored.
+            log_status "WARN" "Custom ALLOWED_TOOLS detected — falling back to legacy mode (Issue #154)"
+            log_status "WARN" "Agent mode uses disallowedTools (blocklist) in .claude/agents/ralph.md,"
+            log_status "WARN" "which cannot enforce ALLOWED_TOOLS (allowlist) from .ralphrc."
+            log_status "WARN" "To use agent mode, remove custom ALLOWED_TOOLS and edit disallowedTools"
+            log_status "WARN" "in .claude/agents/ralph.md instead. Set RALPH_USE_AGENT=false to silence."
+        elif ! check_agent_support; then
+            log_status "WARN" "Agent mode requested but CLI does not support --agent. Falling back to legacy mode."
+        fi
     fi
 
     # Check if prompt file exists
@@ -3730,14 +3784,27 @@ main() {
                 echo -e "${YELLOW}Claude Code was denied permission to execute commands.${NC}"
                 echo ""
                 echo -e "${YELLOW}To fix this:${NC}"
-                echo "  1. Edit .ralphrc and update ALLOWED_TOOLS to include the required tools"
-                echo "  2. Common patterns:"
-                echo "     - Bash(npm *)     - All npm commands"
-                echo "     - Bash(npm install) - Only npm install"
-                echo "     - Bash(pnpm *)    - All pnpm commands"
-                echo "     - Bash(yarn *)    - All yarn commands"
+                # Issue #154: Different guidance for agent mode vs legacy mode
+                if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support && [[ "$CLAUDE_ALLOWED_TOOLS" == "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
+                    echo "  Agent mode is active. Permissions are controlled by the agent definition."
+                    echo "  1. Edit .claude/agents/ralph.md and adjust 'disallowedTools' (blocklist)"
+                    echo "  2. The agent uses permissionMode: bypassPermissions with a blocklist."
+                    echo "     Add specific Bash(...) patterns to disallowedTools to block commands,"
+                    echo "     or remove patterns to allow them."
+                    echo ""
+                    echo "  Alternatively, to use ALLOWED_TOOLS (allowlist) from .ralphrc instead:"
+                    echo "  1. Set RALPH_USE_AGENT=false in .ralphrc to use legacy mode"
+                    echo "  2. Or customize ALLOWED_TOOLS in .ralphrc (auto-disables agent mode)"
+                else
+                    echo "  1. Edit .ralphrc and update ALLOWED_TOOLS to include the required tools"
+                    echo "  2. Common patterns:"
+                    echo "     - Bash(npm *)     - All npm commands"
+                    echo "     - Bash(npm install) - Only npm install"
+                    echo "     - Bash(pnpm *)    - All pnpm commands"
+                    echo "     - Bash(yarn *)    - All yarn commands"
+                fi
                 echo ""
-                echo -e "${YELLOW}After updating .ralphrc:${NC}"
+                echo -e "${YELLOW}After updating:${NC}"
                 echo "  ralph --reset-session  # Clear stale session state"
                 echo "  ralph --monitor        # Restart the loop"
                 echo ""
