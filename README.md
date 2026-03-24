@@ -8,8 +8,8 @@
 <p align="center">
   <a href="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml"><img src="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/version-2.3.2-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-736%20passing-green" alt="Tests">
+  <img src="https://img.shields.io/badge/version-2.4.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-849%20passing-green" alt="Tests">
   <a href="https://github.com/frankbria/ralph-claude-code/issues"><img src="https://img.shields.io/github/issues/frankbria/ralph-claude-code" alt="GitHub Issues"></a>
   <a href="https://github.com/hesreallyhim/awesome-claude-code"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome Claude Code"></a>
   <a href="https://x.com/FrankBria18044"><img src="https://img.shields.io/twitter/follow/FrankBria18044?style=social" alt="Follow on X"></a>
@@ -29,12 +29,27 @@ Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named
 
 **Install once, use everywhere** — Ralph becomes a global command available in any directory.
 
-## What's New in v2.3.2
+## What's New in v2.4.0
+
+- **Plan optimization** — Automatic fix_plan.md task reordering at session start. AST-based import graph (Python/JS/TS) detects real file dependencies, Unix `tsort` for topological ordering, module grouping, phase ordering (create→implement→test→document), size clustering for better batching. Research-backed design from SWE-Agent, Agentless, Reflexion, and Nx/Turborepo patterns.
+- **ralph-explorer task resolution** — Vague tasks without file paths (e.g., "Fix the auth flow") are automatically resolved to specific files via ralph-explorer (Haiku), cached as `<!-- resolved: path -->` annotations
+- **Batch hints** — Session start context now includes batch boundary annotations (e.g., `[BATCH-3: SMALL]`) so Claude skips size re-analysis
+- **Progress re-grounding** — Session context includes last completed task (Reflexion pattern) to reduce re-discovery tokens
+- **`/optimize` skill** — Manual plan optimization via slash command
+- **CLAUDE_MODEL / CLAUDE_EFFORT config** — New `.ralphrc` variables to control model and effort level per project
+- **Bug fix: CLAUDE_CODE_CMD** — `.ralphrc` value now correctly respected (was silently overwritten) (#228)
+- **Bug fix: ALLOWED_TOOLS in agent mode** — Custom ALLOWED_TOOLS auto-falls back to legacy mode with clear warnings (#154)
+- **48 new tests** — Import graph (12), plan optimizer (12), session start integration (24)
+
+<details>
+<summary><strong>v2.3.2</strong></summary>
 
 - **jq bootstrap** — Installer auto-downloads official jq static binary to `~/.local/bin` when jq is missing (Linux/macOS)
 - **ralph-doctor** — Prepends `~/.local/bin` to PATH so bundled jq is detected correctly
 - **RELEASE.md** — Release checklist for version bumps, docs, tests, and deploy
 - **WSL/CRLF** — README notes for `bash install.sh` and line-ending handling on Windows checkouts
+
+</details>
 
 <details>
 <summary><strong>v2.3.1</strong></summary>
