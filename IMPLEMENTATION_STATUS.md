@@ -1,8 +1,8 @@
 # Implementation Status Summary
 
 **Last Updated**: 2026-03-23
-**Version**: v2.3.0
-**Overall Status**: 148/148 stories complete across 40 epics (Phases 0-17). SDK v2.1.0 + bash v2.3.0. All phases complete. Phase 14 done (CTXMGMT-3, SANDBOXV2, EVALS complete). Phase 15 ENABLE epic 7/7 done. Phase 17 SDK enhancements 16/16 done (SAFETY, CONTEXT, COST, OUTPUT, LIFECYCLE).
+**Version**: v2.3.2
+**Overall Status**: 148/148 stories complete across 40 epics (Phases 0-17). SDK v2.0.3 + bash v2.3.2. All phases complete. Phase 14 done (CTXMGMT-3, SANDBOXV2, EVALS complete). Phase 15 ENABLE epic 7/7 done. Phase 17 SDK enhancements 16/16 done (SAFETY, CONTEXT, COST, OUTPUT, LIFECYCLE).
 
 > **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count.
 

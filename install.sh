@@ -1,6 +1,9 @@
 #!/bin/bash
 
 # Ralph for Claude Code - Global Installation Script
+#
+# Windows/WSL: If ./install.sh fails with "invalid option" or "$'\r': command not found",
+# run: bash install.sh   (or normalize CRLF: sed -i 's/\r$//' install.sh in WSL)
 set -e
 
 # Configuration
@@ -30,6 +33,69 @@ log() {
     echo -e "${color}[$(date '+%H:%M:%S')] [$level] $message${NC}"
 }
 
+# Ensure jq is on PATH: use system jq, ~/.local/bin/jq, or download official static binary (Linux/macOS).
+# Set RALPH_SKIP_JQ_BOOTSTRAP=1 to disable download (fail if jq missing).
+ensure_jq() {
+    mkdir -p "$INSTALL_DIR"
+
+    if command -v jq &>/dev/null; then
+        return 0
+    fi
+
+    if [[ -x "$INSTALL_DIR/jq" ]]; then
+        export PATH="$INSTALL_DIR:$PATH"
+        log "INFO" "Using jq from $INSTALL_DIR/jq"
+        return 0
+    fi
+
+    if [[ -n "${RALPH_SKIP_JQ_BOOTSTRAP:-}" ]]; then
+        return 1
+    fi
+
+    local url=""
+    local os arch
+    os=$(uname -s)
+    arch=$(uname -m)
+    case "${os}:${arch}" in
+        Linux:x86_64|Linux:amd64)
+            url="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64"
+            ;;
+        Linux:aarch64|Linux:arm64)
+            url="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-arm64"
+            ;;
+        Darwin:x86_64|Darwin:amd64)
+            url="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-amd64"
+            ;;
+        Darwin:arm64|Darwin:aarch64)
+            url="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-arm64"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
+        return 1
+    fi
+
+    log "INFO" "jq not found — downloading static binary to $INSTALL_DIR/jq ..."
+    local tmp="${TMPDIR:-/tmp}/ralph-jq-$$.bin"
+    if command -v curl &>/dev/null; then
+        curl -fsSL "$url" -o "$tmp" || { rm -f "$tmp"; return 1; }
+    else
+        wget -qO "$tmp" "$url" || { rm -f "$tmp"; return 1; }
+    fi
+    chmod +x "$tmp"
+    if ! "$tmp" --version &>/dev/null; then
+        rm -f "$tmp"
+        return 1
+    fi
+    mv "$tmp" "$INSTALL_DIR/jq"
+    export PATH="$INSTALL_DIR:$PATH"
+    log "SUCCESS" "jq installed at $INSTALL_DIR/jq (add $INSTALL_DIR to PATH if needed)"
+    return 0
+}
+
 # Check dependencies
 check_dependencies() {
     log "INFO" "Checking dependencies..."
@@ -42,8 +108,10 @@ check_dependencies() {
         missing_deps+=("Node.js/npm")
     fi
 
-    if ! command -v jq &> /dev/null; then
-        missing_deps+=("jq")
+    if ! ensure_jq; then
+        if ! command -v jq &>/dev/null; then
+            missing_deps+=("jq")
+        fi
     fi
 
     if ! command -v git &> /dev/null; then
@@ -69,6 +137,8 @@ check_dependencies() {
         echo "  Ubuntu/Debian: sudo apt-get install nodejs npm jq git coreutils"
         echo "  macOS: brew install node jq git coreutils"
         echo "  CentOS/RHEL: sudo yum install nodejs npm jq git coreutils"
+        echo ""
+        echo "  On Linux/macOS, re-run install without RALPH_SKIP_JQ_BOOTSTRAP to auto-download jq to ~/.local/bin."
         exit 1
     fi
 
@@ -137,8 +207,10 @@ install_scripts() {
     cp -r "$SCRIPT_DIR/templates/"* "$RALPH_HOME/templates/"
     shopt -u dotglob
 
-    # Copy lib scripts (response_analyzer.sh, circuit_breaker.sh)
-    cp -r "$SCRIPT_DIR/lib/"* "$RALPH_HOME/lib/"
+    # Copy lib scripts (strip CR for WSL/Windows CRLF source)
+    for f in "$SCRIPT_DIR"/lib/*.sh; do
+        [[ -f "$f" ]] && tr -d $'\r' < "$f" > "$RALPH_HOME/lib/$(basename "$f")"
+    done
     
     # Create the main ralph command
     cat > "$INSTALL_DIR/ralph" << 'EOF'
@@ -186,7 +258,7 @@ EOF
     cat > "$INSTALL_DIR/ralph-migrate" << 'EOF'
 #!/bin/bash
 # Ralph Migration - Global Command
-# Migrates existing projects from flat structure to .ralph/ subfolder
+# Migrates existing projects from flat structure to .ralph/ subfolde
 
 RALPH_HOME="$HOME/.ralph"
 
@@ -215,18 +287,12 @@ RALPH_HOME="$HOME/.ralph"
 exec "$RALPH_HOME/ralph_enable_ci.sh" "$@"
 EOF
 
-    # Copy actual script files to Ralph home with modifications for global operation
-    cp "$SCRIPT_DIR/ralph_monitor.sh" "$RALPH_HOME/"
+    # Copy actual script files to Ralph home (strip CR for CRLF source)
+    for script in ralph_monitor ralph_import migrate_to_ralph_folder ralph_enable ralph_enable_ci; do
+        tr -d $'\r' < "$SCRIPT_DIR/${script}.sh" > "$RALPH_HOME/${script}.sh"
+    done
 
-    # Copy PRD import script to Ralph home
-    cp "$SCRIPT_DIR/ralph_import.sh" "$RALPH_HOME/"
-
-    # Copy migration script to Ralph home
-    cp "$SCRIPT_DIR/migrate_to_ralph_folder.sh" "$RALPH_HOME/"
-
-    # Copy enable scripts to Ralph home
-    cp "$SCRIPT_DIR/ralph_enable.sh" "$RALPH_HOME/"
-    cp "$SCRIPT_DIR/ralph_enable_ci.sh" "$RALPH_HOME/"
+    # Copy setup.sh (handled in install_setup)
 
     # Make all commands executable
     chmod +x "$INSTALL_DIR/ralph"
@@ -250,12 +316,12 @@ EOF
 install_ralph_loop() {
     log "INFO" "Installing global ralph_loop.sh..."
     
-    # Create modified ralph_loop.sh for global operation
+    # Create modified ralph_loop.sh for global operation (strip CR for WSL/Windows CRLF source)
     sed \
         -e "s|RALPH_HOME=\"\$HOME/.ralph\"|RALPH_HOME=\"\$HOME/.ralph\"|g" \
         -e "s|\$script_dir/ralph_monitor.sh|\$RALPH_HOME/ralph_monitor.sh|g" \
         -e "s|\$script_dir/ralph_loop.sh|\$RALPH_HOME/ralph_loop.sh|g" \
-        "$SCRIPT_DIR/ralph_loop.sh" > "$RALPH_HOME/ralph_loop.sh"
+        "$SCRIPT_DIR/ralph_loop.sh" | tr -d $'\r' > "$RALPH_HOME/ralph_loop.sh"
     
     chmod +x "$RALPH_HOME/ralph_loop.sh"
     
@@ -266,9 +332,9 @@ install_ralph_loop() {
 install_setup() {
     log "INFO" "Installing global setup script..."
 
-    # Copy the actual setup.sh from ralph-claude-code root directory so setup information will be consistent
+    # Copy the actual setup.sh from ralph-claude-code root directory (strip CR for CRLF source)
     if [[ -f "$SCRIPT_DIR/setup.sh" ]]; then
-        cp "$SCRIPT_DIR/setup.sh" "$RALPH_HOME/setup.sh"
+        tr -d $'\r' < "$SCRIPT_DIR/setup.sh" > "$RALPH_HOME/setup.sh"
         chmod +x "$RALPH_HOME/setup.sh"
         log "SUCCESS" "Global setup script installed (copied from $SCRIPT_DIR/setup.sh)"
     else
@@ -360,6 +426,8 @@ SDKEOF
     cat > "$INSTALL_DIR/ralph-doctor" << 'DOCTOREOF'
 #!/bin/bash
 # Ralph Doctor - Verify all dependencies
+# Match install layout: jq may live in ~/.local/bin without a login shell PATH
+export PATH="${HOME}/.local/bin:${PATH}"
 echo "Ralph Doctor — Dependency Check"
 echo "================================"
 echo ""

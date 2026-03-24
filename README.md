@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml"><img src="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/version-1.9.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.3.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-736%20passing-green" alt="Tests">
   <a href="https://github.com/frankbria/ralph-claude-code/issues"><img src="https://img.shields.io/github/issues/frankbria/ralph-claude-code" alt="GitHub Issues"></a>
   <a href="https://github.com/hesreallyhim/awesome-claude-code"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome Claude Code"></a>
@@ -29,7 +29,22 @@ Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named
 
 **Install once, use everywhere** — Ralph becomes a global command available in any directory.
 
-## What's New in v1.9.0
+## What's New in v2.3.2
+
+- **jq bootstrap** — Installer auto-downloads official jq static binary to `~/.local/bin` when jq is missing (Linux/macOS)
+- **ralph-doctor** — Prepends `~/.local/bin` to PATH so bundled jq is detected correctly
+- **RELEASE.md** — Release checklist for version bumps, docs, tests, and deploy
+- **WSL/CRLF** — README notes for `bash install.sh` and line-ending handling on Windows checkouts
+
+<details>
+<summary><strong>v2.3.1</strong></summary>
+
+- Version bump — Ralph v2.3.1, SDK v2.0.3
+
+</details>
+
+<details>
+<summary><strong>v1.9.0</strong></summary>
 
 - **Cost-aware agent routing** — Main ralph agent runs on Sonnet for speed; complex/architectural tasks delegate to ralph-architect (Opus) with mandatory code review
 - **Task batching** — Up to 8 small / 5 medium tasks per invocation with epic-boundary QA deferral
@@ -38,6 +53,8 @@ Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named
 - **Live stream text filtering** — Stream metadata, raw JSON dumps, and UUID patterns suppressed; text collapsed and truncated for readability
 - **Circuit breaker decay** — Sliding window and session reinitialization support
 - **Cross-platform compatibility** — Hook environment detection, version divergence fixes, Python3 WSL alias handling
+
+</details>
 
 <details>
 <summary><strong>Previous releases</strong></summary>
@@ -91,9 +108,14 @@ INSTALL ONCE              USE EVERYWHERE
 git clone https://github.com/frankbria/ralph-claude-code.git
 cd ralph-claude-code
 ./install.sh
+# If ./install.sh fails with CRLF errors on WSL, use: bash install.sh
 ```
 
 This adds `ralph`, `ralph-monitor`, `ralph-setup`, `ralph-import`, `ralph-migrate`, `ralph-enable`, and `ralph-enable-ci` to your PATH.
+
+**Dependencies:** Node.js, `git`, `jq`, GNU coreutils (`timeout`). **`jq`:** If `jq` is not installed, the installer can download an official static binary into `~/.local/bin/jq` on Linux and macOS (requires `curl` or `wget`). To skip that and require a system package instead, set `RALPH_SKIP_JQ_BOOTSTRAP=1` before running `install.sh`.
+
+**WSL / Windows checkouts:** Run install from WSL. Put `~/.local/bin` on your `PATH` so `ralph` and bundled `jq` are found. Repo shell scripts use LF line endings (see `.gitattributes`); if you still see `$'\r'` errors, run `sed -i 's/\r$//' install.sh` in WSL or use `git config core.autocrlf input` and re-checkout.
 
 ### 2. Set up a project
 
