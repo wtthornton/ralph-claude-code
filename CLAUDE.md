@@ -59,6 +59,8 @@ bats tests/unit/test_cli_parsing.bats
 | `tracing.sh` | OpenTelemetry traces — GenAI Semantic Conventions, JSONL OTLP format, secret sanitization (Phase 14) |
 | `complexity.sh` | Task complexity classifier — 5-level (TRIVIAL→ARCHITECTURAL), dynamic model routing (Phase 14) |
 | `memory.sh` | Cross-session memory — episodic (what worked/failed), semantic (project index), decay/pruning (Phase 14) |
+| `import_graph.sh` | AST-based file dependency graph — Python `ast`, JS/TS `madge`/grep fallback. Cached in `.ralph/.import_graph.json` with mtime staleness detection. Async background rebuild, incremental invalidation via hooks. (PLANOPT epic) |
+| `plan_optimizer.sh` | Fix plan task reordering — parses fix_plan.md, resolves vague tasks via ralph-explorer (Haiku), detects dependencies via import graph + explicit metadata + phase convention, orders via Unix `tsort`, validates semantic equivalence before atomic write. Runs at session start for changed sections only. (PLANOPT epic) |
 | ~~`response_analyzer.sh`~~ | Removed — response analysis handled by `on-stop.sh` hook → `status.json` |
 | ~~`file_protection.sh`~~ | Removed — file protection handled by PreToolUse hooks |
 
@@ -158,6 +160,9 @@ Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 - `LOG_MAX_FILES` — Number of rotated log files to keep (default: 5)
 - `LOG_MAX_OUTPUT_FILES` — Max claude_output_*.log files to keep (default: 20)
 - `DRY_RUN` — Preview loop execution without API calls (also `--dry-run` flag)
+- `RALPH_NO_OPTIMIZE` — Disable automatic fix_plan.md reordering on session start
+- `RALPH_NO_EXPLORER_RESOLVE` — Disable ralph-explorer file resolution for vague tasks
+- `RALPH_MAX_EXPLORER_RESOLVE` — Max vague tasks to resolve per optimization run (default: 5)
 
 Environment variables override `.ralphrc` settings.
 

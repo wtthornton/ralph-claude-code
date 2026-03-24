@@ -184,6 +184,22 @@ Assign:
 If tasks have dependencies (shared files, import chains), run them sequentially
 as in normal mode. Team mode is an optimization, not a requirement.
 
+## Plan Optimization Awareness
+
+Your fix_plan.md task ordering has been optimized at session start. The ordering is
+intentional — tasks are grouped by module and ordered by dependency. Trust the ordering:
+
+- **Always pick the FIRST unchecked task.** The optimizer has already placed the most
+  important/foundational task first.
+- **Batch hints** may appear in the session context (e.g., `[BATCH-3: SMALL]`). Use
+  these to determine how many tasks to batch without re-analyzing sizes yourself.
+- **When you discover a new dependency** during implementation (e.g., "task X actually
+  needs Y to be done first"), add explicit metadata to fix_plan.md:
+  `<!-- depends: dependency-id -->` and `<!-- id: this-task-id -->`. The optimizer will
+  use these on the next loop.
+- **`<!-- resolved: path -->` annotations** are file-path resolutions from ralph-explorer.
+  Trust these — don't re-search for the same files.
+
 ## Environment Notes
 
 - **Python**: Use `python3` (not `python`) — WSL/Ubuntu only provides `python3` by default

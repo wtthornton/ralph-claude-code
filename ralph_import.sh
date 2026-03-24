@@ -383,6 +383,28 @@ Convert requirements into a prioritized task list:
 [Any important context from the original PRD]
 ```
 
+### Task Ordering Rules (CRITICAL for execution efficiency)
+
+Within each priority section, order tasks for optimal autonomous AI execution:
+
+1. **Dependencies first** — If task B requires output from task A, list A before B.
+   "Create schema" must come before "Add endpoint using schema".
+
+2. **Group by module** — Tasks touching the same files or directories should be
+   adjacent. This minimizes context switching between loops.
+   Example: all \`src/api/\` tasks together, all \`src/db/\` tasks together.
+
+3. **Phase ordering within groups** — Within each module group, follow this order:
+   setup/create/define → implement/add → modify/refactor → test → document
+
+4. **Cluster by size** — Group small tasks (renames, config changes, typo fixes)
+   together so they can be batched in a single loop. Keep large tasks (new features,
+   cross-module refactors) isolated.
+
+5. **Explicit dependencies** — When a dependency isn't obvious from the task text,
+   add a metadata comment: \`<!-- depends: task-id -->\` with a corresponding
+   \`<!-- id: task-id -->\` on the prerequisite task.
+
 ### 3. .ralph/specs/requirements.md
 Create detailed technical specifications:
 ```markdown
@@ -616,6 +638,30 @@ main() {
     # Run conversion using local copy (basename, not original path)
     convert_prd "$source_basename" "$project_name"
     
+    # PLANOPT-4: Post-import plan optimization
+    _optimizer_ran=false
+    for _lib_dir in "$HOME/.ralph/lib" "${RALPH_INSTALL_DIR:-/nonexistent}/lib"; do
+        if [[ -f "$_lib_dir/plan_optimizer.sh" ]]; then
+            source "$_lib_dir/plan_optimizer.sh"
+
+            # Build import graph if available
+            if [[ -f "$_lib_dir/import_graph.sh" ]]; then
+                source "$_lib_dir/import_graph.sh"
+                import_graph_ensure "." ".ralph/.import_graph.json" 2>/dev/null || true
+            fi
+
+            if plan_optimize_section ".ralph/fix_plan.md" "." ".ralph/.import_graph.json" 2>/dev/null; then
+                echo "  Fix plan optimized for execution efficiency"
+                _optimizer_ran=true
+            fi
+            break
+        fi
+    done
+
+    if [[ "$_optimizer_ran" != "true" ]]; then
+        echo "  (Plan optimizer not installed — using prompt-based ordering only)"
+    fi
+
     log "SUCCESS" "🎉 PRD imported successfully!"
     echo ""
     echo "Next steps:"

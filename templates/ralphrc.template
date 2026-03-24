@@ -160,6 +160,22 @@ RALPH_BG_TESTING=false
 RALPH_TEAMMATE_MODE="tmux"
 
 # =============================================================================
+# PLAN OPTIMIZATION (PLANOPT epic)
+# =============================================================================
+
+# Disable automatic plan optimization on session start
+# When true, fix_plan.md is never reordered by the optimizer
+RALPH_NO_OPTIMIZE=false
+
+# Disable ralph-explorer resolution of vague tasks (tasks with no file paths)
+# When true, tasks without explicit file references are left as-is
+RALPH_NO_EXPLORER_RESOLVE=false
+
+# Maximum vague tasks to resolve per optimization run
+# Caps explorer calls to stay within the ContextManager visible window
+RALPH_MAX_EXPLORER_RESOLVE=5
+
+# =============================================================================
 # CONTEXT MANAGEMENT (Phase 14)
 # =============================================================================
 

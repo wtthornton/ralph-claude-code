@@ -88,6 +88,22 @@ fi
 # Use the higher of reported vs actual (defense-in-depth)
 files_modified=$((files_modified_reported > actual_files_modified ? files_modified_reported : actual_files_modified))
 
+# PLANOPT: Mark import graph stale if new source files were created this loop
+# This enables the optimizer to rebuild the graph on next session start
+if [[ -f "$RALPH_DIR/.files_modified_this_loop" && -f "$RALPH_DIR/.import_graph.json" ]]; then
+  while IFS= read -r _modified_file; do
+    [[ -z "$_modified_file" ]] && continue
+    # Only check source files (not config, docs, etc.)
+    if echo "$_modified_file" | grep -qE '\.(py|ts|tsx|js|jsx|sh)$'; then
+      # If this file didn't exist at HEAD, it's newly created → graph is stale
+      if ! git show HEAD:"$_modified_file" &>/dev/null 2>&1; then
+        touch "$RALPH_DIR/.import_graph.json.stale" 2>/dev/null || true
+        break  # One new file is enough to trigger rebuild
+      fi
+    fi
+  done < "$RALPH_DIR/.files_modified_this_loop"
+fi
+
 # PERF: Read loop count and write status.json in single operation (was: jq read + date + jq write = 3 subprocesses)
 loop_count=0
 if [[ -f "$RALPH_DIR/status.json" ]]; then

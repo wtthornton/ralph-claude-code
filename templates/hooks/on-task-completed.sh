@@ -17,5 +17,25 @@ task_description=$(echo "$INPUT" | jq -r '.task_description // "unknown"' 2>/dev
 echo "[$(date '+%H:%M:%S')] TASK COMPLETED: $task_description" \
   >> "$RALPH_DIR/live.log"
 
+# PLANOPT: Incremental import graph invalidation for modified source files
+# Source import_graph.sh from Ralph installation for invalidate_file function
+if [[ -f "$RALPH_DIR/.import_graph.json" && -f "$RALPH_DIR/.files_modified_this_loop" ]]; then
+  _ig_lib=""
+  for _lib_dir in "$HOME/.ralph/lib" "${RALPH_INSTALL_DIR:-/nonexistent}/lib"; do
+    [[ -f "$_lib_dir/import_graph.sh" ]] && _ig_lib="$_lib_dir/import_graph.sh" && break
+  done
+
+  if [[ -n "$_ig_lib" ]]; then
+    source "$_ig_lib"
+    while IFS= read -r _modified_file; do
+      [[ -z "$_modified_file" ]] && continue
+      # Only invalidate source files (not config, docs, etc.)
+      if echo "$_modified_file" | grep -qE '\.(py|ts|tsx|js|jsx|sh)$'; then
+        import_graph_invalidate_file "$_modified_file" "$RALPH_DIR/.import_graph.json" 2>/dev/null || true
+      fi
+    done < "$RALPH_DIR/.files_modified_this_loop"
+  fi
+fi
+
 # Allow completion
 exit 0

@@ -1,6 +1,6 @@
 # Ralph Claude Code — Epic & Story Index
 
-> **Generated:** 2026-03-21 | **Updated:** 2026-03-23 | **Total Epics:** 40 | **Total Stories:** 148 (148 Done, 0 Open)
+> **Generated:** 2026-03-21 | **Updated:** 2026-03-24 | **Total Epics:** 41 | **Total Stories:** 153 (153 Done, 0 Open)
 
 ---
 
@@ -112,6 +112,16 @@ Phase 17 (DONE — SDK v2.1.0 Enhancements)
 │ P1-P2        │   │ P1-P3        │
 │ Structured   │   │ Resilience   │
 └──────────────┘   └──────────────┘
+
+v2.4.0 — Plan Optimization
+Phase 18 (NEW)
+┌──────────────┐
+│RALPH-PLANOPT │
+│ 5 stories    │
+│ High         │
+│ Task Ordering│
+│ tsort+AST    │
+└──────────────┘
 ```
 
 ---
@@ -682,6 +692,28 @@ Phase 17 (DONE — SDK v2.1.0)
 | 1 | [SDK-LIFECYCLE-1](story-sdk-lifecycle-1-cancel-semantics.md) | Cancel Semantics Documentation and Hardening | P1 | 0.5 day | **Done** |
 | 2 | [SDK-LIFECYCLE-2](story-sdk-lifecycle-2-adaptive-timeout.md) | Adaptive Timeout | P3 | 1 day | **Done** |
 | 3 | [SDK-LIFECYCLE-3](story-sdk-lifecycle-3-permission-denial.md) | Permission Denial Detection | P3 | 1 day | **Done** |
+
+---
+
+## Phase 18 — v2.4.0 (Plan Optimization)
+
+**Source:** Deep spec review with research-backed redesign. Grounded in SWE-Agent, Agentless, Reflexion, "Lost in the Middle" research + Nx/Turborepo/Bazel build system patterns. Validated via tapps_checklist and docs_check_cross_refs.
+
+### RALPH-PLANOPT: Fix Plan Optimization on Startup
+**Priority:** High | **Status:** Implemented | **Target:** v2.4.0 | **Dependencies:** None
+**Impact:** Automatic task reordering for dependency order, module locality, and batch density. AST-based import graph + Unix tsort + ralph-explorer (Haiku) for vague task resolution.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| PLANOPT-1 | [File dependency graph](story-planopt-1-file-dependency-graph.md) | Done |
+| PLANOPT-2 | [Plan analysis and reordering engine](story-planopt-2-analysis-and-reorder.md) | Done |
+| PLANOPT-3 | [Session-start integration](story-planopt-3-session-start.md) | Done |
+| PLANOPT-4 | [Import-time optimization](story-planopt-4-import-optimization.md) | Done |
+| PLANOPT-5 | [Observability and logging](story-planopt-5-observability.md) | Done |
+
+**Files added:** `lib/import_graph.sh` (9 functions), `lib/plan_optimizer.sh` (11 functions), `.claude/skills/ralph-optimize/SKILL.md`
+**Files modified:** `on-session-start.sh`, `on-task-completed.sh`, `on-stop.sh`, `ralph.md`, `ralph_import.sh`, `ralphrc.template`, `CLAUDE.md`
+**Tests:** 48 new tests across 3 BATS files
 
 ---
 
