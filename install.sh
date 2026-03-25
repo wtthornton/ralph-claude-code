@@ -211,6 +211,15 @@ install_scripts() {
     for f in "$SCRIPT_DIR"/lib/*.sh; do
         [[ -f "$f" ]] && tr -d $'\r' < "$f" > "$RALPH_HOME/lib/$(basename "$f")"
     done
+
+    # Copy agent definitions to templates/agents/ (for ralph-upgrade-project)
+    if [[ -d "$SCRIPT_DIR/.claude/agents" ]]; then
+        mkdir -p "$RALPH_HOME/templates/agents"
+        for f in "$SCRIPT_DIR"/.claude/agents/ralph*.md; do
+            [[ -f "$f" ]] && tr -d $'\r' < "$f" > "$RALPH_HOME/templates/agents/$(basename "$f")"
+        done
+        log "SUCCESS" "Agent definitions installed to $RALPH_HOME/templates/agents/"
+    fi
     
     # Create the main ralph command
     cat > "$INSTALL_DIR/ralph" << 'EOF'
@@ -287,8 +296,18 @@ RALPH_HOME="$HOME/.ralph"
 exec "$RALPH_HOME/ralph_enable_ci.sh" "$@"
 EOF
 
+    # Create ralph-upgrade-project command
+    cat > "$INSTALL_DIR/ralph-upgrade-project" << 'EOF'
+#!/bin/bash
+# Ralph Upgrade Project - Propagate updated runtime files to existing projects
+
+RALPH_HOME="$HOME/.ralph"
+
+exec "$RALPH_HOME/ralph_upgrade_project.sh" "$@"
+EOF
+
     # Copy actual script files to Ralph home (strip CR for CRLF source)
-    for script in ralph_monitor ralph_import migrate_to_ralph_folder ralph_enable ralph_enable_ci; do
+    for script in ralph_monitor ralph_import migrate_to_ralph_folder ralph_enable ralph_enable_ci ralph_upgrade_project; do
         tr -d $'\r' < "$SCRIPT_DIR/${script}.sh" > "$RALPH_HOME/${script}.sh"
     done
 
@@ -302,11 +321,13 @@ EOF
     chmod +x "$INSTALL_DIR/ralph-migrate"
     chmod +x "$INSTALL_DIR/ralph-enable"
     chmod +x "$INSTALL_DIR/ralph-enable-ci"
+    chmod +x "$INSTALL_DIR/ralph-upgrade-project"
     chmod +x "$RALPH_HOME/ralph_monitor.sh"
     chmod +x "$RALPH_HOME/ralph_import.sh"
     chmod +x "$RALPH_HOME/migrate_to_ralph_folder.sh"
     chmod +x "$RALPH_HOME/ralph_enable.sh"
     chmod +x "$RALPH_HOME/ralph_enable_ci.sh"
+    chmod +x "$RALPH_HOME/ralph_upgrade_project.sh"
     chmod +x "$RALPH_HOME/lib/"*.sh
 
     log "SUCCESS" "Ralph scripts installed to $INSTALL_DIR"
