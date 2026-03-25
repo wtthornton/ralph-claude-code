@@ -68,6 +68,8 @@ if [[ -f "$FIX_PLAN" && -n "$RALPH_LIB" && "$NO_OPTIMIZE" != "true" && "$DRY_RUN
       source "$IMPORT_GRAPH_LIB"
       if import_graph_is_stale "${CLAUDE_PROJECT_DIR:-.}" "$RALPH_DIR/.import_graph.json" 2>/dev/null; then
         # Async rebuild — use stale cache for this loop
+        local _ralph_log_ig="$RALPH_DIR/logs/ralph.log"
+        [[ -f "$_ralph_log_ig" ]] && echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] PLANOPT: Import graph stale — triggering async rebuild" >> "$_ralph_log_ig"
         import_graph_build_async "${CLAUDE_PROJECT_DIR:-.}" "$RALPH_DIR/.import_graph.json" 2>/dev/null || true
       fi
     fi
@@ -79,13 +81,22 @@ if [[ -f "$FIX_PLAN" && -n "$RALPH_LIB" && "$NO_OPTIMIZE" != "true" && "$DRY_RUN
     fi
 
     if [[ -n "$changed_sections" ]]; then
+      # Log optimization start to Ralph log (visible in terminal)
+      local _ralph_log="$RALPH_DIR/logs/ralph.log"
+      local _ts
+      _ts=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "")
+      [[ -f "$_ralph_log" ]] && echo "[$_ts] [INFO] PLANOPT: Optimizing fix_plan.md (changed sections detected)" >> "$_ralph_log"
+
       # Run optimizer (non-fatal — never block the loop)
       if plan_optimize_section "$FIX_PLAN" "${CLAUDE_PROJECT_DIR:-.}" "$RALPH_DIR/.import_graph.json" 2>/dev/null; then
         plan_optimized=true
+        [[ -f "$_ralph_log" ]] && echo "[$_ts] [INFO] PLANOPT: Fix plan reordered (dependency order + module locality)" >> "$_ralph_log"
         # Update section hashes to reflect optimized plan
         if declare -f plan_section_hashes &>/dev/null; then
           plan_section_hashes "$FIX_PLAN" > "$HASH_FILE" 2>/dev/null || true
         fi
+      else
+        [[ -f "$_ralph_log" ]] && echo "[$_ts] [WARN] PLANOPT: Optimization failed (non-fatal, continuing)" >> "$_ralph_log"
       fi
     fi
 

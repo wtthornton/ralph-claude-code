@@ -27,13 +27,21 @@ if [[ -f "$RALPH_DIR/.import_graph.json" && -f "$RALPH_DIR/.files_modified_this_
 
   if [[ -n "$_ig_lib" ]]; then
     source "$_ig_lib"
+    _ig_count=0
     while IFS= read -r _modified_file; do
       [[ -z "$_modified_file" ]] && continue
       # Only invalidate source files (not config, docs, etc.)
       if echo "$_modified_file" | grep -qE '\.(py|ts|tsx|js|jsx|sh)$'; then
-        import_graph_invalidate_file "$_modified_file" "$RALPH_DIR/.import_graph.json" 2>/dev/null || true
+        if import_graph_invalidate_file "$_modified_file" "$RALPH_DIR/.import_graph.json" 2>/dev/null; then
+          _ig_count=$((_ig_count + 1))
+        fi
       fi
     done < "$RALPH_DIR/.files_modified_this_loop"
+    # Log import graph invalidation to ralph.log
+    if [[ $_ig_count -gt 0 ]]; then
+      _ralph_log="$RALPH_DIR/logs/ralph.log"
+      [[ -f "$_ralph_log" ]] && echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] on-task-completed: Invalidated $_ig_count file(s) in import graph" >> "$_ralph_log"
+    fi
   fi
 fi
 

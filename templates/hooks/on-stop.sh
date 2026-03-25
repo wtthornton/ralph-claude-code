@@ -238,4 +238,39 @@ log_line="[$(date '+%H:%M:%S')] Loop $loop_count: status=$status exit=$exit_sign
 [[ "$has_permission_denials" == "true" ]] && log_line+=" denials=$permission_denial_count"
 echo "$log_line" >> "$RALPH_DIR/live.log"
 
+# Detailed logging to ralph.log for key decisions
+_ralph_log="$RALPH_DIR/logs/ralph.log"
+if [[ -f "$_ralph_log" ]]; then
+  _ts=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "")
+  # Log status block parsing result
+  if [[ -z "$_status_block" ]]; then
+    echo "[$_ts] [WARN] on-stop: No RALPH_STATUS block found in response" >> "$_ralph_log"
+  fi
+  # Log question detection
+  if [[ "$asking_questions" == "true" ]]; then
+    echo "[$_ts] [INFO] on-stop: Detected $question_count question pattern(s) in response (USYNC-1)" >> "$_ralph_log"
+  fi
+  # Log permission denial detection
+  if [[ "$has_permission_denials" == "true" ]]; then
+    echo "[$_ts] [WARN] on-stop: Detected $permission_denial_count permission denial(s) in response (USYNC-4)" >> "$_ralph_log"
+  fi
+  # Log circuit breaker state transitions
+  if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
+    _cb_state=$(jq -r '.state // "CLOSED"' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "CLOSED")
+    _cb_np=$(jq -r '.consecutive_no_progress // 0' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "0")
+    if [[ "$_cb_state" == "OPEN" ]]; then
+      _cb_reason=$(jq -r '.reason // "no progress threshold"' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "unknown")
+      echo "[$_ts] [ERROR] on-stop: Circuit breaker OPEN ($_cb_reason)" >> "$_ralph_log"
+    elif [[ "$files_modified" -gt 0 || "$tasks_done" -gt 0 ]]; then
+      echo "[$_ts] [INFO] on-stop: Progress detected (tasks=$tasks_done files=$files_modified) — circuit breaker reset" >> "$_ralph_log"
+    elif [[ "$_cb_np" -gt 0 ]]; then
+      echo "[$_ts] [WARN] on-stop: No progress — consecutive_no_progress=$_cb_np" >> "$_ralph_log"
+    fi
+  fi
+  # Log import graph staleness
+  if [[ -f "$RALPH_DIR/.import_graph.json.stale" ]]; then
+    echo "[$_ts] [INFO] on-stop: Import graph marked stale (new source files created)" >> "$_ralph_log"
+  fi
+fi
+
 exit 0

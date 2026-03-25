@@ -316,28 +316,33 @@ merge_ralphrc() {
     create_backup "$project" ".ralphrc"
 
     # Extract and append each missing section from the template
+    # Template format:
+    #   # =============================================================================
+    #   # SECTION NAME
+    #   # =============================================================================
+    #   content lines...
+    #   (next section or EOF)
     for section in "${missing_sections[@]}"; do
-        # Extract the section: from its "=====" delimiter to the next "=====" or EOF
         local section_text
         section_text=$(awk -v sect="$section" '
-            BEGIN { found=0; collecting=0; buf="" }
-            /^# =+$/ {
-                if (collecting) { collecting=0 }
-                if (found) { print buf; found=0; next }
-            }
-            $0 ~ "^# " sect {
-                found=1; collecting=1
-                # Include the delimiter line above (already printed by previous iteration)
-                buf = "\n# =============================================================================\n# " sect "\n# =============================================================================\n"
-                next
-            }
-            collecting { buf = buf $0 "\n" }
-            END { if (found && buf != "") print buf }
+            BEGIN { state=0; buf="" }
+            # state 0: scanning for section
+            # state 1: found section header, skip closing delimiter
+            # state 2: collecting content until next opening delimiter
+            state == 0 && index($0, "# " sect) == 1 { state=1; next }
+            state == 1 && /^# =+$/ { state=2; next }
+            state == 2 && /^# =+$/ { exit }
+            state == 2 { buf = buf $0 "\n" }
+            END { print buf }
         ' "$template_rc")
 
-        if [[ -n "$section_text" ]]; then
-            echo -e "$section_text" >> "$project_rc"
-        fi
+        {
+            echo ""
+            echo "# ============================================================================="
+            echo "# $section"
+            echo "# ============================================================================="
+            printf '%s' "$section_text"
+        } >> "$project_rc"
     done
 
     log SUCCESS "Appended ${#missing_sections[@]} sections to .ralphrc: ${missing_sections[*]}"
