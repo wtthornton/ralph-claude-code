@@ -82,12 +82,14 @@ from ralph_sdk.tools import (
     ralph_task_update_tool,
 )
 from ralph_sdk.complexity import classify_complexity
+from ralph_sdk.import_graph import CachedImportGraph, build_import_graph
 from ralph_sdk.memory import (
     Episode,
     FileMemoryBackend,
     MemoryManager,
     ProjectIndex,
 )
+from ralph_sdk.plan_optimizer import OptimizeResult, optimize_plan
 from ralph_sdk.versions import VersionManifest, get_versions
 
 __all__ = [
@@ -158,6 +160,11 @@ __all__ = [
     "detect_permission_denials",
     # Complexity classifier
     "classify_complexity",
+    # Import graph & plan optimizer
+    "CachedImportGraph",
+    "build_import_graph",
+    "OptimizeResult",
+    "optimize_plan",
     # Cross-session memory
     "Episode",
     "FileMemoryBackend",

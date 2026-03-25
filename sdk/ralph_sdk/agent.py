@@ -56,6 +56,8 @@ from ralph_sdk.tools import (
     ralph_status_tool,
     ralph_task_update_tool,
 )
+from ralph_sdk.import_graph import CachedImportGraph
+from ralph_sdk.plan_optimizer import optimize_plan
 
 logger = logging.getLogger("ralph.sdk")
 
@@ -805,6 +807,30 @@ class RalphAgent:
         cb.no_progress_count = 0
         cb.same_error_count = 0
         await self.state_backend.write_circuit_breaker(cb._to_state_dict())
+
+        # PLANOPT: Optimize fix_plan.md before first iteration
+        if self.config.optimize_plan:
+            try:
+                fix_plan_path = self.ralph_dir / "fix_plan.md"
+                if fix_plan_path.exists():
+                    graph = CachedImportGraph(
+                        self.project_dir,
+                        max_age_seconds=self.config.optimize_plan_cache_seconds,
+                        project_type=self.config.project_type or None,
+                    )
+                    opt_result = optimize_plan(
+                        fix_plan_path,
+                        project_root=self.project_dir,
+                        import_graph=graph,
+                    )
+                    if opt_result.changed:
+                        logger.info(
+                            "Plan optimized: %s",
+                            opt_result.reason,
+                            extra={"correlation_id": self.correlation_id},
+                        )
+            except Exception as exc:
+                logger.debug("Plan optimization skipped: %s", exc)
 
         result = TaskResult()
         all_files_changed: dict[str, None] = {}  # ordered dedup across iterations

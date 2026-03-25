@@ -104,6 +104,10 @@ class RalphConfig(BaseModel):
     # SDK-LIFECYCLE-1: Cancel semantics
     cancel_grace_seconds: float = Field(default=10.0, ge=1.0, le=120.0)
 
+    # Plan optimization (PLANOPT)
+    optimize_plan: bool = True
+    optimize_plan_cache_seconds: int = Field(default=3600, ge=0, le=86400)
+
     # SDK-LIFECYCLE-2: Adaptive timeout
     adaptive_timeout_enabled: bool = False
     adaptive_timeout_min_samples: int = Field(default=5, ge=1, le=100)
@@ -372,6 +376,7 @@ class RalphConfig(BaseModel):
             "MODEL_MAP_LARGE": ("model_map_large", str),
             "MODEL_MAP_ARCHITECTURAL": ("model_map_architectural", str),
             "MAX_TOKENS_PER_HOUR": ("max_tokens_per_hour", int),
+            "RALPH_NO_OPTIMIZE": ("optimize_plan", lambda v: v.lower() != "true"),
         }
 
         overrides: dict[str, Any] = {}
