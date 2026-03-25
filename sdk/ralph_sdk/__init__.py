@@ -81,6 +81,7 @@ from ralph_sdk.tools import (
     ralph_circuit_state_tool,
     ralph_task_update_tool,
 )
+from ralph_sdk.versions import VersionManifest, get_versions
 
 __all__ = [
     "RalphAgent",
@@ -148,4 +149,7 @@ __all__ = [
     # SDK-LIFECYCLE-3: Permission denial detection
     "PermissionDenialEvent",
     "detect_permission_denials",
+    # Version manifest
+    "VersionManifest",
+    "get_versions",
 ]

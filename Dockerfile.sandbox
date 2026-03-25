@@ -12,6 +12,19 @@ LABEL maintainer="Ralph Contributors"
 LABEL description="Ralph autonomous development loop — Docker sandbox"
 LABEL ralph.mcp="true"
 
+# Build-time version args (populated by generate_version_manifest.sh or CI)
+ARG RALPH_LOOP_VERSION=unknown
+ARG RALPH_SDK_VERSION=unknown
+ARG RALPH_GIT_SHA=unknown
+ARG BUILD_TIME=unknown
+
+# OCI standard image labels
+LABEL org.opencontainers.image.version="${RALPH_LOOP_VERSION}"
+LABEL org.opencontainers.image.revision="${RALPH_GIT_SHA}"
+LABEL org.opencontainers.image.created="${BUILD_TIME}"
+LABEL org.opencontainers.image.source="https://github.com/wtthornton/ralph-claude-code"
+LABEL ralph.sdk.version="${RALPH_SDK_VERSION}"
+
 ENV DEBIAN_FRONTEND=noninteractive
 ENV RALPH_IN_SANDBOX=true
 
@@ -42,6 +55,9 @@ USER ralph
 
 # Working directory (project mounted here)
 WORKDIR /workspace
+
+# Copy version manifest (generated at build time)
+COPY --chown=ralph:ralph version.json /workspace/version.json
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
