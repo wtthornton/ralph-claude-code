@@ -432,3 +432,71 @@ EOF
     # Should NOT contain "null" — should show "N/A" or "0"
     [[ "$output" != *"#null"* ]]
 }
+
+# =============================================================================
+# USYNC-4: Permission Denial Tracking
+# =============================================================================
+
+@test "init_circuit_breaker includes consecutive_permission_denials field" {
+    init_circuit_breaker
+
+    local pd=$(jq -r '.consecutive_permission_denials // "MISSING"' "$CB_STATE_FILE")
+    assert_equal "$pd" "0"
+}
+
+@test "reset_circuit_breaker resets consecutive_permission_denials to 0" {
+    # Set up state with permission denials
+    cat > "$CB_STATE_FILE" << EOF
+{
+    "state": "OPEN",
+    "last_change": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "consecutive_no_progress": 5,
+    "consecutive_permission_denials": 3,
+    "total_opens": 2,
+    "reason": "Permission denied 3 consecutive times"
+}
+EOF
+
+    reset_circuit_breaker "Test reset"
+
+    local pd=$(jq -r '.consecutive_permission_denials' "$CB_STATE_FILE")
+    assert_equal "$pd" "0"
+
+    local state=$(jq -r '.state' "$CB_STATE_FILE")
+    assert_equal "$state" "CLOSED"
+}
+
+@test "show_circuit_status displays permission denial count when > 0" {
+    cat > "$CB_STATE_FILE" << EOF
+{
+    "state": "CLOSED",
+    "last_change": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "consecutive_no_progress": 0,
+    "consecutive_permission_denials": 1,
+    "total_opens": 0,
+    "reason": ""
+}
+EOF
+
+    run show_circuit_status
+    assert_success
+    [[ "$output" == *"Permission denials"* ]] || fail "Expected 'Permission denials' in output, got: $output"
+    [[ "$output" == *"1 consecutive"* ]] || fail "Expected '1 consecutive' in output, got: $output"
+}
+
+@test "show_circuit_status hides permission denial line when count is 0" {
+    cat > "$CB_STATE_FILE" << EOF
+{
+    "state": "CLOSED",
+    "last_change": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "consecutive_no_progress": 0,
+    "consecutive_permission_denials": 0,
+    "total_opens": 0,
+    "reason": ""
+}
+EOF
+
+    run show_circuit_status
+    assert_success
+    [[ "$output" != *"Permission denials"* ]] || fail "Should not show 'Permission denials' when count is 0"
+}

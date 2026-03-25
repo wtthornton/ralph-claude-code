@@ -106,6 +106,8 @@ Python Agent SDK for dual-mode operation. All models are **Pydantic v2 BaseModel
 
 **WSL PowerShell auto-patching (XPLAT-2b)**: `ralph_validate_hooks()` now also inspects the target project's `.claude/settings.json` for hooks calling bare `powershell` (which is unavailable in WSL — requires `powershell.exe`). When detected, Ralph auto-patches the settings file in-place via `sed`, skipping lines that already use `powershell.exe`. This prevents session-start hook errors when running Ralph against Windows-native projects from WSL.
 
+**MCP server process cleanup (MCP-CLEANUP)**: Claude Code spawns MCP servers (tapps-mcp, docsmcp via `uv`) as grandchild processes. On Windows, these survive after the CLI exits because process group teardown doesn't cascade — each loop iteration leaks one `uv` + `python` pair per MCP server. `ralph_cleanup_orphaned_mcp()` runs after every CLI invocation and in the exit trap, killing only **orphaned** MCP processes (parent process dead) to avoid disrupting MCP servers belonging to the user's editor (Cursor, VS Code). On Windows/MINGW it uses a temp PowerShell script with `Get-CimInstance Win32_Process` + parent-alive check (10s timeout guard); on Linux/macOS/WSL it uses `pgrep`/`kill` filtering by PPID==1.
+
 **Sub-agents**: Four specialized agents keep search, testing, review, and complex architecture work out of the main context:
 - **ralph-explorer** (Haiku) — fast codebase search
 - **ralph-tester** (Sonnet, worktree-isolated) — test runner

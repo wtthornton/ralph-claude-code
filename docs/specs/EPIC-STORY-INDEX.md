@@ -1,6 +1,6 @@
 # Ralph Claude Code — Epic & Story Index
 
-> **Generated:** 2026-03-21 | **Updated:** 2026-03-24 | **Total Epics:** 41 | **Total Stories:** 153 (153 Done, 0 Open)
+> **Generated:** 2026-03-21 | **Updated:** 2026-03-25 | **Total Epics:** 42 | **Total Stories:** 160 (160 Done, 0 Open)
 
 ---
 
@@ -114,13 +114,23 @@ Phase 17 (DONE — SDK v2.1.0 Enhancements)
 └──────────────┘   └──────────────┘
 
 v2.4.0 — Plan Optimization
-Phase 18 (NEW)
+Phase 18 (DONE)
 ┌──────────────┐
 │RALPH-PLANOPT │
-│ 5 stories    │
+│ 5/5 Done     │
 │ High         │
 │ Task Ordering│
 │ tsort+AST    │
+└──────────────┘
+
+v2.5.0 — Upstream Sync
+Phase 19 (DONE)
+┌──────────────┐
+│ RALPH-USYNC  │
+│ 7/7 Done     │
+│ High         │
+│ Cherry-pick  │
+│ upstream bugs│
 └──────────────┘
 ```
 
@@ -714,6 +724,27 @@ Phase 17 (DONE — SDK v2.1.0)
 **Files added:** `lib/import_graph.sh` (9 functions), `lib/plan_optimizer.sh` (11 functions), `.claude/skills/ralph-optimize/SKILL.md`
 **Files modified:** `on-session-start.sh`, `on-task-completed.sh`, `on-stop.sh`, `ralph.md`, `ralph_import.sh`, `ralphrc.template`, `CLAUDE.md`
 **Tests:** 48 new tests across 3 BATS files
+
+---
+
+## Phase 19 — Done (Upstream Sync)
+
+### RALPH-USYNC: Upstream Sync (frankbria/ralph-claude-code)
+**Priority:** High | **Status:** Done | **Target:** v2.5.0 | **Dependencies:** None
+**Source:** Comparison of upstream `frankbria/ralph-claude-code` (commit `b31640a`, 2026-03-24) against fork v2.4.0. Cherry-picks 7 highest-value bug fixes and correctness improvements from community contributions.
+
+| Story | Title | Priority | Status | Effort |
+|-------|-------|----------|--------|--------|
+| USYNC-1 | [Question pattern detection in on-stop.sh](story-usync-1-question-detection.md) | Critical | **Done** | Medium |
+| USYNC-2 | [Question-loop corrective guidance injection](story-usync-2-question-guidance.md) | Critical | **Done** | Small |
+| USYNC-3 | [CB: question-detection suppression](story-usync-3-cb-question-suppression.md) | High | **Done** | Small |
+| USYNC-4 | [CB: permission denial tracking](story-usync-4-cb-permission-denial.md) | High | **Done** | Medium |
+| USYNC-5 | [Stuck-loop detection (cross-output errors)](story-usync-5-stuck-loop-detection.md) | Medium | **Done** | Medium |
+| USYNC-6 | [Heuristic exit suppression in JSON mode](story-usync-6-heuristic-exit-suppression.md) | Medium | **Done** | Small |
+| USYNC-7 | [Tmux live output: sub-agent progress](story-usync-7-tmux-subagent-progress.md) | Low | **Done** | Small |
+
+**Dependency graph:** USYNC-1 → USYNC-2, USYNC-1 → USYNC-3 (all others independent)
+**Already present in fork (excluded):** is_error:true detection (#134), stale exit signal clearing (#194), Extra Usage quota (#100), set -e removal (#208), productive work on timeout (#198)
 
 ---
 

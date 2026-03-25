@@ -43,6 +43,7 @@ init_circuit_breaker() {
     "state": "$CB_STATE_CLOSED",
     "last_change": "$(get_iso_timestamp)",
     "consecutive_no_progress": 0,
+    "consecutive_permission_denials": 0,
     "total_opens": 0,
     "reason": ""
 }
@@ -162,6 +163,9 @@ show_circuit_status() {
     no_progress=$(echo "$state_data" | jq -r '.consecutive_no_progress')
     total_opens=$(echo "$state_data" | jq -r '.total_opens')
 
+    local permission_denials
+    permission_denials=$(echo "$state_data" | jq -r '.consecutive_permission_denials // 0')
+
     local color="" status_icon=""
     case $state in
         "$CB_STATE_CLOSED")   color=$GREEN;  status_icon="✅" ;;
@@ -175,6 +179,7 @@ show_circuit_status() {
     echo -e "${color}State:${NC}                 $status_icon $state"
     echo -e "${color}Reason:${NC}                $reason"
     echo -e "${color}Loops since progress:${NC} $no_progress"
+    [[ "$permission_denials" -gt 0 ]] && echo -e "${color}Permission denials:${NC}   $permission_denials consecutive"
     echo -e "${color}Total opens:${NC}          $total_opens"
 
     # CBDECAY-1: Show sliding window stats
@@ -206,6 +211,7 @@ reset_circuit_breaker() {
     "state": "$CB_STATE_CLOSED",
     "last_change": "$(get_iso_timestamp)",
     "consecutive_no_progress": 0,
+    "consecutive_permission_denials": 0,
     "total_opens": $prev_total_opens,
     "reason": "$safe_reason"
 }

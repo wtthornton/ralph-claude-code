@@ -87,6 +87,10 @@ CB_SAME_ERROR_THRESHOLD=5
 # Open circuit if output declines by more than N percent
 CB_OUTPUT_DECLINE_THRESHOLD=70
 
+# Permission denial threshold — denials are deterministic, trip fast (upstream #101)
+# Opens circuit after N consecutive loops with permission denials
+CB_PERMISSION_DENIAL_THRESHOLD=2
+
 # Auto-recovery: cooldown before retry (minutes, 0 = immediate)
 CB_COOLDOWN_MINUTES=30
 

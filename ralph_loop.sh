@@ -994,16 +994,20 @@ log_status_summary() {
     [[ -f "$status_file" ]] || return 1
 
     # PERF: Read ALL fields in single jq call (was: 5 separate jq spawns)
-    local loop exit_sig files_modified work_type recommendation
+    local loop exit_sig files_modified work_type recommendation asking_q q_count has_pd pd_count
     local _summary_tsv
     _summary_tsv=$(jq -r '[
       (.loop_count // "?" | tostring),
       (.exit_signal // "false"),
       (.files_modified // 0 | tostring),
       (.work_type // "UNKNOWN"),
-      (.recommendation // "")
-    ] | @tsv' "$status_file" 2>/dev/null || echo "?	false	0	UNKNOWN	")
-    IFS=$'\t' read -r loop exit_sig files_modified work_type recommendation <<< "$_summary_tsv"
+      (.recommendation // ""),
+      (.asking_questions // false | tostring),
+      (.question_count // 0 | tostring),
+      (.has_permission_denials // false | tostring),
+      (.permission_denial_count // 0 | tostring)
+    ] | @tsv' "$status_file" 2>/dev/null || echo "?	false	0	UNKNOWN		false	0	false	0")
+    IFS=$'\t' read -r loop exit_sig files_modified work_type recommendation asking_q q_count has_pd pd_count <<< "$_summary_tsv"
 
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║           Response Analysis - Loop #$loop                 ║${NC}"
@@ -1011,8 +1015,67 @@ log_status_summary() {
     echo -e "${YELLOW}Exit Signal:${NC}      $exit_sig"
     echo -e "${YELLOW}Files Changed:${NC}    $files_modified"
     echo -e "${YELLOW}Work Type:${NC}        $work_type"
+    [[ "$asking_q" == "true" ]] && echo -e "${YELLOW}Questions:${NC}        $q_count patterns matched"
+    [[ "$has_pd" == "true" ]] && echo -e "${RED}Perm Denials:${NC}     $pd_count detected"
     echo -e "${YELLOW}Summary:${NC}          $recommendation"
     echo ""
+}
+
+# USYNC-5: Detect stuck loops by comparing error patterns across recent outputs (upstream response_analyzer.sh)
+# Returns 0 if stuck (same errors repeating in last 3+ outputs), 1 otherwise.
+detect_stuck_loop() {
+    local current_output="$1"
+    local history_dir="${LOG_DIR:-$RALPH_DIR/logs}"
+
+    [[ -f "$current_output" ]] || return 1
+
+    # Get 3 most recent output files (excluding current)
+    local recent_files
+    recent_files=$(ls -t "$history_dir"/claude_output_*.log 2>/dev/null | grep -v "$(basename "$current_output")" | head -3)
+
+    [[ -z "$recent_files" ]] && return 1  # Not enough history
+
+    # Extract error lines from current output
+    # Filter out JSON field false positives (e.g., "is_error": false)
+    local current_errors
+    current_errors=$(grep -v '"[^"]*error[^"]*":' "$current_output" 2>/dev/null \
+        | grep -E '(^Error:|^ERROR:|^error:|\]: error|Error occurred|failed with error|[Ee]xception|Fatal|FATAL)' \
+        | sort | uniq)
+
+    [[ -z "$current_errors" ]] && return 1  # No errors = not stuck
+
+    # Check if ALL recent files contain ALL current errors
+    local all_match=true
+    while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+        while IFS= read -r error_line; do
+            [[ -z "$error_line" ]] && continue
+            if ! grep -qF "$error_line" "$file" 2>/dev/null; then
+                all_match=false
+                break 2
+            fi
+        done <<< "$current_errors"
+    done <<< "$recent_files"
+
+    if [[ "$all_match" == "true" ]]; then
+        # Store stuck errors for diagnostics
+        local stuck_error_sample
+        stuck_error_sample=$(echo "$current_errors" | head -1 | cut -c1-120)
+        log_status "WARN" "Stuck loop detected: same errors in last 3+ outputs: $stuck_error_sample"
+
+        # Update status.json with stuck state (append fields via jq)
+        if [[ -f "$RALPH_DIR/status.json" ]]; then
+            local _tmp
+            _tmp=$(mktemp "$RALPH_DIR/status.json.XXXXXX")
+            jq --arg err "$stuck_error_sample" '.is_stuck = true | .stuck_error = $err' \
+                "$RALPH_DIR/status.json" > "$_tmp" 2>/dev/null \
+                && mv "$_tmp" "$RALPH_DIR/status.json"
+            rm -f "$_tmp" 2>/dev/null
+        fi
+        return 0
+    fi
+
+    return 1
 }
 
 # Update status JSON for external monitoring
@@ -1686,6 +1749,16 @@ build_loop_context() {
         prev_summary=$(jq -r '.recommendation // "" | .[0:200]' "$RALPH_DIR/status.json" 2>/dev/null || echo "")
         if [[ -n "$prev_summary" && "$prev_summary" != "null" ]]; then
             context+="Previous: ${prev_summary} "
+        fi
+    fi
+
+    # USYNC-2: If previous loop detected questions, inject corrective guidance (upstream #190)
+    if [[ -f "$RALPH_DIR/status.json" ]]; then
+        local prev_asking_questions
+        prev_asking_questions=$(jq -r '.asking_questions // false' "$RALPH_DIR/status.json" 2>/dev/null || echo "false")
+        if [[ "$prev_asking_questions" == "true" ]]; then
+            context+="IMPORTANT: You asked questions in the previous loop. This is a headless automation loop with no human to answer. Do NOT ask questions. Choose the most conservative/safe default and proceed autonomously. "
+            log_status "INFO" "Injecting question-corrective guidance (previous loop asked questions)"
         fi
     fi
 
@@ -2496,6 +2569,90 @@ ralph_mcp_failure_summary() {
 }
 
 # =============================================================================
+# MCP-CLEANUP: Kill orphaned MCP server processes between loop iterations.
+# Claude Code spawns MCP servers (tapps-mcp, docsmcp) as grandchild processes.
+# On Windows, these survive after the CLI exits because process group teardown
+# doesn't cascade. Each loop iteration leaks one pair (uv + python per server).
+# This function kills them so they're re-spawned fresh on the next invocation.
+# =============================================================================
+
+ralph_cleanup_orphaned_mcp() {
+    local killed=0
+
+    # Detect Windows environments: native (MINGW/Cygwin) and WSL (MCP servers
+    # are Windows processes even when Ralph runs in WSL, so pkill won't find them)
+    local _is_windows=false
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "mingw"* || "$OSTYPE" == "cygwin" ]]; then
+        _is_windows=true
+    elif [[ "$(uname -r 2>/dev/null)" == *icrosoft* || "$(uname -r 2>/dev/null)" == *WSL* ]]; then
+        _is_windows=true
+    fi
+
+    if [[ "$_is_windows" == "true" ]]; then
+        # Windows (Git Bash / MINGW64 / Cygwin): use PowerShell via temp script
+        # to avoid bash→PowerShell quote-escaping issues with WMI filters.
+        # Only kills ORPHANED MCP processes (parent dead) to avoid disrupting
+        # MCP servers belonging to the user's editor (Cursor, VS Code, etc.).
+        # On WSL, /tmp is Linux-only; PowerShell can't read it.
+        # Use Windows %TEMP% via wslpath, or fall back to /tmp (MINGW).
+        local _tmpbase="${TMPDIR:-/tmp}"
+        if command -v wslpath &>/dev/null; then
+            _tmpbase=$(wslpath "$(powershell.exe -NoProfile -NonInteractive -Command 'Write-Output $env:TEMP' 2>/dev/null | tr -d '\r')" 2>/dev/null) || _tmpbase="/tmp"
+        fi
+        local ps_script
+        ps_script=$(mktemp "${_tmpbase}/ralph_mcp_cleanup.XXXXXX.ps1")
+        cat > "$ps_script" << 'PSEOF'
+# Collect MCP server processes (uv wrappers + python workers)
+$candidates = @()
+$candidates += Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+    Where-Object { $_.CommandLine -match "(tapps-mcp|docsmcp).*serve" }
+$candidates += Get-CimInstance Win32_Process -Filter "Name='uv.exe'" |
+    Where-Object { $_.CommandLine -match "(tapps-mcp|docsmcp).*serve" }
+
+$count = 0
+foreach ($p in $candidates) {
+    # Only kill orphans: parent process no longer exists
+    $parentAlive = $null -ne (Get-Process -Id $p.ParentProcessId -ErrorAction SilentlyContinue)
+    if (-not $parentAlive) {
+        try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop; $count++ } catch {}
+    }
+}
+Write-Output $count
+PSEOF
+        # Convert Unix path to Windows path (cygpath on MINGW, wslpath on WSL)
+        local win_path
+        if command -v cygpath &>/dev/null; then
+            win_path=$(cygpath -w "$ps_script")
+        elif command -v wslpath &>/dev/null; then
+            win_path=$(wslpath -w "$ps_script")
+        else
+            win_path="$ps_script"
+        fi
+        # 10s timeout prevents blocking in signal traps if PowerShell hangs
+        killed=$(timeout 10s powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$win_path" 2>/dev/null || echo "0")
+        rm -f "$ps_script" 2>/dev/null
+    elif command -v pgrep &>/dev/null; then
+        # Linux / macOS: pgrep + parent-check.
+        # On Unix, orphaned processes are reparented to PID 1 (init/systemd).
+        # Only kill MCP servers whose PPID is 1 (true orphans).
+        local pids
+        pids=$(pgrep -f "(tapps-mcp|docsmcp).*serve" 2>/dev/null) || true
+        for pid in $pids; do
+            local ppid
+            ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+            if [[ "$ppid" == "1" ]]; then
+                kill "$pid" 2>/dev/null && killed=$((killed + 1))
+            fi
+        done
+    fi
+
+    killed=$(echo "$killed" | tr -d '[:space:]')
+    if [[ "${killed:-0}" -gt 0 ]]; then
+        log_status "INFO" "MCP-CLEANUP: Killed $killed orphaned MCP server processes"
+    fi
+}
+
+# =============================================================================
 # ADAPTIVE-1: Percentile-Based Adaptive Timeout (Phase 13)
 # Track completion times and compute P95-based adaptive timeout.
 # =============================================================================
@@ -2911,6 +3068,9 @@ END {
         # Capture exit codes from pipeline
         local -a pipe_status=("${PIPESTATUS[@]}")
 
+        # MCP-CLEANUP: Kill orphaned MCP server processes after pipeline completes
+        ralph_cleanup_orphaned_mcp
+
         # Primary exit code is from Claude/timeout (first command in pipeline)
         exit_code=${pipe_status[0]}
 
@@ -3134,6 +3294,10 @@ EOF
         exit_code=$?
     fi
 
+    # MCP-CLEANUP: Kill orphaned MCP server processes after each CLI invocation.
+    # Claude Code spawns these as grandchildren that survive CLI exit on Windows.
+    ralph_cleanup_orphaned_mcp
+
     if [ $exit_code -eq 0 ]; then
         # Check for is_error:true — API error despite exit code 0 (Issue #134, #199)
         # Claude CLI can return exit code 0 with is_error:true for API 400 errors,
@@ -3211,6 +3375,11 @@ CBEOF
         # Log analysis summary (non-critical)
         if ! log_status_summary; then
             log_status "WARN" "Analysis summary logging failed; non-critical, continuing"
+        fi
+
+        # USYNC-5: Check for stuck loop (same errors repeating across recent outputs)
+        if detect_stuck_loop "$output_file"; then
+            log_status "WARN" "Stuck loop detected — same errors in 3+ consecutive outputs"
         fi
 
         # Get file change count for circuit breaker
@@ -3393,6 +3562,9 @@ cleanup() {
         kill -- -"$RALPH_PIPELINE_PID" 2>/dev/null || kill "$RALPH_PIPELINE_PID" 2>/dev/null || true
         wait "$RALPH_PIPELINE_PID" 2>/dev/null || true
     fi
+
+    # MCP-CLEANUP: Kill orphaned MCP server processes on exit
+    ralph_cleanup_orphaned_mcp 2>/dev/null || true
 
     # CAPTURE-1: Sync filesystem to flush buffered writes on SIGTERM
     sync 2>/dev/null || true

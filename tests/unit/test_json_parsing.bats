@@ -1037,56 +1037,12 @@ EOF
 }
 
 # =============================================================================
-# QUESTION DETECTION TESTS (Issue #190 Bug 2)
+# QUESTION DETECTION TESTS (USYNC-1, upstream #190)
+# These tests are skipped when response_analyzer.sh is missing (entire file).
+# Live question detection tests are in test_exit_detection.bats (USYNC-1/2/3).
 # =============================================================================
 
-@test "detect_questions detects question pattern with question mark" {
-    run detect_questions "Should I implement approach A or B?"
-
-    assert_success
-    [[ "$output" -gt 0 ]]
-}
-
-@test "detect_questions returns 0 count for normal implementation text" {
-    run detect_questions "Implementing module. Tests passed. All done."
-
-    assert_failure
-    assert_output "0"
-}
-
-@test "detect_questions ignores non-matching word order" {
-    run detect_questions "I should implement the conservative approach."
-
-    assert_failure
-    assert_output "0"
-}
-
-@test "detect_questions returns 0 for empty input" {
-    run detect_questions ""
-
-    assert_failure
-    assert_output "0"
-}
-
-@test "detect_questions counts multiple questions" {
-    local text="Should I use approach A? Would you prefer option B? What should I do next?"
-
-    run detect_questions "$text"
-
-    assert_success
-    [[ "$output" -ge 2 ]]
-}
-
-@test "detect_questions detects declarative wait pattern without question mark" {
-    run detect_questions "Please confirm the approach before proceeding."
-
-    assert_success
-    [[ "$output" -gt 0 ]]
-}
-
-@test "detect_questions detects awaiting input pattern without question mark" {
-    run detect_questions "Awaiting your input on the design decision."
-
-    assert_success
-    [[ "$output" -gt 0 ]]
+# Kept as skip-annotated stubs for historical traceability
+@test "detect_questions: moved to test_exit_detection.bats (USYNC-1)" {
+    skip "Question detection moved to on-stop.sh hook — see test_exit_detection.bats USYNC tests"
 }

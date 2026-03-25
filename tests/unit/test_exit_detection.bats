@@ -1185,64 +1185,235 @@ detect_progress_with_commits() {
 }
 
 # =============================================================================
-# QUESTION DETECTION IN ANALYZE_RESPONSE (Issue #190 Bug 2)
+# QUESTION DETECTION VIA ON-STOP.SH HOOK (USYNC-1, upstream #190)
 # =============================================================================
 
-@test "analyze_response sets asking_questions=true for question text output" {
-    # Skip if git is not available (analyze_response uses git)
-    if ! command -v git &>/dev/null; then
-        skip "git not available"
-    fi
+@test "on-stop.sh sets asking_questions=true when response contains question patterns" {
+    command -v jq &>/dev/null || skip "jq not available"
 
-    git init --quiet
-    git config user.email "test@test.com"
-    git config user.name "Test"
-    echo "init" > init.txt
-    git add init.txt
-    git commit --quiet -m "init"
-
-    [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
-    source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
     mkdir -p "$RALPH_DIR/logs"
 
-    local output_file="$RALPH_DIR/logs/claude_output_test.log"
-    echo "Should I implement approach A or B? Which option do you prefer?" > "$output_file"
+    # Create a mock circuit breaker state for the hook
+    cat > "$RALPH_DIR/.circuit_breaker_state" << 'EOF'
+{"state":"CLOSED","last_change":"2026-01-01T00:00:00Z","consecutive_no_progress":0,"consecutive_permission_denials":0,"total_opens":0,"reason":""}
+EOF
 
-    run analyze_response "$output_file" 1
+    # Simulate response with question patterns
+    local hook_script="${BATS_TEST_DIRNAME}/../../templates/hooks/on-stop.sh"
+    [[ -f "$hook_script" ]] || skip "on-stop.sh hook not found"
+
+    local response='{"result":"Should I implement approach A or B? Which option do you prefer?"}'
+
+    CLAUDE_PROJECT_DIR="." run bash -c "echo '$response' | bash '$hook_script'"
 
     assert_success
 
-    local asking=$(jq -r '.analysis.asking_questions' "$RALPH_DIR/.response_analysis")
+    # Check status.json was written with question detection
+    [[ -f "$RALPH_DIR/status.json" ]] || fail "status.json not created"
+    local asking=$(jq -r '.asking_questions' "$RALPH_DIR/status.json")
     assert_equal "$asking" "true"
+
+    local q_count=$(jq -r '.question_count' "$RALPH_DIR/status.json")
+    [[ "$q_count" -gt 0 ]] || fail "question_count should be > 0, got $q_count"
 }
 
-@test "analyze_response sets asking_questions=false for normal output" {
-    # Skip if git is not available (analyze_response uses git)
-    if ! command -v git &>/dev/null; then
-        skip "git not available"
-    fi
+@test "on-stop.sh sets asking_questions=false for normal implementation output" {
+    command -v jq &>/dev/null || skip "jq not available"
 
-    [[ -f "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh" ]] || skip "response_analyzer.sh removed (SKILLS-3)"
-
-    git init --quiet
-    git config user.email "test@test.com"
-    git config user.name "Test"
-    echo "init" > init.txt
-    git add init.txt
-    git commit --quiet -m "init"
-
-    source "${BATS_TEST_DIRNAME}/../../lib/response_analyzer.sh"
     mkdir -p "$RALPH_DIR/logs"
 
-    local output_file="$RALPH_DIR/logs/claude_output_test.log"
-    echo "Implementing feature X. All tests passed successfully." > "$output_file"
+    cat > "$RALPH_DIR/.circuit_breaker_state" << 'EOF'
+{"state":"CLOSED","last_change":"2026-01-01T00:00:00Z","consecutive_no_progress":0,"consecutive_permission_denials":0,"total_opens":0,"reason":""}
+EOF
 
-    run analyze_response "$output_file" 1
+    local hook_script="${BATS_TEST_DIRNAME}/../../templates/hooks/on-stop.sh"
+    [[ -f "$hook_script" ]] || skip "on-stop.sh hook not found"
+
+    local response='{"result":"Implementing feature X. All tests passed successfully. Files modified: 3."}'
+
+    CLAUDE_PROJECT_DIR="." run bash -c "echo '$response' | bash '$hook_script'"
 
     assert_success
 
-    local asking=$(jq -r '.analysis.asking_questions' "$RALPH_DIR/.response_analysis")
+    [[ -f "$RALPH_DIR/status.json" ]] || fail "status.json not created"
+    local asking=$(jq -r '.asking_questions' "$RALPH_DIR/status.json")
     assert_equal "$asking" "false"
+
+    local q_count=$(jq -r '.question_count' "$RALPH_DIR/status.json")
+    assert_equal "$q_count" "0"
+}
+
+@test "on-stop.sh detects permission denials in response (USYNC-4)" {
+    command -v jq &>/dev/null || skip "jq not available"
+
+    mkdir -p "$RALPH_DIR/logs"
+
+    cat > "$RALPH_DIR/.circuit_breaker_state" << 'EOF'
+{"state":"CLOSED","last_change":"2026-01-01T00:00:00Z","consecutive_no_progress":0,"consecutive_permission_denials":0,"total_opens":0,"reason":""}
+EOF
+
+    local hook_script="${BATS_TEST_DIRNAME}/../../templates/hooks/on-stop.sh"
+    [[ -f "$hook_script" ]] || skip "on-stop.sh hook not found"
+
+    local response='{"result":"Error: tool not allowed: Bash(rm -rf /). Permission denied for destructive command."}'
+
+    CLAUDE_PROJECT_DIR="." run bash -c "echo '$response' | bash '$hook_script'"
+
+    assert_success
+
+    [[ -f "$RALPH_DIR/status.json" ]] || fail "status.json not created"
+    local has_pd=$(jq -r '.has_permission_denials' "$RALPH_DIR/status.json")
+    assert_equal "$has_pd" "true"
+}
+
+@test "on-stop.sh does not increment CB no-progress for question loops (USYNC-3)" {
+    command -v jq &>/dev/null || skip "jq not available"
+
+    mkdir -p "$RALPH_DIR/logs"
+
+    # Start with 2 consecutive no-progress loops (one away from threshold)
+    cat > "$RALPH_DIR/.circuit_breaker_state" << 'EOF'
+{"state":"CLOSED","last_change":"2026-01-01T00:00:00Z","consecutive_no_progress":2,"consecutive_permission_denials":0,"total_opens":0,"reason":""}
+EOF
+
+    local hook_script="${BATS_TEST_DIRNAME}/../../templates/hooks/on-stop.sh"
+    [[ -f "$hook_script" ]] || skip "on-stop.sh hook not found"
+
+    # Response with questions — should NOT increment no-progress
+    local response='{"result":"Should I use approach A or B? What do you think?"}'
+
+    CLAUDE_PROJECT_DIR="." run bash -c "echo '$response' | bash '$hook_script'"
+
+    assert_success
+
+    # CB should still be CLOSED — question loops suppress no-progress
+    local cb_state=$(jq -r '.state' "$RALPH_DIR/.circuit_breaker_state")
+    assert_equal "$cb_state" "CLOSED"
+
+    local no_progress=$(jq -r '.consecutive_no_progress' "$RALPH_DIR/.circuit_breaker_state")
+    assert_equal "$no_progress" "2"  # Should NOT have incremented to 3
+}
+
+# =============================================================================
+# STUCK-LOOP DETECTION (USYNC-5)
+# =============================================================================
+
+@test "detect_stuck_loop returns 1 when no errors in current output" {
+    source "${BATS_TEST_DIRNAME}/../../ralph_loop.sh" 2>/dev/null || true
+    # Source just the function we need
+    eval "$(sed -n '/^detect_stuck_loop()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+
+    mkdir -p "$RALPH_DIR/logs"
+    export LOG_DIR="$RALPH_DIR/logs"
+
+    echo "Implementing feature. All tests passed." > "$RALPH_DIR/logs/claude_output_current.log"
+
+    run detect_stuck_loop "$RALPH_DIR/logs/claude_output_current.log"
+
+    assert_failure  # return 1 = not stuck
+}
+
+@test "detect_stuck_loop returns 0 when same errors repeat in 3+ outputs" {
+    eval "$(sed -n '/^detect_stuck_loop()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+    eval "$(sed -n '/^log_status()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh" 2>/dev/null)" || log_status() { :; }
+
+    mkdir -p "$RALPH_DIR/logs"
+    export LOG_DIR="$RALPH_DIR/logs"
+
+    # Create 3 historical outputs with the same error
+    for i in 1 2 3; do
+        echo "Error: EACCES permission denied /etc/passwd" > "$RALPH_DIR/logs/claude_output_${i}.log"
+        sleep 0.1  # Ensure different mtime for ls -t ordering
+    done
+
+    # Current output with same error
+    echo "Error: EACCES permission denied /etc/passwd" > "$RALPH_DIR/logs/claude_output_current.log"
+
+    # Need status.json for the jq update
+    echo '{}' > "$RALPH_DIR/status.json"
+
+    run detect_stuck_loop "$RALPH_DIR/logs/claude_output_current.log"
+
+    assert_success  # return 0 = stuck
+}
+
+@test "detect_stuck_loop returns 1 when errors differ across outputs" {
+    eval "$(sed -n '/^detect_stuck_loop()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+
+    mkdir -p "$RALPH_DIR/logs"
+    export LOG_DIR="$RALPH_DIR/logs"
+
+    echo "Error: file not found" > "$RALPH_DIR/logs/claude_output_1.log"
+    sleep 0.1
+    echo "Error: network timeout" > "$RALPH_DIR/logs/claude_output_2.log"
+    sleep 0.1
+    echo "Error: syntax error" > "$RALPH_DIR/logs/claude_output_3.log"
+    sleep 0.1
+
+    echo "Error: EACCES permission denied" > "$RALPH_DIR/logs/claude_output_current.log"
+
+    run detect_stuck_loop "$RALPH_DIR/logs/claude_output_current.log"
+
+    assert_failure  # return 1 = not stuck (different errors)
+}
+
+@test "detect_stuck_loop ignores JSON field false positives" {
+    eval "$(sed -n '/^detect_stuck_loop()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+
+    mkdir -p "$RALPH_DIR/logs"
+    export LOG_DIR="$RALPH_DIR/logs"
+
+    # JSON with "is_error": false is not an actual error
+    for i in 1 2 3; do
+        echo '{"is_error": false, "result": "Success"}' > "$RALPH_DIR/logs/claude_output_${i}.log"
+        sleep 0.1
+    done
+
+    echo '{"is_error": false, "result": "Success"}' > "$RALPH_DIR/logs/claude_output_current.log"
+
+    run detect_stuck_loop "$RALPH_DIR/logs/claude_output_current.log"
+
+    assert_failure  # return 1 = not stuck (no real errors)
+}
+
+# =============================================================================
+# CORRECTIVE GUIDANCE INJECTION (USYNC-2, upstream #190)
+# =============================================================================
+
+@test "build_loop_context includes question guidance when asking_questions=true" {
+    # Write status.json with asking_questions=true
+    cat > "$RALPH_DIR/status.json" << 'EOF'
+{"asking_questions": true, "question_count": 3, "recommendation": ""}
+EOF
+
+    # Source just build_loop_context
+    log_status() { :; }  # stub
+    ralph_inject_continue_state() { :; }  # stub
+    export RALPH_CONTINUE_STATE_FILE="/nonexistent"
+
+    eval "$(sed -n '/^build_loop_context()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+
+    run build_loop_context 5
+
+    assert_success
+    [[ "$output" == *"Do NOT ask questions"* ]] || fail "Expected corrective guidance, got: $output"
+}
+
+@test "build_loop_context does not include question guidance when asking_questions=false" {
+    cat > "$RALPH_DIR/status.json" << 'EOF'
+{"asking_questions": false, "question_count": 0, "recommendation": ""}
+EOF
+
+    log_status() { :; }
+    ralph_inject_continue_state() { :; }
+    export RALPH_CONTINUE_STATE_FILE="/nonexistent"
+
+    eval "$(sed -n '/^build_loop_context()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+
+    run build_loop_context 5
+
+    assert_success
+    [[ "$output" != *"Do NOT ask questions"* ]] || fail "Should not inject guidance when asking_questions=false"
 }
 
 # --- Stale Exit Signals Tests (Issue #194) ---
