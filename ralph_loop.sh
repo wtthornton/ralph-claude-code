@@ -25,7 +25,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/tracing.sh" ]] && source "$SCRIPT_DIR/lib/tracing.sh"
 
 # Version
-RALPH_VERSION="2.4.0"
+RALPH_VERSION="2.4.1"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -66,7 +66,7 @@ _env_LOG_MAX_OUTPUT_FILES="${LOG_MAX_OUTPUT_FILES:-}"
 CLAUDE_CODE_CMD="${CLAUDE_CODE_CMD:-claude}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-}"
 CLAUDE_EFFORT="${CLAUDE_EFFORT:-}"
-MAX_CALLS_PER_HOUR="${MAX_CALLS_PER_HOUR:-100}"
+MAX_CALLS_PER_HOUR="${MAX_CALLS_PER_HOUR:-200}"
 VERBOSE_PROGRESS="${VERBOSE_PROGRESS:-false}"
 CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-15}"
 
@@ -358,7 +358,7 @@ ralph_export_config() {
         cat << JSONEOF
 {
   "projectName": "${PROJECT_NAME:-my-project}",
-  "maxCallsPerHour": ${MAX_CALLS_PER_HOUR:-100},
+  "maxCallsPerHour": ${MAX_CALLS_PER_HOUR:-200},
   "timeoutMinutes": ${CLAUDE_TIMEOUT_MINUTES:-15},
   "outputFormat": "${CLAUDE_OUTPUT_FORMAT:-json}",
   "sessionContinuity": ${CLAUDE_USE_CONTINUE:-true},
@@ -374,7 +374,7 @@ JSONEOF
     jq -n \
         --arg pn "${PROJECT_NAME:-my-project}" \
         --arg pt "${PROJECT_TYPE:-unknown}" \
-        --argjson mc "${MAX_CALLS_PER_HOUR:-100}" \
+        --argjson mc "${MAX_CALLS_PER_HOUR:-200}" \
         --argjson tm "${CLAUDE_TIMEOUT_MINUTES:-15}" \
         --arg of "${CLAUDE_OUTPUT_FORMAT:-json}" \
         --argjson sc "${CLAUDE_USE_CONTINUE:-true}" \
@@ -538,7 +538,7 @@ setup_tmux_session() {
     ralph_cmd="$ralph_cmd --live"
 
     # Forward --calls if non-default
-    if [[ "$MAX_CALLS_PER_HOUR" != "100" ]]; then
+    if [[ "$MAX_CALLS_PER_HOUR" != "200" ]]; then
         ralph_cmd="$ralph_cmd --calls $MAX_CALLS_PER_HOUR"
     fi
     # Forward --prompt if non-default

@@ -26,7 +26,7 @@ class RalphConfig(BaseModel):
     project_type: str = "unknown"
 
     # Loop settings
-    max_calls_per_hour: int = Field(default=100, ge=1, le=10000)
+    max_calls_per_hour: int = Field(default=200, ge=1, le=10000)
     timeout_minutes: int = Field(default=15, ge=1, le=1440)
     output_format: str = "json"
 

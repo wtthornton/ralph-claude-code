@@ -18,7 +18,7 @@ ralph [OPTIONS]
 |------|-------|-------------|---------|
 | `--version` | `-V` | Show version and exit | — |
 | `--help` | `-h` | Show help message | — |
-| `--calls NUM` | `-c` | Max API calls per hour | 100 |
+| `--calls NUM` | `-c` | Max API calls per hour | 200 |
 | `--prompt FILE` | `-p` | Prompt file path | `.ralph/PROMPT.md` |
 | `--status` | `-s` | Show current status and exit | — |
 | `--monitor` | `-m` | Start with tmux dashboard | false |

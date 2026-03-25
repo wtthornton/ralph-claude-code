@@ -21,7 +21,7 @@ PROJECT_TYPE="${PROJECT_TYPE:-unknown}"
 # =============================================================================
 
 # Maximum API calls per hour (rate limiting)
-MAX_CALLS_PER_HOUR=100
+MAX_CALLS_PER_HOUR=200
 
 # Timeout for each Claude Code invocation (in minutes)
 # When timeout is reached, the loop logs the event and continues to the next iteration

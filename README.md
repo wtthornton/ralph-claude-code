@@ -233,7 +233,7 @@ Key hooks:
 PROJECT_NAME="my-project"
 PROJECT_TYPE="typescript"
 CLAUDE_CODE_CMD="claude"
-MAX_CALLS_PER_HOUR=100
+MAX_CALLS_PER_HOUR=200
 CLAUDE_TIMEOUT_MINUTES=15
 CLAUDE_OUTPUT_FORMAT="json"
 
@@ -260,7 +260,7 @@ RALPH_MAX_TEAMMATES=2
 ralph [OPTIONS]
   -V, --version           Show version
   -h, --help              Show help
-  -c, --calls NUM         Max calls per hour (default: 100)
+  -c, --calls NUM         Max calls per hour (default: 200)
   -p, --prompt FILE       Custom prompt file
   -s, --status            Show status and exit
   -m, --monitor           Start with tmux monitoring
