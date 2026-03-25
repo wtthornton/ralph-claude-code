@@ -650,6 +650,141 @@ plan_optimize_section() {
 }
 
 # =============================================================================
+# Section-level hashing and change detection (PLANOPT-3)
+# =============================================================================
+
+# plan_section_hashes — Hash unchecked task lines per section
+#
+# Outputs tab-separated "section_header\thash" lines, one per section.
+# Only unchecked tasks (- [ ]) contribute to the hash — checking off a task
+# changes the hash, enabling change detection at the section level.
+#
+# Usage: plan_section_hashes "/path/to/fix_plan.md"
+#
+plan_section_hashes() {
+    local fix_plan="$1"
+
+    [[ ! -f "$fix_plan" ]] && return 1
+
+    awk '
+    /^## / {
+        if (section_text != "") {
+            cmd = "printf \"%s\" \"" section_text "\" | sha256sum 2>/dev/null || printf \"%s\" \"" section_text "\" | shasum -a 256 2>/dev/null"
+            cmd | getline hash
+            close(cmd)
+            split(hash, h, " ")
+            print section_name "\t" h[1]
+        }
+        section_name = $0
+        section_text = ""
+        next
+    }
+    /^- \[ \]/ {
+        section_text = section_text $0 "\n"
+    }
+    END {
+        if (section_text != "") {
+            cmd = "printf \"%s\" \"" section_text "\" | sha256sum 2>/dev/null || printf \"%s\" \"" section_text "\" | shasum -a 256 2>/dev/null"
+            cmd | getline hash
+            close(cmd)
+            split(hash, h, " ")
+            print section_name "\t" h[1]
+        }
+    }
+    ' "$fix_plan"
+}
+
+# plan_changed_sections — Detect which sections have changed since last optimization
+#
+# Compares current section hashes against stored hashes in hash_file.
+# On first run (no hash file), all sections are considered "changed".
+# Outputs changed section headers (one per line).
+#
+# Usage: changed=$(plan_changed_sections "$fix_plan" "$hash_file")
+#
+plan_changed_sections() {
+    local fix_plan="$1"
+    local hash_file="$2"  # .ralph/.plan_section_hashes
+
+    local current_hashes
+    current_hashes=$(plan_section_hashes "$fix_plan")
+
+    if [[ ! -f "$hash_file" ]]; then
+        # First run: all sections are "changed"
+        echo "$current_hashes" | cut -f1
+        echo "$current_hashes" > "$hash_file"
+        return
+    fi
+
+    local previous_hashes
+    previous_hashes=$(cat "$hash_file")
+
+    # Diff to find changed sections
+    while IFS=$'\t' read -r section hash; do
+        local prev_hash
+        prev_hash=$(echo "$previous_hashes" | grep "^${section}	" | cut -f2)
+        if [[ "$hash" != "$prev_hash" ]]; then
+            echo "$section"
+        fi
+    done <<< "$current_hashes"
+
+    # Update stored hashes (will be overwritten with post-optimization hashes)
+    echo "$current_hashes" > "$hash_file"
+}
+
+# =============================================================================
+# Batch annotation (PLANOPT-3)
+# =============================================================================
+
+# plan_annotate_batches — Generate batch hints for context injection
+#
+# Analyzes upcoming unchecked tasks and groups consecutive same-size tasks
+# into batch annotations like [BATCH-3: SMALL] [SINGLE: LARGE].
+# Uses .size field from plan_parse_tasks (0=SMALL, 1=MEDIUM, 2=LARGE).
+# Looks at up to 8 upcoming tasks.
+#
+# Usage: hint=$(plan_annotate_batches "$tasks_json")
+#
+plan_annotate_batches() {
+    local tasks_json="$1"
+
+    # Map numeric size to label
+    local -A size_labels=([0]="SMALL" [1]="MEDIUM" [2]="LARGE")
+
+    echo "$tasks_json" | jq -r '
+        [.[] | select(.checked == false)] | .[0:8] |
+        .[] | "\(.size // 1)"
+    ' | {
+        local result=""
+        local batch_size=0
+        local prev_size=""
+
+        while IFS= read -r size; do
+            if [[ "$size" == "$prev_size" || -z "$prev_size" ]]; then
+                batch_size=$((batch_size + 1))
+            else
+                if [[ $batch_size -gt 1 ]]; then
+                    result="${result}[BATCH-${batch_size}: ${size_labels[$prev_size]:-MEDIUM}] "
+                elif [[ -n "$prev_size" ]]; then
+                    result="${result}[SINGLE: ${size_labels[$prev_size]:-MEDIUM}] "
+                fi
+                batch_size=1
+            fi
+            prev_size="$size"
+        done
+
+        # Emit final batch
+        if [[ $batch_size -gt 1 ]]; then
+            result="${result}[BATCH-${batch_size}: ${size_labels[$prev_size]:-MEDIUM}]"
+        elif [[ -n "$prev_size" ]]; then
+            result="${result}[SINGLE: ${size_labels[$prev_size]:-MEDIUM}]"
+        fi
+
+        echo "$result"
+    }
+}
+
+# =============================================================================
 # Export functions for use in other scripts
 # =============================================================================
 export -f plan_parse_tasks
@@ -663,3 +798,6 @@ export -f plan_secondary_sort
 export -f plan_validate_equivalence
 export -f plan_write_optimized
 export -f plan_optimize_section
+export -f plan_section_hashes
+export -f plan_changed_sections
+export -f plan_annotate_batches

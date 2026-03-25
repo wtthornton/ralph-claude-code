@@ -29,17 +29,29 @@ Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named
 
 **Install once, use everywhere** — Ralph becomes a global command available in any directory.
 
-## What's New in v2.4.0
+## What's New in v2.5.0
 
-- **Plan optimization** — Automatic fix_plan.md task reordering at session start. AST-based import graph (Python/JS/TS) detects real file dependencies, Unix `tsort` for topological ordering, module grouping, phase ordering (create→implement→test→document), size clustering for better batching. Research-backed design from SWE-Agent, Agentless, Reflexion, and Nx/Turborepo patterns.
-- **ralph-explorer task resolution** — Vague tasks without file paths (e.g., "Fix the auth flow") are automatically resolved to specific files via ralph-explorer (Haiku), cached as `<!-- resolved: path -->` annotations
-- **Batch hints** — Session start context now includes batch boundary annotations (e.g., `[BATCH-3: SMALL]`) so Claude skips size re-analysis
-- **Progress re-grounding** — Session context includes last completed task (Reflexion pattern) to reduce re-discovery tokens
+- **SDK plan optimizer** — Plan optimization now runs inside `RalphAgent.run()` before the first iteration. TheStudio and all SDK consumers get automatic task reordering for free — no integration changes needed. Disable with `RALPH_NO_OPTIMIZE=true`.
+- **SDK import graph** — Python AST + JS/TS regex dependency graph with JSON caching and staleness detection. Cross-platform path normalization.
+- **SDK complexity classifier** — 5-level task classifier (TRIVIAL→ARCHITECTURAL) ported from bash. Annotation overrides, keyword scoring, file count heuristics, retry escalation. Feeds into `select_model()` for dynamic model routing.
+- **SDK episodic memory** — Cross-session memory with pluggable `MemoryBackend` protocol. Keyword-based retrieval with failure bias and age decay. Project index auto-detection.
+- **Build-time version manifest** — `generate_version_manifest.sh` reads versions from canonical sources, writes `version.json`. SDK exposes `get_versions()`. Dockerfile updated with OCI labels.
+- **Default rate limit bumped to 200/hr** — Better match for current Claude plan tiers.
+- **Upstream sync epic** — Question detection, permission denial CB fast-trip, stuck loop detection, heuristic exit suppression.
+- **SDK v2.1.0** — 5 new modules: `complexity.py`, `memory.py`, `import_graph.py`, `plan_optimizer.py`, `versions.py`.
+
+<details>
+<summary><strong>v2.4.0</strong></summary>
+
+- **Plan optimization (bash)** — Automatic fix_plan.md task reordering at session start. AST-based import graph (Python/JS/TS) detects real file dependencies, Unix `tsort` for topological ordering, module grouping, phase ordering (create→implement→test→document), size clustering for better batching.
+- **ralph-explorer task resolution** — Vague tasks without file paths automatically resolved to specific files via ralph-explorer (Haiku)
+- **Batch hints** — Session start context includes batch boundary annotations
+- **Progress re-grounding** — Session context includes last completed task (Reflexion pattern)
 - **`/optimize` skill** — Manual plan optimization via slash command
-- **CLAUDE_MODEL / CLAUDE_EFFORT config** — New `.ralphrc` variables to control model and effort level per project
-- **Bug fix: CLAUDE_CODE_CMD** — `.ralphrc` value now correctly respected (was silently overwritten) (#228)
-- **Bug fix: ALLOWED_TOOLS in agent mode** — Custom ALLOWED_TOOLS auto-falls back to legacy mode with clear warnings (#154)
+- **CLAUDE_MODEL / CLAUDE_EFFORT config** — New `.ralphrc` variables
 - **48 new tests** — Import graph (12), plan optimizer (12), session start integration (24)
+
+</details>
 
 <details>
 <summary><strong>v2.3.2</strong></summary>
@@ -54,7 +66,7 @@ Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named
 <details>
 <summary><strong>v2.3.1</strong></summary>
 
-- Version bump — Ralph v2.3.1, SDK v2.0.3
+- Version bump — Ralph v2.3.1, SDK v2.0.3 (now superseded by SDK v2.1.0)
 
 </details>
 

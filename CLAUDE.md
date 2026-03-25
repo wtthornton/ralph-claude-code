@@ -82,6 +82,11 @@ Python Agent SDK for dual-mode operation. All models are **Pydantic v2 BaseModel
 | `ralph_sdk/converters.py` | TaskPacket conversion — TaskPacketInput/IntentSpecInput mirror models, complexity→max_turns, trust→permissions |
 | `ralph_sdk/evidence.py` | EvidenceBundle output — test/lint extraction (pytest/jest/BATS/ruff/eslint), JSON round-trip |
 | `ralph_sdk/tools.py` | Custom tools — ralph_status, ralph_rate_check, ralph_circuit_state, ralph_task_update |
+| `ralph_sdk/complexity.py` | 5-level task classifier (TRIVIAL→ARCHITECTURAL) — annotation overrides, keyword scoring, file count, retry escalation. Feeds into `cost.select_model()`. |
+| `ralph_sdk/memory.py` | Cross-session episodic + semantic memory — pluggable `MemoryBackend` protocol, keyword retrieval with failure bias, age decay, project index auto-detection. |
+| `ralph_sdk/import_graph.py` | AST-based Python + regex JS/TS file dependency graph — `CachedImportGraph` with JSON caching, staleness detection, cross-platform path normalization. |
+| `ralph_sdk/plan_optimizer.py` | Fix plan task reordering — 3-layer dependency detection (import graph → metadata → phase), Kahn's toposort, secondary sort (module/phase/size), semantic equivalence validation, atomic write. Auto-runs in `RalphAgent.run()`. |
+| `ralph_sdk/versions.py` | Build-time version manifest reader — `get_versions()` returns all component versions from `version.json`. |
 | `ralph_sdk/__main__.py` | CLI entry point — `ralph --sdk` or `python -m ralph_sdk` (uses run_sync()) |
 
 ### Key Design Patterns
