@@ -81,6 +81,13 @@ from ralph_sdk.tools import (
     ralph_circuit_state_tool,
     ralph_task_update_tool,
 )
+from ralph_sdk.complexity import classify_complexity
+from ralph_sdk.memory import (
+    Episode,
+    FileMemoryBackend,
+    MemoryManager,
+    ProjectIndex,
+)
 from ralph_sdk.versions import VersionManifest, get_versions
 
 __all__ = [
@@ -149,6 +156,13 @@ __all__ = [
     # SDK-LIFECYCLE-3: Permission denial detection
     "PermissionDenialEvent",
     "detect_permission_denials",
+    # Complexity classifier
+    "classify_complexity",
+    # Cross-session memory
+    "Episode",
+    "FileMemoryBackend",
+    "MemoryManager",
+    "ProjectIndex",
     # Version manifest
     "VersionManifest",
     "get_versions",
