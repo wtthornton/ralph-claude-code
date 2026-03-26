@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-LOCK
 **Priority:** Critical
+**Status:** Done
 **Affects:** API cost efficiency, data integrity, loop stability
 **Components:** `ralph_loop.sh` (startup sequence)
 **Related specs:** [epic-loop-stability.md](epic-loop-stability.md)

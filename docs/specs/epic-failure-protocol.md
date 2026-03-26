@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-FAILSPEC
 **Priority:** Critical
+**Status:** Done
 **Affects:** Reliability, compliance, audit readiness, emergency controls
 **Components:** `ralph_loop.sh`, `lib/circuit_breaker.sh`, new `FAILURE.md`, new `FAILSAFE.md`, new `KILLSWITCH.md`
 **Related specs:** [epic-loop-guard-rails.md](epic-loop-guard-rails.md), [epic-circuit-breaker-decay.md](epic-circuit-breaker-decay.md), [epic-brain-security-design.md](epic-brain-security-design.md)

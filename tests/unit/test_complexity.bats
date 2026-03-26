@@ -14,77 +14,67 @@ teardown() {
     rm -rf "$BATS_TEST_TMPDIR/.ralph"
 }
 
+# Note: ralph_classify_task_complexity echoes AND returns the score as exit code.
+# Use `run` to avoid set -e failures on non-zero exit codes.
+
 @test "default task classified as ROUTINE (3)" {
-    local result
-    result=$(ralph_classify_task_complexity "Fix a small bug in auth module")
-    [[ "$result" -eq 3 ]]
+    run ralph_classify_task_complexity "Fix a small bug in auth module"
+    [[ "$output" -eq 3 ]]
 }
 
 @test "[TRIVIAL] annotation returns 1" {
-    local result
-    result=$(ralph_classify_task_complexity "[TRIVIAL] Fix typo in README")
-    [[ "$result" -eq 1 ]]
+    run ralph_classify_task_complexity "[TRIVIAL] Fix typo in README"
+    [[ "$output" -eq 1 ]]
 }
 
 @test "[SMALL] annotation returns 2" {
-    local result
-    result=$(ralph_classify_task_complexity "[SMALL] Add missing import")
-    [[ "$result" -eq 2 ]]
+    run ralph_classify_task_complexity "[SMALL] Add missing import"
+    [[ "$output" -eq 2 ]]
 }
 
 @test "[MEDIUM] annotation returns 3" {
-    local result
-    result=$(ralph_classify_task_complexity "[MEDIUM] Implement new endpoint")
-    [[ "$result" -eq 3 ]]
+    run ralph_classify_task_complexity "[MEDIUM] Implement new endpoint"
+    [[ "$output" -eq 3 ]]
 }
 
 @test "[LARGE] annotation returns 4" {
-    local result
-    result=$(ralph_classify_task_complexity "[LARGE] Refactor entire auth system")
-    [[ "$result" -eq 4 ]]
+    run ralph_classify_task_complexity "[LARGE] Refactor entire auth system"
+    [[ "$output" -eq 4 ]]
 }
 
 @test "[ARCHITECTURAL] annotation returns 5" {
-    local result
-    result=$(ralph_classify_task_complexity "[ARCHITECTURAL] Redesign database schema")
-    [[ "$result" -eq 5 ]]
+    run ralph_classify_task_complexity "[ARCHITECTURAL] Redesign database schema"
+    [[ "$output" -eq 5 ]]
 }
 
 @test "architectural keywords increase score" {
-    local result
-    result=$(ralph_classify_task_complexity "Architect the new microservice platform for deployment")
-    [[ "$result" -ge 4 ]]
+    run ralph_classify_task_complexity "Architect the new microservice platform for deployment"
+    [[ "$output" -ge 4 ]]
 }
 
 @test "trivial keywords decrease score" {
-    local result
-    result=$(ralph_classify_task_complexity "Fix a typo in the comment")
-    [[ "$result" -le 3 ]]
+    run ralph_classify_task_complexity "Fix a typo in the comment"
+    [[ "$output" -le 3 ]]
 }
 
 @test "5+ file references increase score" {
-    local result
-    result=$(ralph_classify_task_complexity "Update auth.py, login.py, register.py, profile.py, settings.py, middleware.py")
-    [[ "$result" -ge 4 ]]
+    run ralph_classify_task_complexity "Update auth.py, login.py, register.py, profile.py, settings.py, middleware.py"
+    [[ "$output" -ge 4 ]]
 }
 
 @test "retry escalation: 3+ retries adds +2" {
-    local result
-    result=$(ralph_classify_task_complexity "Simple bug fix" 3)
-    [[ "$result" -ge 4 ]]
+    run ralph_classify_task_complexity "Simple bug fix" 3
+    [[ "$output" -ge 4 ]]
 }
 
 @test "retry escalation: 1 retry adds +1" {
-    local result
-    result=$(ralph_classify_task_complexity "Simple bug fix" 1)
-    [[ "$result" -ge 3 ]]
+    run ralph_classify_task_complexity "Simple bug fix" 1
+    [[ "$output" -ge 3 ]]
 }
 
 @test "score clamped to 1-5 range" {
-    # Very simple task with low keywords
-    local result
-    result=$(ralph_classify_task_complexity "[TRIVIAL] typo fix")
-    [[ "$result" -ge 1 ]] && [[ "$result" -le 5 ]]
+    run ralph_classify_task_complexity "[TRIVIAL] typo fix"
+    [[ "$output" -ge 1 ]] && [[ "$output" -le 5 ]]
 }
 
 @test "ralph_complexity_name maps numbers to names" {

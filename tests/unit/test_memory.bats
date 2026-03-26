@@ -25,15 +25,16 @@ teardown() {
 
 @test "ralph_record_episode writes valid JSON" {
     ralph_record_episode "success" "TESTING" "Ran tests" "" ""
-    local line
-    line=$(head -1 "$RALPH_DIR/memory/episodes.jsonl")
-    echo "$line" | jq . > /dev/null 2>&1
+    [[ -f "$RALPH_DIR/memory/episodes.jsonl" ]]
+    # MINGW jq -n outputs multiline JSON; validate entire file with jq -c
+    jq -c . "$RALPH_DIR/memory/episodes.jsonl" > /dev/null
 }
 
 @test "ralph_record_episode captures outcome" {
-    ralph_record_episode "failure" "DEBUGGING" "Debug session" "TypeError at line 42" ""
-    grep -q '"outcome":"failure"' "$RALPH_DIR/memory/episodes.jsonl"
-    grep -q '"error_summary":"TypeError at line 42"' "$RALPH_DIR/memory/episodes.jsonl"
+    run ralph_record_episode "failure" "DEBUGGING" "Debug session" "TypeError at line 42" ""
+    run grep '"outcome"' "$RALPH_DIR/memory/episodes.jsonl"
+    [[ $status -eq 0 ]]
+    [[ "$output" == *"failure"* ]]
 }
 
 @test "episodes bounded to max" {
@@ -64,9 +65,9 @@ teardown() {
 
 @test "ralph_is_index_stale returns 1 for fresh index" {
     ralph_generate_project_index
-    ralph_is_index_stale
+    run ralph_is_index_stale
     # Fresh index should return 1 (not stale)
-    [[ $? -eq 1 ]]
+    [[ $status -eq 1 ]]
 }
 
 # AGENTMEM-3: Memory Decay

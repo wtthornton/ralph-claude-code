@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-SDK-COST
 **Priority:** P1–P2
+**Status:** Done
 **Affects:** Cost efficiency, model selection, budget enforcement, rate limiting accuracy
 **Components:** `ralph_sdk/config.py`, `ralph_sdk/agent.py`
 **Related specs:** [epic-brain-design-refinements.md](epic-brain-design-refinements.md)

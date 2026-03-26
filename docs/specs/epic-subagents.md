@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-SUBAGENTS
 **Priority:** Important
+**Status:** Done
 **Affects:** Codebase exploration efficiency, test isolation, code review quality
 **Components:** `.claude/agents/`, `ralph_loop.sh`
 **Related specs:** `claude-code-2026-enhancements.md` (§4.1.2–4.1.4, §4.5, §4.7, §5 Phase 2)

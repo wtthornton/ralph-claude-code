@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-COSTROUTE
 **Priority:** High
+**Status:** Done
 **Affects:** Cost efficiency, throughput, model selection, prompt caching
 **Components:** `ralph_loop.sh`, `.claude/agents/ralph.md`, `.claude/hooks/on-session-start.sh`
 **Related specs:** [epic-adaptive-timeout.md](epic-adaptive-timeout.md) (Phase 13 — timeout adaptation), [epic-skills-bash-reduction.md](epic-skills-bash-reduction.md) (Phase 3 — existing model assignments)

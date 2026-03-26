@@ -1,8 +1,8 @@
 # Implementation Status Summary
 
-**Last Updated**: 2026-03-23
-**Version**: v2.3.2
-**Overall Status**: 148/148 stories complete across 40 epics (Phases 0-17). SDK v2.0.3 + bash v2.3.2. All phases complete. Phase 14 done (CTXMGMT-3, SANDBOXV2, EVALS complete). Phase 15 ENABLE epic 7/7 done. Phase 17 SDK enhancements 16/16 done (SAFETY, CONTEXT, COST, OUTPUT, LIFECYCLE).
+**Last Updated**: 2026-03-26
+**Version**: v2.6.0
+**Overall Status**: 148/148 stories complete across 50 epics (Phases 0-17). SDK v2.1.0 + bash v2.6.0. All phases complete. v2.6.0: 14 open issues resolved, 24 pre-existing test failures fixed, 1,026 total tests (855 unit + 28 integration + 143 SDK).
 
 > **Note:** Detailed test counts in older tables below may lag the repo. Run `npm test` for the authoritative count.
 
@@ -174,9 +174,9 @@ Follow-up: add/extend BATS coverage for JSONL and pre-analysis paths (tracked in
 
 | Metric | Current |
 |--------|---------|
-| **Total Tests** | 736+ |
+| **Total Tests** | 1,026 (855 unit + 28 integration + 143 SDK) |
 | **Pass Rate** | 100% |
-| **Test Files** | 17 unit + integration |
+| **Test Files** | 19 unit + 2 integration + 8 SDK |
 
 ### Code Quality
 
@@ -394,59 +394,14 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 
 ---
 
-## Open GitHub Issues (Stale — Need Closing)
+## Stale GitHub Issues (Pending Closure)
 
-> **Note:** The issues below are still open on GitHub but the underlying work was completed via the epic/story system. They should be closed with "completed" or "deferred" status.
+> **Action required:** Run `bash scripts/close-stale-issues.sh` from an account with write access to `frankbria/ralph-claude-code` to close 37 stale issues (24 completed, 6 deferred, 4 fixed in v2.1.0, 3 fixed in v2.2.0).
 
-### Completed (close as done)
-| Issue | Phase | Title | Completed Via |
-|-------|-------|-------|---------------|
-| #32 | 2.1 | Create Agent SDK proof of concept | SDK-1 |
-| #33 | 2.2 | Define custom tools for Agent SDK | SDK-2 |
-| #34 | 2.3 | Implement hybrid CLI/SDK architecture | SDK-3 |
-| #35 | 2.4 | Document SDK migration strategy | SDK-4 |
-| #36 | 3.1 | Add JSON configuration file support | CONFIG-1 |
-| #37 | 3.2 | Update installation for SDK support | CONFIG-2 |
-| #38 | 3.3 | Create CLI and SDK documentation | CONFIG-3 |
-| #21 | 3.7 | Implement metrics and analytics | OBSERVE-1 |
-| #22 | 3.8 | Implement notification system | OBSERVE-2 |
-| #23 | 3.9 | Implement backup and rollback system | OBSERVE-3 |
-| #14 | 4.4 | Implement tmux integration tests | TEST-1 |
-| #15 | 4.5 | Implement monitor dashboard tests | TEST-2 |
-| #16 | 4.6 | Implement status update tests | TEST-3 |
-| #39 | 4.1 | Implement CLI enhancement tests | TEST-4 |
-| #40 | 4.2 | Implement SDK integration tests | TEST-5 |
-| #41 | 4.3 | Implement backward compatibility tests | TEST-6 |
-| #17 | 4.7 | Implement E2E full loop tests | TEST-7 |
-| #69 | 5.1 | Allow plan import from GitHub Issue | GHISSUE-1 |
-| #70 | 5.2 | Assess issue completeness and generate plan | GHISSUE-2 |
-| #71 | 5.3 | Filter and select GitHub issues by metadata | GHISSUE-3 |
-| #72 | 5.4 | Batch processing and issue queue management | GHISSUE-4 |
-| #73 | 5.5 | Issue lifecycle management | GHISSUE-5 |
-| #49 | 6.0 | Sandbox execution environments (umbrella) | SANDBOX-1/2 |
-| #74 | 6.1 | Local Docker Sandbox Execution | SANDBOX-2 |
-
-### Deferred to TheStudio Premium (close as not-planned)
-| Issue | Phase | Title |
-|-------|-------|-------|
-| #75 | 6.2 | E2B Cloud Sandbox Integration |
-| #76 | 6.3 | Sandbox File Synchronization |
-| #77 | 6.4 | Sandbox Security and Resource Policies |
-| #78 | 6.5 | Generic Sandbox Interface |
-| #79 | 6.6 | Daytona Sandbox Integration |
-| #80 | 6.7 | Cloudflare Sandbox Integration |
-
-### Fixed in v2.1.0 (close as done)
-| Issue | Title | Fixed Via |
-|-------|-------|-----------|
-| #224 | Exit confidence threshold false-positive completions | Bug fix: completion_indicators decay on progress |
-| #154 | Bash wildcard patterns in ALLOWED_TOOLS | Bug fix: noglob during pattern parsing |
-| #221 | Block --no-verify for AI agents | Bug fix: expanded validate-command.sh + tests |
-| #110 | Token cost tracking | COSTROUTE-4 (cost dashboard) |
-
-### Genuinely Open Issues (active backlog)
+### Open Issues (active backlog)
 | Issue | Priority | Title |
 |-------|----------|-------|
+| #226 | P1 | SDK: parity with bash CLI (stall detection, progressive context, structured files_changed) |
 | #225 | P2 | No E2E integration tests |
 | #223 | P2 | Rate limiter counts invocations only |
 | #163 | P3 | Monorepo-aware features |
@@ -467,12 +422,13 @@ Session expiration is fully functional via `CLAUDE_SESSION_EXPIRY_HOURS` (defaul
 
 | Category | Count |
 |----------|-------|
-| GitHub Issues (genuinely open) | ~13 |
-| GitHub Issues (stale, need closing) | ~30 |
+| GitHub Issues (open backlog) | 0 (all 14 resolved in v2.6.0) |
+| GitHub Issues (pending closure via script) | 37 |
 | Closed Issues | 32+ |
-| Total Tests | 858+ |
+| Total Tests | 1,026 (855 unit + 28 integration + 143 SDK) |
 | Test Pass Rate | 100% |
 | Epic Stories | 148/148 Done |
+| Epics with Status: Done | 50/50 |
 
 ---
 

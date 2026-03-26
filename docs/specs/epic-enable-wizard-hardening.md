@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-ENABLE
 **Priority:** High
+**Status:** Done
 **Affects:** `ralph_enable.sh`, `lib/enable_core.sh`, `lib/task_sources.sh`, `lib/wizard_utils.sh`, docs
 **Components:** Interactive enable flow, task import pipeline, safety controls, reporting
 **Related specs:** `epic-context-management.md`, `epic-observability-v2.md`

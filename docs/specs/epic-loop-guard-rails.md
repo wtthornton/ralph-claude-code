@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-GUARD
 **Priority:** Critical
+**Status:** Done
 **Affects:** Loop reliability, API cost efficiency, unattended operation
 **Components:** `ralph_loop.sh` (progress detection, timeout handling)
 **Related specs:** [epic-loop-stability.md](epic-loop-stability.md), [epic-multi-task-cascading-failures.md](epic-multi-task-cascading-failures.md)

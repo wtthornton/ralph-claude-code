@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-ADAPTIVE
 **Priority:** High
+**Status:** Done
 **Affects:** Loop throughput, API efficiency, unattended operation
 **Components:** `ralph_loop.sh` (timeout calculation, latency tracking)
 **Related specs:** [epic-loop-guard-rails.md](epic-loop-guard-rails.md)

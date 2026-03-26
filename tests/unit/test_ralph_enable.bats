@@ -240,6 +240,7 @@ EOF
     echo "original prompt" > .ralph/PROMPT.md
     echo "original fix plan" > .ralph/fix_plan.md
     echo "original agent" > .ralph/AGENT.md
+    echo 'PROJECT_NAME="test"' > .ralphrc  # ENABLE-1: .ralphrc is now a required file
 
     run bash "$RALPH_ENABLE_CI" --from none
 

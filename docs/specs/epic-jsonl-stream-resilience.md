@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-JSONL
 **Priority:** Critical
+**Status:** Done
 **Affects:** Live mode (`--live`) reliability, autonomous loop continuity
 **Components:** `response_analyzer.sh`, `ralph_loop.sh`
 **Related specs:** `ralph-jsonl-crash-bug.md`, `ralph-multi-task-loop-and-cascading-failures.md`

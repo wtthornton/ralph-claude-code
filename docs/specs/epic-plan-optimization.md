@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-PLANOPT
 **Priority:** High
+**Status:** Done
 **Affects:** Token efficiency, task ordering, context switching overhead, loop throughput, quality
 **Components:** `lib/plan_optimizer.sh`, `lib/import_graph.sh`, `on-session-start.sh`, `ralph_import.sh`, `on-task-completed.sh`, `on-stop.sh`, `ralph.md`
 **Related specs:** `epic-hooks-agent-definition.md`, `epic-skills-bash-reduction.md`, `epic-sdk-context-management.md`, `epic-subagents.md`

@@ -377,18 +377,42 @@ def detect_permission_denials(output: str) -> list[PermissionDenialEvent]:
 # Tool names whose `file_path` input parameter represents a changed file
 _FILE_CHANGE_TOOLS = frozenset({"Write", "Edit", "MultiEdit"})
 
+# Pattern matching ``git add <path>`` arguments inside a Bash command string.
+# Handles both ``Bash(git add ...)`` and plain ``git add ...`` invocations.
+_GIT_ADD_PATTERN = re.compile(
+    r"git\s+add\s+(?:-[A-Za-z]+\s+)*(.+)",
+    re.IGNORECASE,
+)
+
+# Pattern matching ``git diff --name-only`` output lines (plain file paths,
+# one per line).  Used to extract paths from tool_result content.
+_DIFF_NAME_ONLY_TRIGGER = re.compile(
+    r"git\s+diff\s+.*--name-only",
+    re.IGNORECASE,
+)
+
 
 def extract_files_changed(text: str) -> list[str]:
-    """Extract unique file paths from Claude JSONL tool_use records.
+    """Extract unique file paths from Claude JSONL output.
 
-    Scans every JSONL line for ``{"type": "tool_use"}`` objects whose
-    ``name`` is one of Write, Edit, or MultiEdit.  Extracts the
-    ``file_path`` parameter from the ``input`` dict.
+    Uses three complementary strategies:
 
-    Returns a deduplicated list of file paths in first-seen order.
-    No regex heuristics on freeform text — only structured tool_use records.
+    1. **Write/Edit/MultiEdit tool_use** — extracts ``file_path`` from the
+       ``input`` dict of structured tool_use JSONL records.
+    2. **Bash(git add) tool_use** — parses the ``command`` input of Bash
+       tool_use records for ``git add <path>`` invocations.
+    3. **git diff --name-only output** — when a Bash tool_use command
+       contains ``git diff --name-only``, parses the corresponding
+       ``tool_result`` content for file paths (one per line).
+
+    Returns a deduplicated ``list[str]`` of file paths in first-seen order.
     """
     seen: dict[str, None] = {}  # ordered dict for dedup + order preservation
+
+    # Track whether the last Bash tool_use was a ``git diff --name-only``
+    # command, so we can harvest paths from the subsequent tool_result.
+    _awaiting_diff_result = False
+
     for line in text.splitlines():
         line = line.strip()
         if not line:
@@ -398,18 +422,52 @@ def extract_files_changed(text: str) -> list[str]:
         except json.JSONDecodeError:
             continue
 
-        if obj.get("type") != "tool_use":
-            continue
-        tool_name = obj.get("name", "")
-        if tool_name not in _FILE_CHANGE_TOOLS:
+        obj_type = obj.get("type", "")
+
+        # ----- Strategy 3 (cont.): Harvest git diff --name-only results -----
+        if _awaiting_diff_result and obj_type == "tool_result":
+            _awaiting_diff_result = False
+            result_content = obj.get("content", "")
+            if isinstance(result_content, str):
+                for diff_line in result_content.splitlines():
+                    path = diff_line.strip()
+                    if path and not path.startswith(("diff ", "index ", "---", "+++")):
+                        seen.setdefault(path, None)
             continue
 
+        if obj_type != "tool_use":
+            # Reset diff-result tracking if we see a non-tool_use, non-tool_result
+            if obj_type != "tool_result":
+                _awaiting_diff_result = False
+            continue
+
+        tool_name = obj.get("name", "")
         tool_input = obj.get("input")
         if not isinstance(tool_input, dict):
             continue
 
-        file_path = tool_input.get("file_path")
-        if isinstance(file_path, str) and file_path:
-            seen.setdefault(file_path, None)
+        # ----- Strategy 1: Write / Edit / MultiEdit -----
+        if tool_name in _FILE_CHANGE_TOOLS:
+            file_path = tool_input.get("file_path")
+            if isinstance(file_path, str) and file_path:
+                seen.setdefault(file_path, None)
+            continue
+
+        # ----- Strategy 2: Bash(git add ...) -----
+        if tool_name == "Bash":
+            command = tool_input.get("command", "")
+            if isinstance(command, str):
+                git_add_match = _GIT_ADD_PATTERN.search(command)
+                if git_add_match:
+                    raw_paths = git_add_match.group(1).strip()
+                    # Split on whitespace, but skip glob-only args like "."
+                    for token in raw_paths.split():
+                        token = token.strip("'\"")
+                        if token and token not in (".", "-A", "--all", "-u", "--update"):
+                            seen.setdefault(token, None)
+
+                # ----- Strategy 3: Bash(git diff --name-only) -----
+                if _DIFF_NAME_ONLY_TRIGGER.search(command):
+                    _awaiting_diff_result = True
 
     return list(seen)

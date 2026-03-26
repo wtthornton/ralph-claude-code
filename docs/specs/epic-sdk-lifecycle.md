@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-SDK-LIFECYCLE
 **Priority:** P1–P3
+**Status:** Done
 **Affects:** Graceful shutdown, timeout efficiency, permission awareness
 **Components:** `ralph_sdk/agent.py`, `ralph_sdk/config.py`, `ralph_sdk/parsing.py`
 **Related specs:** [epic-adaptive-timeout.md](epic-adaptive-timeout.md)

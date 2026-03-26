@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-UPKEEP
 **Priority:** Medium
+**Status:** Done
 **Affects:** Operational reliability, log quality, dependency health
 **Components:** `ralph_loop.sh` (auto-update), MCP connection handling
 **Related specs:** [epic-observability.md](epic-observability.md)

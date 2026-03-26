@@ -61,7 +61,7 @@ class RalphConfig(BaseModel):
     # SDK-SAFETY-1: Stall detection thresholds
     cb_max_consecutive_fast_failures: int = Field(default=3, ge=1, le=50)
     cb_fast_failure_threshold_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
-    cb_max_deferred_tests: int = Field(default=10, ge=1, le=100)
+    cb_max_deferred_tests: int = Field(default=5, ge=1, le=100)
     cb_deferred_tests_warn_at: int = Field(default=5, ge=1, le=50)
     cb_max_consecutive_timeouts: int = Field(default=5, ge=1, le=50)
 

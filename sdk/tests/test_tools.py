@@ -76,8 +76,8 @@ class TestRalphRateCheckTool:
         (Path(ralph_dir) / ".call_count").write_text("100")
         (Path(ralph_dir) / ".last_reset").write_text(str(int(time.time()) - 7200))
         result = await ralph_rate_check_tool(ralph_dir=ralph_dir, max_calls_per_hour=100)
-        # Elapsed > 3600 so remaining = max (counter not physically reset until next call)
-        assert result["calls_remaining"] == 0  # count file still says 100
+        # Elapsed > 3600 so counter is virtually reset — full quota available
+        assert result["calls_remaining"] == 100
 
 
 class TestRalphCircuitStateTool:

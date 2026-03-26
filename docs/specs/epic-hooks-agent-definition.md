@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-HOOKS
 **Priority:** Critical
+**Status:** Done
 **Affects:** Core loop reliability, tool permission management, response parsing
 **Components:** `ralph_loop.sh`, `lib/response_analyzer.sh`, `lib/file_protection.sh`
 **Related specs:** `claude-code-2026-enhancements.md` (§4.1, §4.2, §5 Phase 1)

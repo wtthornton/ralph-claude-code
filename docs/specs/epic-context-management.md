@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-CTXMGMT
 **Priority:** High
+**Status:** Done
 **Affects:** Loop success rate, token efficiency, long-running session stability
 **Components:** `ralph_loop.sh`, `.claude/agents/ralph.md`, `.claude/hooks/on-session-start.sh`
 **Related specs:** [epic-adaptive-timeout.md](epic-adaptive-timeout.md), [epic-plan-optimization.md](epic-plan-optimization.md)

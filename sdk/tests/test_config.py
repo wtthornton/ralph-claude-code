@@ -20,7 +20,7 @@ def tmp_project(tmp_path):
 def test_default_config():
     """Default config has sane values."""
     config = RalphConfig()
-    assert config.max_calls_per_hour == 100
+    assert config.max_calls_per_hour == 200
     assert config.timeout_minutes == 15
     assert config.output_format == "json"
     assert config.session_continuity is True
@@ -116,7 +116,7 @@ def test_missing_config_files(tmp_project):
     """Config loads with defaults when no config files exist."""
     config = RalphConfig.load(tmp_project)
     assert config.project_name == "my-project"
-    assert config.max_calls_per_hour == 100
+    assert config.max_calls_per_hour == 200
 
 
 def test_validation_ranges():

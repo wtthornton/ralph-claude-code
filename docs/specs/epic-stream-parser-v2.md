@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-STREAM
 **Priority:** Medium
+**Status:** Done
 **Affects:** Stream parsing, multi-result detection, RALPH_STATUS extraction, log clarity
 **Components:** `ralph_loop.sh` (`ralph_emergency_jsonl_normalize`), `templates/hooks/on-stop.sh`
 **Related specs:** `epic-jsonl-stream-resilience.md` (Phase 0), `epic-loop-stability.md` (Phase 0.5)

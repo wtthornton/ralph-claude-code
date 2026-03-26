@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-DEPLOY
 **Priority:** High
+**Status:** Done
 **Affects:** QA accuracy, test reliability, deployment correctness
 **Components:** `.claude/agents/ralph-tester.md`, `ralph_loop.sh` (QA phase), PROMPT.md templates
 **Related specs:** [epic-adaptive-timeout.md](epic-adaptive-timeout.md), [epic-loop-guard-rails.md](epic-loop-guard-rails.md)

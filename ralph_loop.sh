@@ -25,7 +25,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/tracing.sh" ]] && source "$SCRIPT_DIR/lib/tracing.sh"
 
 # Version
-RALPH_VERSION="2.5.0"
+RALPH_VERSION="2.6.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -39,8 +39,10 @@ SLEEP_DURATION=3600     # 1 hour in seconds
 LIVE_OUTPUT=false       # Show Claude Code output in real-time (streaming)
 LIVE_LOG_FILE="$RALPH_DIR/live.log"  # Fixed file for live output monitoring
 CALL_COUNT_FILE="$RALPH_DIR/.call_count"
+TOKEN_COUNT_FILE="$RALPH_DIR/.token_count"
 TIMESTAMP_FILE="$RALPH_DIR/.last_reset"
 USE_TMUX=false
+RALPH_SERVICE=""           # Monorepo service scope (Issue #163)
 
 # Save environment variable state BEFORE setting defaults
 # These are used by load_ralphrc() to determine which values came from environment
@@ -64,9 +66,16 @@ _env_LOG_MAX_OUTPUT_FILES="${LOG_MAX_OUTPUT_FILES:-}"
 
 # Now set defaults (only if not already set by environment)
 CLAUDE_CODE_CMD="${CLAUDE_CODE_CMD:-claude}"
+
+# E2E testing: override Claude command with mock (Issue #225)
+if [[ "${RALPH_MOCK_CLAUDE:-false}" == "true" ]]; then
+    CLAUDE_CODE_CMD="${RALPH_DIR}/../tests/mock_claude.sh"
+fi
+
 CLAUDE_MODEL="${CLAUDE_MODEL:-}"
 CLAUDE_EFFORT="${CLAUDE_EFFORT:-}"
 MAX_CALLS_PER_HOUR="${MAX_CALLS_PER_HOUR:-200}"
+MAX_TOKENS_PER_HOUR="${MAX_TOKENS_PER_HOUR:-0}"  # 0 = disabled; Issue #223
 VERBOSE_PROGRESS="${VERBOSE_PROGRESS:-false}"
 CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-15}"
 
@@ -109,6 +118,9 @@ RALPH_SESSION_HISTORY_FILE="$RALPH_DIR/.ralph_session_history"  # Session transi
 # Session expiration: 24 hours default balances project continuity with fresh context
 # Too short = frequent context loss; Too long = stale context causes unpredictable behavior
 CLAUDE_SESSION_EXPIRY_HOURS=${CLAUDE_SESSION_EXPIRY_HOURS:-24}
+
+# Issue #213: Keep tmux monitor panes alive after loop exits
+KEEP_MONITOR_AFTER_EXIT="${KEEP_MONITOR_AFTER_EXIT:-false}"
 
 # CTXMGMT-3: Continue-As-New configuration (Temporal pattern for long sessions)
 # After N iterations or M minutes in the same session, reset context carrying only essential state
@@ -434,26 +446,49 @@ validate_claude_command() {
 
     # For direct commands, check that the command exists
     if ! command -v "$cmd" &>/dev/null; then
-        echo ""
-        echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${RED}║  CLAUDE CODE CLI NOT FOUND                                ║${NC}"
-        echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
-        echo ""
-        echo -e "${YELLOW}The Claude Code CLI command '${cmd}' is not available.${NC}"
-        echo ""
-        echo -e "${YELLOW}Installation options:${NC}"
-        echo "  1. Install globally (recommended):"
-        echo "     npm install -g @anthropic-ai/claude-code"
-        echo ""
-        echo "  2. Use npx (no global install needed):"
-        echo "     Add to .ralphrc: CLAUDE_CODE_CMD=\"npx @anthropic-ai/claude-code\""
-        echo ""
-        echo -e "${YELLOW}Current configuration:${NC} CLAUDE_CODE_CMD=\"${cmd}\""
-        echo ""
-        echo -e "${YELLOW}After installation or configuration:${NC}"
-        echo "  ralph --monitor  # Restart Ralph"
-        echo ""
-        return 1
+        # Issue #211: Try sourcing user's shell rc file (zsh/bash) to pick up PATH additions
+        # Users who install claude via nvm/fnm/homebrew etc. may only have it in their shell profile
+        local _rc_sourced=false
+        if [[ -n "${ZSH_VERSION:-}" ]] && [[ -f "$HOME/.zshrc" ]]; then
+            source "$HOME/.zshrc" 2>/dev/null && _rc_sourced=true
+        elif [[ -f "$HOME/.zshrc" ]] && command -v zsh &>/dev/null; then
+            # Running under bash but user has zsh config — extract PATH from zsh
+            local _zsh_path
+            _zsh_path=$(zsh -ic 'echo $PATH' 2>/dev/null) && export PATH="$_zsh_path" && _rc_sourced=true
+        fi
+        if [[ "$_rc_sourced" == "false" ]] && [[ -f "$HOME/.bashrc" ]]; then
+            source "$HOME/.bashrc" 2>/dev/null && _rc_sourced=true
+        fi
+        # Also try common Node.js manager paths
+        for _node_dir in "$HOME/.nvm" "$HOME/.fnm" "$HOME/.local/share/fnm" "$HOME/.volta"; do
+            if [[ -d "$_node_dir" ]]; then
+                export PATH="$_node_dir/current/bin:$_node_dir/bin:$PATH" 2>/dev/null
+            fi
+        done
+        # Re-check after sourcing
+        if ! command -v "$cmd" &>/dev/null; then
+            echo ""
+            echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}║  CLAUDE CODE CLI NOT FOUND                                ║${NC}"
+            echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            echo -e "${YELLOW}The Claude Code CLI command '${cmd}' is not available.${NC}"
+            echo ""
+            echo -e "${YELLOW}Installation options:${NC}"
+            echo "  1. Install globally (recommended):"
+            echo "     npm install -g @anthropic-ai/claude-code"
+            echo ""
+            echo "  2. Use npx (no global install needed):"
+            echo "     Add to .ralphrc: CLAUDE_CODE_CMD=\"npx @anthropic-ai/claude-code\""
+            echo ""
+            echo -e "${YELLOW}Current configuration:${NC} CLAUDE_CODE_CMD=\"${cmd}\""
+            echo ""
+            echo -e "${YELLOW}After installation or configuration:${NC}"
+            echo "  ralph --monitor  # Restart Ralph"
+            echo ""
+            return 1
+        fi
+        [[ "$_rc_sourced" == "true" ]] && log_status "INFO" "Found '$cmd' after sourcing shell rc file"
     fi
 
     return 0
@@ -573,13 +608,22 @@ setup_tmux_session() {
     if [[ "$CB_AUTO_RESET" == "true" ]]; then
         ralph_cmd="$ralph_cmd --auto-reset-circuit"
     fi
+    # Forward --service if set (Issue #163)
+    if [[ -n "$RALPH_SERVICE" ]]; then
+        ralph_cmd="$ralph_cmd --service '$RALPH_SERVICE'"
+    fi
 
     # Chain tmux kill-session after the loop command so the entire tmux
     # session is torn down when the Ralph loop exits (graceful completion,
     # circuit breaker, error, or manual interrupt). Without this, the
     # tail -f and ralph_monitor.sh panes keep the session alive forever.
     # Issue: https://github.com/frankbria/ralph-claude-code/issues/176
-    tmux send-keys -t "$session_name:${base_win}.0" "$ralph_cmd; tmux kill-session -t $session_name 2>/dev/null" Enter
+    # Issue #213: KEEP_MONITOR_AFTER_EXIT preserves tail -f and status panes
+    if [[ "${KEEP_MONITOR_AFTER_EXIT:-false}" == "true" ]]; then
+        tmux send-keys -t "$session_name:${base_win}.0" "$ralph_cmd; echo 'Ralph loop exited. Monitor panes preserved. Run: tmux kill-session -t $session_name'" Enter
+    else
+        tmux send-keys -t "$session_name:${base_win}.0" "$ralph_cmd; tmux kill-session -t $session_name 2>/dev/null" Enter
+    fi
 
     # Focus on left pane (main ralph loop)
     tmux select-pane -t "$session_name:${base_win}.0"
@@ -606,6 +650,89 @@ setup_tmux_session() {
     exit 0
 }
 
+# Issue #156: Detect Windows Terminal availability
+check_windows_terminal_available() {
+    if command -v wt.exe &>/dev/null; then
+        return 0
+    fi
+    # Check common Windows paths from WSL/Git Bash
+    local wt_path="/mnt/c/Users/${USER}/AppData/Local/Microsoft/WindowsApps/wt.exe"
+    if [[ -x "$wt_path" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Issue #156: Setup Windows Terminal split panes as tmux alternative
+setup_windows_terminal_session() {
+    local ralph_home="${RALPH_HOME:-$HOME/.ralph}"
+    local project_dir
+    project_dir=$(pwd)
+
+    log_status "INFO" "Setting up Windows Terminal split panes"
+
+    # Initialize live.log file
+    echo "=== Ralph Live Output - Waiting for first loop... ===" > "$LIVE_LOG_FILE"
+
+    # Build the ralph command for the main pane
+    local ralph_cmd
+    if command -v ralph &>/dev/null; then
+        ralph_cmd="ralph"
+    else
+        ralph_cmd="'$ralph_home/ralph_loop.sh'"
+    fi
+    ralph_cmd="$ralph_cmd --live"
+    if [[ "$MAX_CALLS_PER_HOUR" != "200" ]]; then
+        ralph_cmd="$ralph_cmd --calls $MAX_CALLS_PER_HOUR"
+    fi
+    if [[ "$VERBOSE_PROGRESS" == "true" ]]; then
+        ralph_cmd="$ralph_cmd --verbose"
+    fi
+    if [[ -n "$RALPH_SERVICE" ]]; then
+        ralph_cmd="$ralph_cmd --service '$RALPH_SERVICE'"
+    fi
+
+    # Build monitor command
+    local monitor_cmd
+    if command -v ralph-monitor &>/dev/null; then
+        monitor_cmd="ralph-monitor"
+    else
+        monitor_cmd="'$ralph_home/ralph_monitor.sh'"
+    fi
+
+    # Find wt.exe
+    local wt_exe="wt.exe"
+    if ! command -v wt.exe &>/dev/null; then
+        wt_exe="/mnt/c/Users/${USER}/AppData/Local/Microsoft/WindowsApps/wt.exe"
+    fi
+
+    # Launch Windows Terminal with split panes:
+    # Main pane: Ralph loop
+    # Right pane (split vertical): tail -f live.log
+    # Bottom-right pane (split horizontal): Ralph monitor
+    "$wt_exe" \
+        --title "Ralph Loop" \
+        -d "$project_dir" bash -c "$ralph_cmd" \; \
+        split-pane --vertical --title "Claude Output" \
+        -d "$project_dir" bash -c "tail -f '$project_dir/$LIVE_LOG_FILE'" \; \
+        split-pane --horizontal --title "Status" \
+        -d "$project_dir" bash -c "$monitor_cmd" \
+        2>/dev/null
+
+    if [[ $? -ne 0 ]]; then
+        log_status "ERROR" "Failed to launch Windows Terminal split panes"
+        log_status "INFO" "Falling back to standard execution. Use --monitor with tmux instead."
+        return 1
+    fi
+
+    log_status "SUCCESS" "Windows Terminal session created with 3 panes:"
+    log_status "INFO" "  Left:         Ralph loop"
+    log_status "INFO" "  Right-top:    Claude Code live output"
+    log_status "INFO" "  Right-bottom: Status monitor"
+
+    exit 0
+}
+
 # Initialize call tracking
 init_call_tracking() {
     # Debug logging removed for cleaner output
@@ -616,9 +743,10 @@ init_call_tracking() {
         last_reset_hour=$(cat "$TIMESTAMP_FILE")
     fi
 
-    # Reset counter if it's a new hour
+    # Reset counters if it's a new hour (invocation + token counts)
     if [[ "$current_hour" != "$last_reset_hour" ]]; then
         echo "0" > "$CALL_COUNT_FILE"
+        echo "0" > "$TOKEN_COUNT_FILE"  # Issue #223
         echo "$current_hour" > "$TIMESTAMP_FILE"
         log_status "INFO" "Call counter reset for new hour: $current_hour"
     fi
@@ -1107,16 +1235,33 @@ _read_call_count() {
     echo "${_cc:-0}"
 }
 
-# Check if we can make another call
+# Issue #223: Helper to read token count
+_read_token_count() {
+    local _tc=0
+    [[ -f "$TOKEN_COUNT_FILE" ]] && read -r _tc < "$TOKEN_COUNT_FILE" 2>/dev/null
+    echo "${_tc:-0}"
+}
+
+# Check if we can make another call (invocation + token limits)
 can_make_call() {
     local calls_made
     calls_made=$(_read_call_count)
 
     if [[ $calls_made -ge $MAX_CALLS_PER_HOUR ]]; then
-        return 1  # Cannot make call
-    else
-        return 0  # Can make call
+        return 1  # Cannot make call — invocation limit
     fi
+
+    # Issue #223: Token-based rate limiting (0 = disabled)
+    if [[ "$MAX_TOKENS_PER_HOUR" -gt 0 ]]; then
+        local tokens_used
+        tokens_used=$(_read_token_count)
+        if [[ $tokens_used -ge $MAX_TOKENS_PER_HOUR ]]; then
+            log_status "WARN" "Token limit reached ($tokens_used/$MAX_TOKENS_PER_HOUR tokens/hour)"
+            return 1  # Cannot make call — token limit
+        fi
+    fi
+
+    return 0  # Can make call
 }
 
 # Increment call counter
@@ -1127,6 +1272,26 @@ increment_call_counter() {
     ((calls_made++))
     echo "$calls_made" > "$CALL_COUNT_FILE"
     echo "$calls_made"
+}
+
+# Issue #223: Accumulate token usage from Claude output
+accumulate_tokens() {
+    local output_file=$1
+    [[ ! -f "$output_file" ]] && return 0
+    [[ "$MAX_TOKENS_PER_HOUR" -eq 0 ]] && return 0  # Token tracking disabled
+
+    local tokens_in tokens_out tokens_this_call
+    tokens_in=$(jq -r '.usage.input_tokens // 0' "$output_file" 2>/dev/null || echo "0")
+    tokens_out=$(jq -r '.usage.output_tokens // 0' "$output_file" 2>/dev/null || echo "0")
+    tokens_this_call=$((tokens_in + tokens_out))
+
+    if [[ $tokens_this_call -gt 0 ]]; then
+        local current_tokens
+        current_tokens=$(_read_token_count)
+        local new_total=$((current_tokens + tokens_this_call))
+        echo "$new_total" > "$TOKEN_COUNT_FILE"
+        log_status "INFO" "Tokens this call: $tokens_this_call (total: $new_total/$MAX_TOKENS_PER_HOUR)"
+    fi
 }
 
 # Wait for rate limit reset with countdown
@@ -1154,8 +1319,9 @@ wait_for_reset() {
     done
     printf "\n"
     
-    # Reset counter
+    # Reset counters (invocation + tokens)
     echo "0" > "$CALL_COUNT_FILE"
+    echo "0" > "$TOKEN_COUNT_FILE"  # Issue #223
     echo "$(date +%Y%m%d%H)" > "$TIMESTAMP_FILE"
     log_status "SUCCESS" "Rate limit reset! Ready for new calls."
 }
@@ -1858,8 +2024,14 @@ init_claude_session() {
         fi
 
         # Session is valid, try to read it
-        local session_id=$(cat "$CLAUDE_SESSION_FILE" 2>/dev/null)
-        if [[ -n "$session_id" ]]; then
+        # Issue #123: Support both JSON format (new) and plain text (legacy) for backward compat
+        local session_id
+        session_id=$(jq -r '.session_id // empty' "$CLAUDE_SESSION_FILE" 2>/dev/null)
+        if [[ -z "$session_id" ]]; then
+            # Fallback: plain text format (pre-#123 files)
+            session_id=$(cat "$CLAUDE_SESSION_FILE" 2>/dev/null)
+        fi
+        if [[ -n "$session_id" && "$session_id" != "null" ]]; then
             log_status "INFO" "Resuming Claude session: ${session_id:0:20}... (${age_hours}h old)"
             echo "$session_id"
             return 0
@@ -1885,10 +2057,14 @@ save_claude_session() {
     fi
 
     # Try to extract session ID from JSON output
+    # Issue #123: Use JSON format consistent with store_session_id()
     if [[ -f "$output_file" ]]; then
         local session_id=$(jq -r '.metadata.session_id // .session_id // empty' "$output_file" 2>/dev/null)
         if [[ -n "$session_id" && "$session_id" != "null" ]]; then
-            echo "$session_id" > "$CLAUDE_SESSION_FILE"
+            jq -n \
+                --arg session_id "$session_id" \
+                --arg timestamp "$(get_iso_timestamp)" \
+                '{ session_id: $session_id, timestamp: $timestamp }' > "$CLAUDE_SESSION_FILE"
             log_status "INFO" "Saved Claude session: ${session_id:0:20}..."
         fi
     fi
@@ -2259,6 +2435,32 @@ check_agent_support() {
     return 1
 }
 
+# Append monorepo service scope to prompt content (Issue #163)
+# When RALPH_SERVICE is set, adds a section scoping work to that service directory
+ralph_scope_prompt_for_service() {
+    local prompt_content="$1"
+    local service_name="${RALPH_SERVICE:-}"
+
+    if [[ -z "$service_name" ]]; then
+        echo "$prompt_content"
+        return 0
+    fi
+
+    # Determine the service directory path
+    local monorepo_root="${MONOREPO_ROOT:-services/}"
+    local service_dir="${monorepo_root%/}/${service_name}"
+
+    # Check if service directory exists
+    if [[ ! -d "$service_dir" ]]; then
+        log_status "WARN" "Service directory not found: $service_dir"
+        log_status "WARN" "Checked MONOREPO_ROOT='$monorepo_root' + service='$service_name'"
+    fi
+
+    # Append service scope section to prompt
+    printf '%s\n\n## Monorepo Service Scope\nYou are scoped to the **%s** service.\n- Focus all work within the `%s` directory\n- Only modify files under `%s/` unless cross-service changes are explicitly required\n- Run tests and builds scoped to this service when possible\n- When referencing paths, use paths relative to the project root (e.g., `%s/src/...`)\n' \
+        "$prompt_content" "$service_name" "$service_dir" "$service_dir" "$service_dir"
+}
+
 # Uses -p flag with prompt content (Claude CLI does not have --prompt-file)
 # When RALPH_USE_AGENT=true and CLI supports it, uses --agent ralph instead
 build_claude_command() {
@@ -2299,6 +2501,8 @@ build_claude_command() {
         if [[ -f "$prompt_file" ]]; then
             local prompt_content
             prompt_content=$(cat "$prompt_file")
+            # Issue #163: Scope prompt to monorepo service if --service was specified
+            prompt_content=$(ralph_scope_prompt_for_service "$prompt_content")
             CLAUDE_CMD_ARGS+=("-p" "$prompt_content")
         fi
         log_status "INFO" "Using agent mode: --agent ${RALPH_AGENT_NAME:-ralph}"
@@ -2370,6 +2574,8 @@ build_claude_command() {
     # Read prompt file content and use -p flag
     local prompt_content
     prompt_content=$(cat "$prompt_file")
+    # Issue #163: Scope prompt to monorepo service if --service was specified
+    prompt_content=$(ralph_scope_prompt_for_service "$prompt_content")
     CLAUDE_CMD_ARGS+=("-p" "$prompt_content")
 }
 
@@ -2740,7 +2946,11 @@ execute_claude_code() {
     # GUARD-1: Capture working tree baseline before Claude invocation
     ralph_capture_baseline
 
-    log_status "LOOP" "Executing Claude Code (Call $calls_made/$MAX_CALLS_PER_HOUR)"
+    local _token_info=""
+    if [[ "$MAX_TOKENS_PER_HOUR" -gt 0 ]]; then
+        _token_info=" | Tokens $(_read_token_count)/$MAX_TOKENS_PER_HOUR"
+    fi
+    log_status "LOOP" "Executing Claude Code (Call $calls_made/$MAX_CALLS_PER_HOUR${_token_info})"
 
     # ADAPTIVE-1: Use adaptive timeout if enabled, otherwise static
     local adaptive_timeout
@@ -3335,6 +3545,9 @@ EOF
         if [[ "$CLAUDE_USE_CONTINUE" == "true" ]]; then
             save_claude_session "$output_file"
         fi
+
+        # Issue #223: Accumulate token usage from this call
+        accumulate_tokens "$output_file"
 
         # Update exit signals from status.json (written by on-stop.sh hook)
         log_status "INFO" "🔍 Reading response analysis from status.json..."
@@ -4048,43 +4261,84 @@ main() {
             log_status "INFO" "Run 'ralph --reset-circuit' to reset the circuit breaker after addressing issues"
             break
         elif [ $exec_result -eq 2 ]; then
-            # API 5-hour limit reached - handle specially
+            # Issue #102: API plan limit / Extra Usage exhaustion — parse reset time and auto-sleep
             update_status "$loop_count" "$(_read_call_count)" "api_limit" "paused"
-            log_status "WARN" "🛑 Claude API 5-hour limit reached!"
-            
-            # Ask user whether to wait or exit
-            echo -e "\n${YELLOW}A Claude API usage limit has been reached (5-hour plan limit or Extra Usage quota).${NC}"
-            echo -e "${YELLOW}You can either:${NC}"
-            echo -e "  ${GREEN}1)${NC} Wait for the limit to reset (usually within an hour)"
-            echo -e "  ${GREEN}2)${NC} Exit the loop and try again later"
-            echo -e "\n${BLUE}Choose an option (1 or 2):${NC} "
-            
-            # Read user input with timeout
+            log_status "WARN" "🛑 Claude API usage limit reached!"
+
+            # Try to extract reset time from the output (e.g., "resets 9pm", "try back in 3 hours")
+            local reset_hint=""
+            local wait_minutes=60  # default: 1 hour
+            if [[ -f "$output_file" ]]; then
+                # "resets 9pm" pattern (Extra Usage)
+                reset_hint=$(tail -30 "$output_file" 2>/dev/null | grep -oiE 'resets?\s+[0-9]{1,2}\s*(am|pm)' | tail -1)
+                if [[ -n "$reset_hint" ]]; then
+                    local reset_hour
+                    reset_hour=$(echo "$reset_hint" | grep -oE '[0-9]+')
+                    local reset_ampm
+                    reset_ampm=$(echo "$reset_hint" | grep -oiE 'am|pm')
+                    # Convert to 24h and calculate wait
+                    if [[ "${reset_ampm,,}" == "pm" && "$reset_hour" -ne 12 ]]; then
+                        reset_hour=$((reset_hour + 12))
+                    elif [[ "${reset_ampm,,}" == "am" && "$reset_hour" -eq 12 ]]; then
+                        reset_hour=0
+                    fi
+                    local current_hour=$(date +%H)
+                    local current_min=$(date +%M)
+                    local mins_until=$(( (reset_hour * 60 - current_hour * 60 - current_min + 1440) % 1440 ))
+                    [[ $mins_until -le 0 ]] && mins_until=60
+                    [[ $mins_until -gt 360 ]] && mins_until=60  # cap at 6h, fallback
+                    wait_minutes=$mins_until
+                fi
+                # "try back in N hours" pattern
+                if [[ -z "$reset_hint" ]]; then
+                    reset_hint=$(tail -30 "$output_file" 2>/dev/null | grep -oiE 'try.*(back|again).*in\s+[0-9]+\s*hour' | tail -1)
+                    if [[ -n "$reset_hint" ]]; then
+                        local hours_back
+                        hours_back=$(echo "$reset_hint" | grep -oE '[0-9]+' | tail -1)
+                        [[ -n "$hours_back" && "$hours_back" -gt 0 ]] && wait_minutes=$((hours_back * 60))
+                    fi
+                fi
+            fi
+
+            local wait_h=$((wait_minutes / 60))
+            local wait_m=$((wait_minutes % 60))
+            local resume_time
+            resume_time=$(date -d "+${wait_minutes} minutes" '+%H:%M' 2>/dev/null || date -v+${wait_minutes}M '+%H:%M' 2>/dev/null || echo "~${wait_h}h ${wait_m}m from now")
+
+            echo ""
+            echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}║  PLAN LIMIT EXHAUSTED                                     ║${NC}"
+            echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            echo -e "${YELLOW}Your Claude plan credits have been exhausted.${NC}"
+            [[ -n "$reset_hint" ]] && echo -e "${YELLOW}Detected reset info: ${reset_hint}${NC}"
+            echo -e "${YELLOW}Estimated resume time: ${GREEN}${resume_time}${NC} (${wait_minutes} minutes)"
+            echo ""
+            echo -e "${YELLOW}Options:${NC}"
+            echo -e "  ${GREEN}1)${NC} Auto-sleep until credits reset (${wait_minutes} min)"
+            echo -e "  ${GREEN}2)${NC} Exit the loop"
+            echo -e "\n${BLUE}Choose an option (1 or 2) [auto-sleep in 30s]:${NC} "
+
             read -t 30 -n 1 user_choice || true
-            echo  # New line after input
-            
+            echo
+
             if [[ "$user_choice" == "2" ]]; then
                 log_status "INFO" "User chose to exit. Exiting loop..."
                 reset_session "api_limit_exit"
                 update_status "$loop_count" "$(_read_call_count)" "api_limit_exit" "stopped" "api_5hour_limit"
                 break
             else
-                # Auto-wait on timeout (empty choice) or explicit "1" — supports unattended operation
-                log_status "INFO" "Waiting for API limit reset (auto-wait for unattended mode)..."
-                # Wait for longer period when API limit is hit
-                local wait_minutes=60
-                log_status "INFO" "Waiting $wait_minutes minutes before retrying..."
-                
-                # Countdown display
+                log_status "INFO" "Auto-sleeping for $wait_minutes minutes until credit reset (~$resume_time)..."
                 local wait_seconds=$((wait_minutes * 60))
                 while [[ $wait_seconds -gt 0 ]]; do
                     local minutes=$((wait_seconds / 60))
                     local seconds=$((wait_seconds % 60))
-                    printf "\r${YELLOW}Time until retry: %02d:%02d${NC}" $minutes $seconds
+                    printf "\r${YELLOW}💤 Ralph sleeping — credits reset in: %02d:%02d — resume ~${resume_time}${NC}" $minutes $seconds
                     sleep 1
                     ((wait_seconds--))
                 done
                 printf "\n"
+                log_status "INFO" "Credit reset period complete. Resuming loop..."
             fi
         else
             update_status "$loop_count" "$(_read_call_count)" "failed" "error"
@@ -4207,6 +4461,15 @@ Cost Optimization (Phase 14):
     --cost-dashboard        Show unified cost dashboard and exit
     --costs                 Alias for --cost-dashboard
 
+Monorepo (Issue #163):
+    --service NAME          Scope Ralph to a monorepo service directory
+
+Beads Integration (Issue #87):
+    --beads                 Shortcut: set TASK_SOURCES="beads"
+
+Windows (Issue #156):
+    --wt                    Use Windows Terminal split panes instead of tmux (auto-detected)
+
 Sandbox (Phase 11 — v1.8.0):
     --sandbox               Run loop inside Docker container
     --sandbox-required      Fail if Docker not available (instead of fallback)
@@ -4265,6 +4528,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -c|--calls)
             MAX_CALLS_PER_HOUR="$2"
+            shift 2
+            ;;
+        --max-tokens)
+            MAX_TOKENS_PER_HOUR="$2"
             shift 2
             ;;
         -p|--prompt)
@@ -4460,6 +4727,22 @@ while [[ $# -gt 0 ]]; do
             RALPH_STOP_ON_FAILURE=true
             shift
             ;;
+        --service)
+            if [[ -z "$2" || "$2" == --* ]]; then
+                echo "Error: --service requires a service name"
+                exit 1
+            fi
+            RALPH_SERVICE="$2"
+            shift 2
+            ;;
+        --beads)
+            TASK_SOURCES="beads"
+            shift
+            ;;
+        --wt)
+            USE_WINDOWS_TERMINAL=true
+            shift
+            ;;
         --sandbox)
             RALPH_SANDBOX_MODE=true
             shift
@@ -4543,9 +4826,29 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     fi
 
     # If tmux mode requested, set it up
-    if [[ "$USE_TMUX" == "true" ]]; then
-        check_tmux_available
-        setup_tmux_session
+    # Issue #156: On Windows, auto-detect Windows Terminal as tmux alternative
+    if [[ "$USE_TMUX" == "true" ]] || [[ "${USE_WINDOWS_TERMINAL:-false}" == "true" ]]; then
+        if [[ "${USE_WINDOWS_TERMINAL:-false}" == "true" ]]; then
+            # Explicit --wt flag
+            if check_windows_terminal_available; then
+                setup_windows_terminal_session
+            else
+                log_status "ERROR" "Windows Terminal (wt.exe) not found. Install from Microsoft Store or use --monitor with tmux."
+                exit 1
+            fi
+        elif command -v tmux &>/dev/null; then
+            check_tmux_available
+            setup_tmux_session
+        elif check_windows_terminal_available; then
+            log_status "INFO" "tmux not available, using Windows Terminal split panes instead"
+            setup_windows_terminal_session
+        else
+            log_status "ERROR" "Neither tmux nor Windows Terminal (wt.exe) found."
+            echo "Install one of:"
+            echo "  tmux:             sudo apt-get install tmux (WSL/Linux)"
+            echo "  Windows Terminal: Available from Microsoft Store"
+            exit 1
+        fi
     fi
 
     # Start the main loop

@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-SDK-CONTEXT
 **Priority:** P0–P2 (mixed; progressive context loading is P0)
+**Status:** Done
 **Affects:** Token efficiency, context window utilization, session durability, cost reduction
 **Components:** `ralph_sdk/agent.py`, `ralph_sdk/config.py`, `ralph_sdk/state.py`
 **Related specs:** [epic-context-management.md](epic-context-management.md), [epic-adaptive-timeout.md](epic-adaptive-timeout.md)

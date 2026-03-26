@@ -59,10 +59,17 @@ fetch_beads_tasks() {
         bdArgs+=("--all")
     fi
 
+    # Issue #87: Support BEADS_PROJECT for project-scoped queries
+    if [[ -n "${BEADS_PROJECT:-}" ]]; then
+        bdArgs+=("--project" "$BEADS_PROJECT")
+    fi
+
     # Try to get tasks as JSON
     local json_output
     if json_output=$(bd "${bdArgs[@]}" 2>/dev/null); then
         # Parse JSON and format as markdown tasks
+        # Issue #87: Enhanced JSON parsing with proper field mapping and priority extraction
+        # Fields: id, title, status, priority (P0-P4), type, description, assignee, labels
         # Note: Use 'select(.status == "closed") | not' to avoid bash escaping issues with '!='
         # Also filter out entries with missing id or title fields
         if command -v jq &>/dev/null; then
@@ -70,7 +77,13 @@ fetch_beads_tasks() {
                 .[] |
                 select(.status == "closed" | not) |
                 select((.id // "") != "" and (.title // "") != "") |
-                "- [ ] [\(.id)] \(.title)"
+                # Extract priority tag if present
+                (if (.priority // "") != "" then " [" + .priority + "]" else "" end) as $prio |
+                # Extract type tag if present
+                (if (.type // "") != "" then " [" + .type + "]" else "" end) as $type |
+                # Extract assignee if present
+                (if (.assignee // "") != "" then " @" + .assignee else "" end) as $assignee |
+                "- [ ] [\(.id)]\($prio)\($type) \(.title)\($assignee)"
             ' 2>/dev/null || echo "")
         fi
     fi
@@ -86,15 +99,23 @@ fetch_beads_tasks() {
         elif [[ "$filterStatus" == "all" ]]; then
             fallbackArgs+=("--all")
         fi
+        # Issue #87: Add project scoping to fallback as well
+        if [[ -n "${BEADS_PROJECT:-}" ]]; then
+            fallbackArgs+=("--project" "$BEADS_PROJECT")
+        fi
         tasks=$(bd "${fallbackArgs[@]}" 2>/dev/null | while IFS= read -r line; do
             # Extract ID and title from bd list output
             # Format: "○ cnzb-xxx [● P2] [task] - Title here"
-            local id title
+            local id title priority
             id=$(echo "$line" | grep -oE '[a-z]+-[a-z0-9]+' | head -1 || echo "")
+            # Issue #87: Extract priority from bd list output (e.g., "P0", "P1", "P2")
+            priority=$(echo "$line" | grep -oE 'P[0-4]' | head -1 || echo "")
             # Extract title after the last " - " separator
             title=$(echo "$line" | sed 's/.*- //' || echo "$line")
             if [[ -n "$id" && -n "$title" ]]; then
-                echo "- [ ] [$id] $title"
+                local prio_tag=""
+                [[ -n "$priority" ]] && prio_tag=" [$priority]"
+                echo "- [ ] [$id]${prio_tag} $title"
             fi
         done)
     fi
@@ -119,10 +140,16 @@ get_beads_count() {
         return 1
     fi
 
+    # Issue #87: Support BEADS_PROJECT for project-scoped count
+    local bd_args=("list" "--json")
+    if [[ -n "${BEADS_PROJECT:-}" ]]; then
+        bd_args+=("--project" "$BEADS_PROJECT")
+    fi
+
     local count
     if command -v jq &>/dev/null; then
         # Note: Use 'select(.status == "closed" | not)' to avoid bash escaping issues with '!='
-        count=$(bd list --json 2>/dev/null | jq '[.[] | select(.status == "closed" | not)] | length' 2>/dev/null || echo "0")
+        count=$(bd "${bd_args[@]}" 2>/dev/null | jq '[.[] | select(.status == "closed" | not)] | length' 2>/dev/null || echo "0")
     else
         count=$(bd list 2>/dev/null | wc -l | tr -d ' ')
     fi

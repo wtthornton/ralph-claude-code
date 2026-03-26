@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-SDK-SAFETY
 **Priority:** P0–P1 (mixed; stall detection is P0)
+**Status:** Done
 **Affects:** SDK loop reliability, budget waste prevention, production quality
 **Components:** `ralph_sdk/circuit_breaker.py`, `ralph_sdk/agent.py`, `ralph_sdk/status.py`
 **Related specs:** [epic-loop-guard-rails.md](epic-loop-guard-rails.md), [epic-multi-task-cascading-failures.md](epic-multi-task-cascading-failures.md)

@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-GHISSUE
 **Priority:** Important
+**Status:** Done
 **Affects:** Task intake, GitHub workflow, issue lifecycle
 **Components:** `ralph_loop.sh`, `lib/task_sources.sh`, new `lib/github_issues.sh`
 **Related specs:** `IMPLEMENTATION_PLAN.md` (§Phase 5)

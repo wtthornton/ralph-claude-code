@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-SANDBOXV2
 **Priority:** Medium
+**Status:** Done
 **Affects:** Security, isolation, resource control, compliance
 **Components:** `lib/sandbox.sh`, `docker/ralph-sandbox/Dockerfile`
 **Related specs:** [epic-docker-sandbox.md](epic-docker-sandbox.md) (Phase 11 — initial Docker sandbox)

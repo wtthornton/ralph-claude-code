@@ -35,15 +35,17 @@ teardown() {
 }
 
 @test "HOOKS-1: ralph.md has model: opus" {
-    grep -q "model: opus" "$PROJECT_ROOT/.claude/agents/ralph.md"
+    # Agent runs on sonnet since v1.8.4 speed optimizations
+    grep -q "model: sonnet" "$PROJECT_ROOT/.claude/agents/ralph.md"
 }
 
 @test "HOOKS-1: ralph.md has maxTurns" {
     grep -q "maxTurns:" "$PROJECT_ROOT/.claude/agents/ralph.md"
 }
 
-@test "HOOKS-1: ralph.md has permissionMode: acceptEdits" {
-    grep -q "permissionMode: acceptEdits" "$PROJECT_ROOT/.claude/agents/ralph.md"
+@test "HOOKS-1: ralph.md has permissionMode: bypassPermissions" {
+    # Changed from acceptEdits since v1.8.4 speed optimizations
+    grep -q "permissionMode: bypassPermissions" "$PROJECT_ROOT/.claude/agents/ralph.md"
 }
 
 @test "HOOKS-1: ralph.md includes RALPH_STATUS template" {
@@ -84,9 +86,8 @@ teardown() {
 }
 
 @test "HOOKS-2: settings.json declares PostToolUse hooks" {
-    local count
-    count=$(jq '.hooks.PostToolUse | length' "$PROJECT_ROOT/.claude/settings.json")
-    [[ "$count" -ge 2 ]]
+    # PostToolUse hooks disabled since v1.8.4 (speed optimization); array exists but is empty
+    jq -e '.hooks.PostToolUse' "$PROJECT_ROOT/.claude/settings.json" >/dev/null
 }
 
 @test "HOOKS-2: settings.json declares SubagentStop hook" {
@@ -98,8 +99,9 @@ teardown() {
 }
 
 @test "HOOKS-2: hook scripts reference .ralph/hooks/ directory" {
+    # All bash commands should reference .ralph/hooks/; ignore tool matchers like "Write", "server_error"
     local non_ralph_hooks
-    non_ralph_hooks=$(jq -r '.. | .command? // empty' "$PROJECT_ROOT/.claude/settings.json" | grep -v '.ralph/hooks/' | wc -l | tr -d '[:space:]')
+    non_ralph_hooks=$(jq -r '.. | .command? // empty' "$PROJECT_ROOT/.claude/settings.json" | grep -E '^bash ' | grep -v '.ralph/hooks/' | wc -l | tr -d '[:space:]')
     [[ "$non_ralph_hooks" -eq 0 ]]
 }
 

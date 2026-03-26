@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-WSL
 **Priority:** Low
+**Status:** Done
 **Affects:** Temp file cleanup, git status noise, trap handler robustness
 **Components:** `templates/hooks/on-stop.sh`, `ralph_loop.sh` (cleanup function)
 **Source:** [ralph-feedback-report.md](../../../../tapps-brain/ralph-feedback-report.md) (2026-03-21, Issues #3, #4)

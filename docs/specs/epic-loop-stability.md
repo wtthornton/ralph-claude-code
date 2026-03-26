@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-LOOP
 **Priority:** Critical
+**Status:** Done
 **Affects:** Autonomous loop continuity, live mode reliability, WSL production stability
 **Components:** `ralph_loop.sh`, `lib/response_analyzer.sh`, `lib/circuit_breaker.sh`, `.ralphrc` template
 **Related specs:** `epic-jsonl-stream-resilience.md` (Phase 0), `epic-multi-task-cascading-failures.md` (Phase 0)

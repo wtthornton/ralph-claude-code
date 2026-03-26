@@ -211,8 +211,8 @@ teardown() {
 # =============================================================================
 
 @test "CLAUDE_ALLOWED_TOOLS has sensible defaults" {
-    # Verify by checking the default in ralph_loop.sh via grep
-    run grep 'CLAUDE_ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
+    # Defaults are now in RALPH_DEFAULT_ALLOWED_TOOLS (Issue #154 refactor)
+    run grep 'RALPH_DEFAULT_ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
 
     # Should include Write, Bash, Read at minimum
     [[ "$output" == *"Write"* ]]
@@ -220,16 +220,16 @@ teardown() {
 }
 
 @test "CLAUDE_ALLOWED_TOOLS default includes Edit tool (issue #136)" {
-    # Verify the default includes Edit for file editing
-    run grep 'CLAUDE_ALLOWED_TOOLS=.*:-' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
+    # Defaults are now in RALPH_DEFAULT_ALLOWED_TOOLS (Issue #154 refactor)
+    run grep 'RALPH_DEFAULT_ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
 
     # The default should include Edit
     [[ "$output" == *"Edit"* ]]
 }
 
 @test "CLAUDE_ALLOWED_TOOLS default includes test execution tools (issue #136)" {
-    # Verify the default includes test execution capabilities
-    run grep 'CLAUDE_ALLOWED_TOOLS=.*:-' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
+    # Defaults are now in RALPH_DEFAULT_ALLOWED_TOOLS (Issue #154 refactor)
+    run grep 'RALPH_DEFAULT_ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
 
     # Should include Bash(npm *) for npm test
     [[ "$output" == *'Bash(npm *)'* ]]

@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-OBSERVE
 **Priority:** Medium
+**Status:** Done
 **Affects:** Monitoring, alerting, state recovery
 **Components:** `ralph_loop.sh`, `.ralph/metrics/`, `.ralph/status.json`, new notification module
 **Related specs:** `IMPLEMENTATION_PLAN.md` (§Phase 3)

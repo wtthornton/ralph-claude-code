@@ -460,6 +460,63 @@ detect_task_sources() {
 }
 
 # =============================================================================
+# MONOREPO DETECTION (Issue #163)
+# =============================================================================
+
+export DETECTED_MONOREPO="false"
+export DETECTED_MONOREPO_SERVICES=""
+
+# detect_monorepo - Detect monorepo structure by finding multiple build manifests
+#
+# Scans subdirectories (depth 2) for package.json, pyproject.toml, or go.mod.
+# If 2+ are found in different subdirectories, flags the project as a monorepo
+# and populates DETECTED_MONOREPO_SERVICES with a comma-separated list.
+#
+# Sets globals:
+#   DETECTED_MONOREPO - "true" if monorepo detected
+#   DETECTED_MONOREPO_SERVICES - comma-separated list of service directories
+#
+detect_monorepo() {
+    DETECTED_MONOREPO="false"
+    DETECTED_MONOREPO_SERVICES=""
+
+    local manifests=()
+    local manifest_patterns=("package.json" "pyproject.toml" "go.mod" "Cargo.toml")
+
+    for pattern in "${manifest_patterns[@]}"; do
+        while IFS= read -r -d '' manifest; do
+            # Skip root-level manifests
+            local dir
+            dir=$(dirname "$manifest")
+            if [[ "$dir" != "." ]]; then
+                manifests+=("$dir")
+            fi
+        done < <(find . -maxdepth 3 -name "$pattern" -not -path "*/node_modules/*" -not -path "*/.git/*" -print0 2>/dev/null)
+    done
+
+    # Deduplicate directories
+    local unique_dirs=()
+    local seen=""
+    for d in "${manifests[@]}"; do
+        # Strip leading ./
+        d="${d#./}"
+        if [[ "$seen" != *"|${d}|"* ]]; then
+            seen="${seen}|${d}|"
+            unique_dirs+=("$d")
+        fi
+    done
+
+    if [[ ${#unique_dirs[@]} -ge 2 ]]; then
+        DETECTED_MONOREPO="true"
+        # Join with commas
+        local IFS=','
+        DETECTED_MONOREPO_SERVICES="${unique_dirs[*]}"
+        enable_log "INFO" "Monorepo detected with ${#unique_dirs[@]} services: $DETECTED_MONOREPO_SERVICES"
+        enable_log "INFO" "Consider adding to .ralphrc: MONOREPO_SERVICES=\"$DETECTED_MONOREPO_SERVICES\""
+    fi
+}
+
+# =============================================================================
 # TEMPLATE GENERATION
 # =============================================================================
 
@@ -856,6 +913,9 @@ enable_ralph_in_directory() {
         task_sources="github,$task_sources"
     fi
 
+    # Issue #163: Detect monorepo structure and suggest MONOREPO_SERVICES
+    detect_monorepo
+
     # Generate .ralphrc
     local ralphrc_content
     ralphrc_content=$(generate_ralphrc "$project_name" "$DETECTED_PROJECT_TYPE" "$task_sources")
@@ -876,6 +936,7 @@ export -f create_ralph_structure
 export -f detect_project_context
 export -f detect_git_info
 export -f detect_task_sources
+export -f detect_monorepo
 export -f get_templates_dir
 export -f generate_prompt_md
 export -f generate_agent_md

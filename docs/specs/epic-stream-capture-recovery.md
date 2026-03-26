@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-CAPTURE
 **Priority:** High
+**Status:** Done
 **Affects:** Loop state awareness, error recovery, log quality
 **Components:** `ralph_loop.sh` (stream pipeline, stats extraction, multi-result handling)
 **Related specs:** [epic-jsonl-stream-resilience.md](epic-jsonl-stream-resilience.md), [epic-stream-parser-v2.md](epic-stream-parser-v2.md)

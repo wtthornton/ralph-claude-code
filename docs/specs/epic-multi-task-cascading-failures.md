@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-MULTI
 **Priority:** High
+**Status:** Done
 **Affects:** Loop control integrity, permission detection, session reliability
 **Components:** `PROMPT.md` template, `ralph_loop.sh`, `response_analyzer.sh`, `.ralphrc` template
 **Related specs:** `ralph-multi-task-loop-and-cascading-failures.md`, `ralph-jsonl-crash-bug.md`

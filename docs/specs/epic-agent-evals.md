@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-EVALS
 **Priority:** Medium
+**Status:** Done
 **Affects:** Quality assurance, regression detection, agent behavior validation
 **Components:** new `tests/evals/`, `ralph_loop.sh`, CI configuration
 **Related specs:** [epic-validation-testing.md](epic-validation-testing.md) (Phase 9 — BATS testing)

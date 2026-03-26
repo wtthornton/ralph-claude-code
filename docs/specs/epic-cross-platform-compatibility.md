@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-XPLAT
 **Priority:** Medium
+**Status:** Done
 **Affects:** Log quality, hook reliability, agent environments
 **Components:** `ralph_loop.sh` (version check), `.claude/settings.json` (hooks), `.claude/agents/ralph.md` (agent prompts)
 **Related specs:** [epic-wsl-reliability-polish.md](epic-wsl-reliability-polish.md)

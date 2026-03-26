@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-OTEL
 **Priority:** High
+**Status:** Done
 **Affects:** Observability, cost tracking, debugging, TheStudio integration
 **Components:** `ralph_loop.sh`, `lib/metrics.sh`, new `lib/tracing.sh`, `.claude/hooks/`
 **Related specs:** [epic-observability.md](epic-observability.md) (Phase 8 — lightweight predecessor)

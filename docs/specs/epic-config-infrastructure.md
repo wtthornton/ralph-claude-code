@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-CONFIG
 **Priority:** Medium
+**Status:** Done
 **Affects:** Installation, configuration, developer documentation
 **Components:** `ralph_loop.sh`, `install.sh`, `.ralphrc`, new `ralph.config.json`
 **Related specs:** `IMPLEMENTATION_PLAN.md` (§Phase 3)

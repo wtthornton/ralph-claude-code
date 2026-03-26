@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-CBDECAY
 **Priority:** High
+**Status:** Done
 **Affects:** Loop continuity, false halt prevention, unattended operation
 **Components:** `lib/circuit_breaker.sh`, `ralph_loop.sh` (session reinitialization)
 **Related specs:** [epic-multi-task-cascading-failures.md](epic-multi-task-cascading-failures.md), [epic-loop-stability.md](epic-loop-stability.md)

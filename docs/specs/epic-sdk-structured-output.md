@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-SDK-OUTPUT
 **Priority:** P1–P2
+**Status:** Done
 **Affects:** Integration reliability, error handling, observability, analytics
 **Components:** `ralph_sdk/parsing.py`, `ralph_sdk/status.py`, `ralph_sdk/agent.py`
 **Related specs:** [epic-jsonl-stream-resilience.md](epic-jsonl-stream-resilience.md)

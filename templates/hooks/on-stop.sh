@@ -107,6 +107,8 @@ question_count=0
 if [[ -n "$response_text" ]]; then
   for pattern in "${QUESTION_PATTERNS[@]}"; do
     count=$(echo "$response_text" | grep -ciE "$pattern" 2>/dev/null || echo "0")
+    count=$(echo "$count" | tr -cd '0-9')
+    count=${count:-0}
     question_count=$((question_count + count))
   done
   [[ "$question_count" -gt 0 ]] && asking_questions="true"
@@ -118,13 +120,16 @@ has_permission_denials="false"
 permission_denial_count=0
 if [[ -n "$response_text" ]]; then
   permission_denial_count=$(echo "$response_text" | grep -ciE '(permission denied|tool not allowed|not in allowed|disallowed tool|not permitted)' 2>/dev/null || echo "0")
+  permission_denial_count=$(echo "$permission_denial_count" | tr -cd '0-9')
+  permission_denial_count=${permission_denial_count:-0}
   [[ "$permission_denial_count" -gt 0 ]] && has_permission_denials="true"
 fi
 
 # Count actual files modified (from PostToolUse tracking)
 actual_files_modified=0
 if [[ -f "$RALPH_DIR/.files_modified_this_loop" ]]; then
-  actual_files_modified=$(sort -u "$RALPH_DIR/.files_modified_this_loop" | wc -l | tr -d '[:space:]')
+  actual_files_modified=$(sort -u "$RALPH_DIR/.files_modified_this_loop" | wc -l | tr -cd '0-9')
+  actual_files_modified=${actual_files_modified:-0}
 fi
 
 # Use the higher of reported vs actual (defense-in-depth)
@@ -154,6 +159,13 @@ fi
 # Validate loop_count is numeric before arithmetic
 [[ "$loop_count" =~ ^[0-9]+$ ]] || loop_count=0
 loop_count=$((loop_count + 1))
+
+# Sanitize all numeric/boolean fields for valid JSON output (MINGW/CRLF safety)
+[[ "$question_count" =~ ^[0-9]+$ ]] || question_count=0
+[[ "$permission_denial_count" =~ ^[0-9]+$ ]] || permission_denial_count=0
+[[ "$files_modified" =~ ^[0-9]+$ ]] || files_modified=0
+[[ "$asking_questions" == "true" ]] || asking_questions="false"
+[[ "$has_permission_denials" == "true" ]] || has_permission_denials="false"
 
 # Write status.json (atomic write via temp file)
 # PERF: Use printf for timestamp instead of date subprocess where possible

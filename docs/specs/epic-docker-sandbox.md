@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-SANDBOX
 **Priority:** Medium
+**Status:** Done
 **Affects:** Execution isolation, security, reproducibility
 **Components:** `ralph_loop.sh`, new `lib/sandbox.sh`, new `docker/ralph-sandbox/`
 **Related specs:** `IMPLEMENTATION_PLAN.md` (§Phase 6)

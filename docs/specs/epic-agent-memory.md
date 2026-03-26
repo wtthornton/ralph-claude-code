@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-AGENTMEM
 **Priority:** Medium
+**Status:** Done
 **Affects:** Loop efficiency, task quality, codebase familiarity, repeat error prevention
 **Components:** `.claude/agents/ralph.md`, new `.ralph/memory/`, `ralph_loop.sh`
 **Related specs:** [epic-observability.md](epic-observability.md) (metrics as memory input)

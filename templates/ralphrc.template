@@ -23,6 +23,11 @@ PROJECT_TYPE="${PROJECT_TYPE:-unknown}"
 # Maximum API calls per hour (rate limiting)
 MAX_CALLS_PER_HOUR=200
 
+# Maximum tokens per hour (0 = disabled) — Issue #223
+# Tracks cumulative input+output tokens across all calls in the hour window
+# Example: 500000 limits to ~500K tokens/hour regardless of call count
+MAX_TOKENS_PER_HOUR=0
+
 # Timeout for each Claude Code invocation (in minutes)
 # When timeout is reached, the loop logs the event and continues to the next iteration
 CLAUDE_TIMEOUT_MINUTES=15
@@ -177,6 +182,10 @@ RALPH_MAX_TEAMMATES=3
 # Background testing (independent of teams)
 RALPH_BG_TESTING=false
 
+# Keep tmux monitor panes alive after loop exits (default: false)
+# When true, tail -f and status monitor remain after the loop finishes
+KEEP_MONITOR_AFTER_EXIT=false
+
 # Teammate display mode: "in-process" | "tmux" | "auto"
 # "tmux" recommended for Ralph (already uses tmux for monitoring)
 RALPH_TEAMMATE_MODE="tmux"
@@ -230,3 +239,17 @@ RALPH_MAX_EXPLORER_RESOLVE=5
 
 # Monthly cost budget in USD (0 = disabled, triggers alert at 80% by default)
 # RALPH_COST_BUDGET_USD=0
+
+# =============================================================================
+# MONOREPO SUPPORT (Issue #163)
+# =============================================================================
+# Comma-separated list of service directories
+# MONOREPO_SERVICES=""
+# Root directory containing services (relative to project root)
+# MONOREPO_ROOT="services/"
+
+# =============================================================================
+# BEADS INTEGRATION (Issue #87)
+# =============================================================================
+# Beads project for scoped queries
+# BEADS_PROJECT=""

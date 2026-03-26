@@ -29,42 +29,83 @@ class ContextManager:
     def __init__(self, max_unchecked_items: int = 5) -> None:
         self.max_unchecked_items = max_unchecked_items
 
+    # ------------------------------------------------------------------
+    # Public helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def estimate_tokens(text: str) -> int:
+        """Estimate token count using the 4-char heuristic.
+
+        Convenience method — delegates to the module-level
+        :func:`estimate_tokens` so callers can use either form.
+        """
+        return estimate_tokens(text)
+
+    # ------------------------------------------------------------------
+    # trim_fix_plan — SDK-parity signature (Issue #226)
+    # ------------------------------------------------------------------
+
     def trim_fix_plan(
         self,
-        content: str,
-        current_section_marker: str = "##",
+        plan_content: str,
+        current_section: str | None = None,
+        max_items: int = 10,
     ) -> str:
         """Trim fix_plan.md to the active section with progressive summarization.
 
-        Finds the first section (identified by current_section_marker) that contains
-        unchecked items (``- [ ]``), includes up to max_unchecked_items from that
-        section, and summarizes all completed sections above it.
+        Identifies the current epic section, includes only the current + next
+        N unchecked items, and summarizes completed sections as
+        "N/M tasks complete".
+
+        Matches ``ralph_build_progressive_context()`` from
+        ``lib/context_management.sh`` (CTXMGMT-1).
 
         Args:
-            content: Full fix_plan.md content.
-            current_section_marker: Markdown heading marker for section boundaries.
+            plan_content: Full fix_plan.md content.
+            current_section: Optional section heading text (without ``##``)
+                to force as the active section.  When *None*, the first
+                section containing unchecked items is used.
+            max_items: Maximum number of unchecked items to include
+                from the active section (default 10, matching
+                ``RALPH_MAX_PLAN_ITEMS``).
 
         Returns:
             Trimmed content with completed sections summarized.
         """
-        if not content or not content.strip():
-            return content
+        if not plan_content or not plan_content.strip():
+            return plan_content
 
+        effective_max = max_items if max_items > 0 else self.max_unchecked_items
+
+        return self._trim_sections(plan_content, current_section, effective_max)
+
+    # ------------------------------------------------------------------
+    # Internal implementation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_sections(
+        content: str,
+        section_marker: str = "##",
+    ) -> tuple[list[str], list[tuple[str, list[str]]]]:
+        """Parse markdown content into preamble and sections.
+
+        Returns:
+            (preamble_lines, sections) where each section is
+            ``(heading_line, body_lines)``.
+        """
         lines = content.splitlines()
 
-        # Parse into sections: list of (heading_line, body_lines)
         sections: list[tuple[str, list[str]]] = []
         current_heading = ""
         current_body: list[str] = []
-
-        # Collect any preamble (lines before the first section heading)
         preamble_lines: list[str] = []
 
         for line in lines:
-            if line.strip().startswith(current_section_marker) and not line.strip().startswith(
-                current_section_marker + "#"
+            if line.strip().startswith(section_marker) and not line.strip().startswith(
+                section_marker + "#"
             ):
-                # This is a section heading at the target level (e.g., ## but not ###)
                 if current_heading or current_body:
                     sections.append((current_heading, current_body))
                 elif not current_heading and current_body:
@@ -74,95 +115,136 @@ class ContextManager:
             else:
                 current_body.append(line)
 
-        # Don't forget the last section
         if current_heading:
             sections.append((current_heading, current_body))
-        elif current_body and not sections:
-            # No sections found at all — return as-is
+
+        return preamble_lines, sections
+
+    def _trim_sections(
+        self,
+        content: str,
+        current_section: str | None,
+        max_items: int,
+    ) -> str:
+        """Core trimming logic shared by all calling paths."""
+        preamble_lines, sections = self._parse_sections(content)
+
+        # No sections found — return as-is
+        if not sections:
             return content
 
-        # If there's only preamble and no sections, return as-is
-        if not sections and preamble_lines:
-            return content
-
-        # Find the active section (first one with unchecked items)
+        # ----------------------------------------------------------
+        # Locate the active section
+        # ----------------------------------------------------------
         active_idx = -1
-        for i, (heading, body) in enumerate(sections):
-            if any(re.match(r"\s*- \[ \]", line) for line in body):
-                active_idx = i
-                break
 
-        # If no unchecked items anywhere, return a summary of everything
+        if current_section is not None:
+            # User-specified section — match by heading text (case-insensitive,
+            # ignoring leading ``## `` markers).
+            needle = current_section.strip().lstrip("#").strip().lower()
+            for i, (heading, _body) in enumerate(sections):
+                heading_text = heading.strip().lstrip("#").strip().lower()
+                if heading_text == needle:
+                    active_idx = i
+                    break
+
+        # Fallback / default: first section with unchecked items
         if active_idx == -1:
-            total_checked = sum(
-                sum(1 for line in body if re.match(r"\s*- \[x\]", line, re.IGNORECASE))
-                for _, body in sections
-            )
-            result_parts = []
+            for i, (_heading, body) in enumerate(sections):
+                if any(re.match(r"\s*- \[ \]", line) for line in body):
+                    active_idx = i
+                    break
+
+        # ----------------------------------------------------------
+        # All items complete — summary only
+        # ----------------------------------------------------------
+        if active_idx == -1:
+            total_items = 0
+            total_checked = 0
+            for _, body in sections:
+                for line in body:
+                    if re.match(r"\s*- \[x\]", line, re.IGNORECASE):
+                        total_items += 1
+                        total_checked += 1
+                    elif re.match(r"\s*- \[ \]", line):
+                        total_items += 1
+            result_parts: list[str] = []
             if preamble_lines:
                 result_parts.extend(preamble_lines)
                 result_parts.append("")
-            if total_checked > 0:
-                result_parts.append(f"({total_checked} completed items — all tasks done)")
+            if total_items > 0:
+                result_parts.append(
+                    f"({total_checked}/{total_items} tasks complete — all tasks done)"
+                )
             return "\n".join(result_parts)
 
+        # ----------------------------------------------------------
         # Build output
+        # ----------------------------------------------------------
         result_parts: list[str] = []
 
-        # Include preamble (title, description)
+        # Preamble
         if preamble_lines:
             result_parts.extend(preamble_lines)
             result_parts.append("")
 
         # Summarize completed sections above the active one
-        completed_above = 0
         for i in range(active_idx):
             heading, body = sections[i]
-            checked_count = sum(
-                1 for line in body if re.match(r"\s*- \[x\]", line, re.IGNORECASE)
+            total_in_section = sum(
+                1 for line in body
+                if re.match(r"\s*- \[[xX ]\]", line)
             )
-            completed_above += checked_count
+            checked_in_section = sum(
+                1 for line in body
+                if re.match(r"\s*- \[x\]", line, re.IGNORECASE)
+            )
+            if total_in_section > 0:
+                section_title = heading.strip().lstrip("#").strip()
+                result_parts.append(
+                    f"{heading.rstrip()}  ({checked_in_section}/{total_in_section} tasks complete)"
+                )
 
-        if completed_above > 0:
-            result_parts.append(f"({completed_above} completed items above)")
+        if active_idx > 0:
             result_parts.append("")
 
-        # Include the active section heading
+        # Active section heading
         active_heading, active_body = sections[active_idx]
         result_parts.append(active_heading)
 
-        # Include checked items as a summary count, then unchecked items up to limit
+        # Emit checked items as a summary, then unchecked items up to limit
         checked_in_section = 0
+        total_in_section = 0
         unchecked_count = 0
         remaining_unchecked = 0
 
         for line in active_body:
             if re.match(r"\s*- \[x\]", line, re.IGNORECASE):
                 checked_in_section += 1
+                total_in_section += 1
             elif re.match(r"\s*- \[ \]", line):
-                if unchecked_count < self.max_unchecked_items:
+                total_in_section += 1
+                if unchecked_count < max_items:
                     if checked_in_section > 0 and unchecked_count == 0:
                         result_parts.append(
-                            f"  ({checked_in_section} completed items in this section)"
+                            f"  ({checked_in_section}/{total_in_section} tasks complete in this section)"
                         )
                     result_parts.append(line)
                     unchecked_count += 1
                 else:
                     remaining_unchecked += 1
             else:
-                # Non-checkbox lines (descriptions, blank lines) — include if we're
-                # still within the unchecked window
-                if unchecked_count > 0 and unchecked_count <= self.max_unchecked_items:
+                # Non-checkbox lines — include while within the unchecked window
+                if unchecked_count > 0 and unchecked_count <= max_items:
                     result_parts.append(line)
                 elif unchecked_count == 0:
-                    # Lines before any unchecked item (section description)
                     if not re.match(r"\s*- \[x\]", line, re.IGNORECASE):
                         result_parts.append(line)
 
-        # If there were checked items but no unchecked items were added yet
+        # If only checked items existed (no unchecked emitted yet), still summarize
         if checked_in_section > 0 and unchecked_count == 0:
             result_parts.append(
-                f"  ({checked_in_section} completed items in this section)"
+                f"  ({checked_in_section}/{total_in_section} tasks complete in this section)"
             )
 
         if remaining_unchecked > 0:

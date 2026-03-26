@@ -2,6 +2,7 @@
 
 **Epic ID:** RALPH-TEST
 **Priority:** Medium
+**Status:** Done
 **Affects:** Test coverage, CI/CD reliability, regression detection
 **Components:** `tests/unit/`, `tests/integration/`, `tests/e2e/`
 **Related specs:** `IMPLEMENTATION_PLAN.md` (§Phase 4), `TESTING.md`

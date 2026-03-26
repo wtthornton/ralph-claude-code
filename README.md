@@ -8,8 +8,8 @@
 <p align="center">
   <a href="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml"><img src="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/version-2.4.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-849%20passing-green" alt="Tests">
+  <img src="https://img.shields.io/badge/version-2.6.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-1026%20passing-green" alt="Tests">
   <a href="https://github.com/frankbria/ralph-claude-code/issues"><img src="https://img.shields.io/github/issues/frankbria/ralph-claude-code" alt="GitHub Issues"></a>
   <a href="https://github.com/hesreallyhim/awesome-claude-code"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome Claude Code"></a>
   <a href="https://x.com/FrankBria18044"><img src="https://img.shields.io/twitter/follow/FrankBria18044?style=social" alt="Follow on X"></a>
@@ -29,7 +29,27 @@ Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named
 
 **Install once, use everywhere** — Ralph becomes a global command available in any directory.
 
-## What's New in v2.5.0
+## What's New in v2.6.0
+
+**14 open issues resolved**, 24 pre-existing test failures fixed, 1,026 total tests passing.
+
+- **Token-based rate limiting** (#223) — `MAX_TOKENS_PER_HOUR` tracks cumulative token usage alongside invocation count. `--max-tokens` CLI flag, status line display, hourly reset.
+- **SDK parity** (#226) — Progressive context (`trim_fix_plan` with section targeting), 3-strategy `extract_files_changed()` (Write/Edit + git add + git diff --name-only), stall detection config alignment.
+- **E2E integration tests** (#225) — Mock Claude CLI (`tests/mock_claude.sh`) with 7 scenarios. 28 new E2E tests for completion, circuit breaker, rate limit, and permission denial flows.
+- **Task import tests** (#152) — 28 integration tests for beads JSON/text parsing, GitHub filtering, combined sources, deduplication.
+- **Plan limit exhaustion** (#102) — Parses reset time from Claude output ("resets 9pm"), calculates wait, auto-sleeps with countdown timer.
+- **Monorepo support** (#163) — `--service NAME` flag scopes Ralph to a service directory. Auto-detection in `ralph-enable`. `MONOREPO_SERVICES` / `MONOREPO_ROOT` config.
+- **Windows native** (#156) — `ralph.ps1` PowerShell wrapper (WSL/Git Bash auto-detection), `ralph.cmd` CMD wrapper, `--wt` Windows Terminal split-pane monitoring.
+- **Nix flake** (#157) — `nix shell github:frankbria/ralph-claude-code` for instant usage. Dev shell with all dependencies.
+- **Badge automation** (#138) — GitHub Actions workflow auto-updates version/test count badges on push to main.
+- **Beads integration** (#87) — Enhanced `fetch_beads_tasks()` with priority/assignee extraction, `BEADS_PROJECT` scoping, `--beads` CLI shortcut.
+- **KEEP_MONITOR_AFTER_EXIT** (#213) — Preserves tmux monitor panes after loop exits.
+- **.zshrc loading** (#211) — Sources shell rc files and checks nvm/fnm/volta paths before "CLI not found" error.
+- **Session format consistency** (#123) — `save_claude_session()` now writes JSON format with backward-compatible reading.
+- **README update** (#82) — Features table (24 capabilities), CLI flags (+8), library modules (+11), updated roadmap.
+
+<details>
+<summary><strong>v2.5.0</strong></summary>
 
 - **SDK plan optimizer** — Plan optimization now runs inside `RalphAgent.run()` before the first iteration. TheStudio and all SDK consumers get automatic task reordering for free — no integration changes needed. Disable with `RALPH_NO_OPTIMIZE=true`.
 - **SDK import graph** — Python AST + JS/TS regex dependency graph with JSON caching and staleness detection. Cross-platform path normalization.
@@ -39,6 +59,8 @@ Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named
 - **Default rate limit bumped to 200/hr** — Better match for current Claude plan tiers.
 - **Upstream sync epic** — Question detection, permission denial CB fast-trip, stuck loop detection, heuristic exit suppression.
 - **SDK v2.1.0** — 5 new modules: `complexity.py`, `memory.py`, `import_graph.py`, `plan_optimizer.py`, `versions.py`.
+
+</details>
 
 <details>
 <summary><strong>v2.4.0</strong></summary>
@@ -106,16 +128,26 @@ Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named
 |----------|-----------|
 | **Core Loop** | Autonomous development cycles with structured task execution |
 | **Exit Detection** | Dual-condition gate: completion indicators + explicit `EXIT_SIGNAL` |
-| **Rate Limiting** | Hourly API call limits with countdown timers and 5-hour limit handling |
-| **Circuit Breaker** | Three-state pattern (CLOSED/HALF_OPEN/OPEN) with auto-recovery |
+| **Rate Limiting** | Hourly API call + token limits with countdown timers and plan exhaustion auto-sleep |
+| **Circuit Breaker** | Three-state pattern (CLOSED/HALF_OPEN/OPEN) with auto-recovery, fast-trip, stall detection |
 | **Session Continuity** | Context preserved across loops with 24-hour expiration |
 | **Live Streaming** | Real-time Claude Code output with `--live` flag |
 | **Agent Teams** | Parallel task execution with teammate coordination (experimental) |
-| **Sub-agents** | Explorer (read-only), tester (worktree isolation), reviewer, background tester |
+| **Sub-agents** | Explorer (read-only), tester (worktree isolation), reviewer, architect, background tester |
 | **Hook System** | 8 hook events for response analysis, file protection, and command validation |
-| **Monitoring** | tmux dashboard with loop count, API usage, and live logs |
+| **Monitoring** | tmux dashboard with loop count, API usage, and live logs (`KEEP_MONITOR_AFTER_EXIT` option) |
 | **Task Import** | From PRDs, beads, or GitHub Issues via `ralph-enable` wizard |
 | **Configuration** | `.ralphrc` per-project settings with tool permission control |
+| **Log Rotation** | Automatic `ralph.log` rotation at configurable size limit |
+| **Dry-Run Mode** | Preview loop execution without API calls (`--dry-run`) |
+| **Metrics** | Monthly JSONL metrics, `ralph --stats` summary, `--stats-json` for machine-readable |
+| **Notifications** | Terminal, OS native, webhook POST, and terminal bell alerts |
+| **Backup/Rollback** | Auto-snapshots before each loop, `ralph --rollback` to restore state |
+| **GitHub Issues** | `ralph --issue NUM` import, `ralph --batch` processing, lifecycle management |
+| **Docker Sandbox** | `ralph --sandbox` runs loop inside Docker container with signal forwarding |
+| **Cost Dashboard** | `ralph --cost-dashboard` with per-model breakdown and budget tracking |
+| **Plan Optimization** | Automatic fix_plan.md task reordering by dependency graph at session start |
+| **Python SDK** | Full SDK (`sdk/ralph_sdk/`) with async agent loop, Pydantic v2 models, pluggable state |
 
 ## Quick Start
 
@@ -143,6 +175,21 @@ This adds `ralph`, `ralph-monitor`, `ralph-setup`, `ralph-import`, `ralph-migrat
 **Dependencies:** Node.js, `git`, `jq`, GNU coreutils (`timeout`). **`jq`:** If `jq` is not installed, the installer can download an official static binary into `~/.local/bin/jq` on Linux and macOS (requires `curl` or `wget`). To skip that and require a system package instead, set `RALPH_SKIP_JQ_BOOTSTRAP=1` before running `install.sh`.
 
 **WSL / Windows checkouts:** Run install from WSL. Put `~/.local/bin` on your `PATH` so `ralph` and bundled `jq` are found. Repo shell scripts use LF line endings (see `.gitattributes`); if you still see `$'\r'` errors, run `sed -i 's/\r$//' install.sh` in WSL or use `git config core.autocrlf input` and re-checkout.
+
+### Alternative: Install with Nix
+
+If you use [Nix](https://nixos.org/) with flakes enabled, you can run Ralph without cloning:
+
+```bash
+# Try it instantly (no install needed)
+nix shell github:frankbria/ralph-claude-code
+ralph --version
+
+# Or enter a development shell with all dependencies
+git clone https://github.com/frankbria/ralph-claude-code.git
+cd ralph-claude-code
+nix develop
+```
 
 ### 2. Set up a project
 
@@ -217,6 +264,17 @@ This prevents premature exits when Claude says "done" mid-phase but hasn't actua
 | `wizard_utils.sh` | Interactive prompt utilities |
 | `date_utils.sh` | Cross-platform date/epoch utilities |
 | `timeout_utils.sh` | Cross-platform timeout detection |
+| `metrics.sh` | Monthly JSONL metrics, `--stats` summary |
+| `notifications.sh` | Terminal, OS native, webhook notifications |
+| `backup.sh` | State backup/rollback, auto-snapshots |
+| `github_issues.sh` | GitHub issue import, assess, filter, batch, lifecycle |
+| `sandbox.sh` | Docker sandbox execution, signal forwarding |
+| `tracing.sh` | OpenTelemetry traces, OTLP export |
+| `complexity.sh` | Task complexity classification, dynamic model routing |
+| `memory.sh` | Cross-session episodic + semantic memory |
+| `import_graph.sh` | AST-based file dependency graph |
+| `plan_optimizer.sh` | Fix plan task reordering via topological sort |
+| `context_management.sh` | Progressive context loading, task decomposition hints |
 
 ### Agent Definitions (`.claude/agents/`)
 
@@ -246,6 +304,7 @@ PROJECT_NAME="my-project"
 PROJECT_TYPE="typescript"
 CLAUDE_CODE_CMD="claude"
 MAX_CALLS_PER_HOUR=200
+MAX_TOKENS_PER_HOUR=0            # 0 = disabled; set to e.g. 500000 to cap token usage
 CLAUDE_TIMEOUT_MINUTES=15
 CLAUDE_OUTPUT_FORMAT="json"
 
@@ -261,6 +320,17 @@ CB_NO_PROGRESS_THRESHOLD=3
 CB_COOLDOWN_MINUTES=30
 CB_AUTO_RESET=false
 
+# Log rotation
+LOG_MAX_SIZE_MB=10               # Rotate ralph.log at this size
+LOG_MAX_FILES=5                  # Rotated log files to keep
+LOG_MAX_OUTPUT_FILES=20          # Max claude_output_*.log files
+
+# Dry-run mode
+DRY_RUN=false                    # Also: ralph --dry-run
+
+# Monitoring
+KEEP_MONITOR_AFTER_EXIT=false    # Keep tmux panes alive after loop exits
+
 # Agent teams (experimental)
 RALPH_ENABLE_TEAMS=false
 RALPH_MAX_TEAMMATES=2
@@ -273,6 +343,7 @@ ralph [OPTIONS]
   -V, --version           Show version
   -h, --help              Show help
   -c, --calls NUM         Max calls per hour (default: 200)
+  --max-tokens NUM        Max tokens per hour (default: 0 = disabled)
   -p, --prompt FILE       Custom prompt file
   -s, --status            Show status and exit
   -m, --monitor           Start with tmux monitoring
@@ -289,6 +360,15 @@ ralph [OPTIONS]
   --reset-session         Clear session state
   --log-max-size MB       Max log size before rotation
   --log-max-files NUM     Max rotated log files
+  --stats                 Show metrics summary and exit
+  --stats-json            Show metrics as JSON and exit
+  --rollback              Restore state from last backup
+  --sdk                   Run via Python SDK instead of bash
+  --sandbox               Run loop inside Docker container
+  --issue NUM             Import GitHub issue into fix_plan.md
+  --issues                List GitHub issues for selection
+  --batch                 Process multiple issues sequentially
+  --cost-dashboard        Show cost tracking dashboard
 ```
 
 ## Understanding Ralph Files
@@ -301,7 +381,7 @@ ralph [OPTIONS]
 | `.ralph/specs/` | Project specifications | Add when needed |
 | `.ralphrc` | Loop configuration | Rarely edit |
 
-Design specs for loop reliability live in [`docs/specs/`](docs/specs/) (9 epics, 42 stories — all complete).
+Design specs for loop reliability live in [`docs/specs/`](docs/specs/) (50 epics, 148 stories — all complete).
 
 ## Project Structure
 
@@ -353,12 +433,12 @@ wsl ralph --monitor          # Run with tmux dashboard
 
 ```bash
 npm install          # Install BATS framework
-npm test             # Run all 736+ tests
+npm test             # Run all 858+ tests
 npm run test:unit    # Unit tests only
 npm run test:integration  # Integration tests only
 ```
 
-- **736+ tests** across 17 test files
+- **858+ tests** across 17+ test files
 - **100% pass rate** (quality gate)
 - Framework: BATS (Bash Automated Testing System)
 - Coverage: kcov (informational only due to subprocess limitations)
@@ -385,19 +465,20 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for the complet
 ```bash
 git clone https://github.com/YOUR_USERNAME/ralph-claude-code.git
 cd ralph-claude-code
-npm install && npm test  # All 736+ tests must pass
+npm install && npm test  # All 858+ tests must pass
 ```
 
 **Priority areas:** test coverage, documentation, real-world testing, feature development.
 
 ## Roadmap
 
-All 42 epic stories are complete across 5 phases. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for planned enhancements:
+All 148 stories are complete across 50 epics and 17 phases. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for details.
 
-- Agent SDK integration
-- GitHub Issue import
-- Sandbox execution environments (Docker, E2B, Daytona, Cloudflare)
-- Metrics and analytics
+**Open backlog** (14 issues):
+- **P1**: SDK parity with bash CLI (#226)
+- **P2**: E2E integration tests (#225), token-aware rate limiting (#223)
+- **P3**: Monorepo support (#163), Windows native (#156), Nix flake (#157), task import tests (#152)
+- **P4**: Beads integration (#87), README updates (#82)
 
 ## License
 
