@@ -33,21 +33,30 @@ jobs:
       run: |
         npm install
         sudo apt-get update
-        sudo apt-get install -y jq
+        # gawk is required for PLANOPT-2 array-capture syntax (mawk lacks it).
+        sudo apt-get install -y jq gawk
 
     - name: Run unit tests
       run: npm run test:unit
 
     - name: Run integration tests
-      run: npm run test:integration || true
+      # TAP-537: Was masked with `|| true`. The mask hid 13 real regressions
+      # (stale version assertion, missing exec bit on mock_claude.sh, missing
+      # ralph_upgrade_project.sh fixture). Failures are now blocking — fix the
+      # tests, not the gate.
+      run: npm run test:integration
 
-    - name: Run E2E tests
-      run: npm run test:e2e || true
+    - name: Run deterministic agent evals
+      # TAP-537: Pin loop-correctness invariants (exit gate, circuit breaker,
+      # tool restrictions, hooks). No LLM calls, ~5 min. Required.
+      run: npm run test:evals:deterministic
 
     - name: Generate test report
       run: |
         echo "## Test Results" >> $GITHUB_STEP_SUMMARY
         echo "✅ Unit tests passed" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Integration tests passed" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Deterministic evals passed" >> $GITHUB_STEP_SUMMARY
 
   coverage:
     runs-on: ubuntu-latest
@@ -103,17 +112,34 @@ jobs:
         # Use full path to bats since kcov subprocess doesn't inherit npm PATH
         BATS_CMD="$(pwd)/node_modules/.bin/bats"
 
+        # kcov is informational only (see env comment above re: subprocess
+        # tracing). Failures here must NOT fail the job, but TAP-537 requires
+        # they be visible — capture stderr to a logged artifact so a silent
+        # `|| true` can't hide a real coverage regression next time.
+        run_kcov_step() {
+            local label="$1"; shift
+            if "$@" 2> "coverage/${label}.stderr.log"; then
+                echo "kcov ${label}: ok"
+            else
+                local rc=$?
+                echo "::warning::kcov ${label} exited ${rc} — see coverage/${label}.stderr.log artifact"
+                tail -20 "coverage/${label}.stderr.log" || true
+            fi
+        }
+
         # Run CLI parsing tests under kcov
-        kcov --include-path="$(pwd)/ralph_loop.sh,$(pwd)/lib" \
-             --exclude-pattern=tests/,node_modules/ \
-             coverage/cli-parsing \
-             bash -c "$BATS_CMD tests/unit/test_cli_parsing.bats" || true
+        run_kcov_step cli-parsing \
+            kcov --include-path="$(pwd)/ralph_loop.sh,$(pwd)/lib" \
+                 --exclude-pattern=tests/,node_modules/ \
+                 coverage/cli-parsing \
+                 bash -c "$BATS_CMD tests/unit/test_cli_parsing.bats"
 
         # Run all unit tests under kcov for comprehensive coverage
-        kcov --include-path="$(pwd)/ralph_loop.sh,$(pwd)/lib" \
-             --exclude-pattern=tests/,node_modules/ \
-             coverage/all-unit \
-             bash -c "$BATS_CMD tests/unit/" || true
+        run_kcov_step all-unit \
+            kcov --include-path="$(pwd)/ralph_loop.sh,$(pwd)/lib" \
+                 --exclude-pattern=tests/,node_modules/ \
+                 coverage/all-unit \
+                 bash -c "$BATS_CMD tests/unit/"
 
     - name: Parse coverage results
       id: coverage

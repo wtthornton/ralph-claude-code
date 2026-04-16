@@ -186,10 +186,24 @@ Environment variables override `.ralphrc` settings.
 ## Testing
 
 - **Framework**: BATS (Bash Automated Testing System) with bats-assert and bats-support
-- **Prerequisites**: Node.js 18+, jq, git
+- **Prerequisites**: Node.js 18+, jq, git, gawk (mawk lacks `match(s, re, arr)` array capture used by PLANOPT-2)
 - **Quality gate**: 100% test pass rate (code coverage via kcov is informational only due to subprocess tracing limitations)
 - Tests live in `tests/unit/` and `tests/integration/`; helpers in `tests/helpers/`
 - **Agent evals**: `tests/evals/deterministic/` (64 BATS tests, no LLM calls) and `tests/evals/stochastic/` (golden-file comparisons with Wilson score CI). Run via `npm run test:evals:deterministic` and `npm run test:evals:stochastic`.
+
+### CI: blocking vs informational (TAP-537)
+
+The `Test Suite` workflow in `.github/workflows/test.yml` has two job categories. Only the **blocking** ones gate merges. **Informational** ones must still surface failure signal — never silence with bare `|| true`:
+
+| Step | Status | Why |
+|------|--------|-----|
+| `npm run test:unit` | **blocking** | Core invariants — every PR must keep these green |
+| `npm run test:integration` | **blocking** | Was masked with `|| true`; mask hid real regressions for multiple releases (stale version assertion, missing exec bit on `tests/mock_claude.sh`, missing `ralph_upgrade_project.sh` test fixture). Now hard-fails. |
+| `npm run test:evals:deterministic` | **blocking** | 64 deterministic checks of loop-correctness invariants (exit gate, circuit breaker, tool restrictions, hooks). No LLM cost. |
+| `kcov` coverage steps | informational | Subprocess tracing is structurally incomplete in BATS-spawned bash. We keep it running but log stderr to `coverage/<label>.stderr.log` and emit a `::warning::` annotation instead of swallowing the exit code with `|| true`. |
+| `npm run test:evals:stochastic` | informational | Runs N golden-file comparisons against live LLM; intended for nightly/manual jobs, not PR gating. |
+
+When adding a new CI step, decide its category up front. If informational, capture stderr to an artifact + emit a GitHub annotation rather than `|| true` — silent masking is what TAP-537 rolled back.
 
 ## Versioning
 
