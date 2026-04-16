@@ -90,11 +90,13 @@ ralph_show_stats() {
         return 0
     fi
 
-    # Collect all JSONL files
-    local files
-    files=$(find "$metrics_dir" -name '*.jsonl' -type f | sort)
+    # Collect all JSONL files into an array (TAP-533: array-safe word splitting)
+    local files=()
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && files+=("$f")
+    done < <(find "$metrics_dir" -name '*.jsonl' -type f | sort)
 
-    if [[ -z "$files" ]]; then
+    if [[ ${#files[@]} -eq 0 ]]; then
         if [[ "$format" == "json" ]]; then
             echo '{"error": "No metrics data found"}'
         else
@@ -108,23 +110,23 @@ ralph_show_stats() {
         return 1
     fi
 
-    # Apply time filter
-    local filter_cmd="cat"
+    # Compute time cutoff if --last PERIOD was provided
+    local cutoff=""
     if [[ -n "$period" ]]; then
-        local cutoff
         case "$period" in
             *d) cutoff=$(date -u -d "-${period%d} days" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -v-"${period%d}d" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) ;;
             *h) cutoff=$(date -u -d "-${period%h} hours" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -v-"${period%h}H" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) ;;
-            *) cutoff="" ;;
         esac
-        if [[ -n "$cutoff" ]]; then
-            filter_cmd="jq -c 'select(.timestamp >= \"$cutoff\")'"
-        fi
     fi
 
-    # Aggregate metrics
+    # Aggregate metrics — TAP-533: pass cutoff via `jq --arg` (no eval, no shell injection),
+    # quote files as array (no glob/word-split hazard).
     local all_metrics
-    all_metrics=$(cat $files | eval "$filter_cmd" 2>/dev/null)
+    if [[ -n "$cutoff" ]]; then
+        all_metrics=$(jq -c --arg cutoff "$cutoff" 'select(.timestamp >= $cutoff)' "${files[@]}" 2>/dev/null)
+    else
+        all_metrics=$(cat "${files[@]}" 2>/dev/null)
+    fi
 
     if [[ -z "$all_metrics" ]]; then
         echo "No metrics found for the specified period."

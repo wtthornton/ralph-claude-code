@@ -351,3 +351,112 @@ EOF
     size2=$(echo "$tasks_json" | jq '.[2].size')
     [[ "$size2" -eq 2 ]]
 }
+
+# =============================================================================
+# TAP-534: plan_annotate_resolved — safe rewrite (no sed regex injection)
+# =============================================================================
+
+@test "TAP-534: plan_annotate_resolved appends annotation to unchecked task" {
+    local plan="$TEST_DIR/fix_plan.md"
+    cat > "$plan" <<'EOF'
+## Tasks
+- [ ] Some task
+EOF
+
+    run plan_annotate_resolved "$plan" 2 "src/foo/bar.py"
+    assert_success
+
+    local line2
+    line2=$(sed -n '2p' "$plan")
+    [[ "$line2" == "- [ ] Some task <!-- resolved: src/foo/bar.py -->" ]]
+}
+
+@test "TAP-534: plan_annotate_resolved handles | & \\ in resolved path verbatim" {
+    local plan="$TEST_DIR/fix_plan.md"
+    cat > "$plan" <<'EOF'
+## Tasks
+- [ ] Some task
+EOF
+
+    # Path containing &, \, and | — would corrupt sed-based replacement
+    run plan_annotate_resolved "$plan" 2 'src/weird&path\with|metas.py'
+    assert_success
+
+    local line2
+    line2=$(sed -n '2p' "$plan")
+    [[ "$line2" == '- [ ] Some task <!-- resolved: src/weird&path\with|metas.py -->' ]]
+}
+
+@test "TAP-534: plan_annotate_resolved preserves pre-existing task metadata" {
+    local plan="$TEST_DIR/fix_plan.md"
+    cat > "$plan" <<'EOF'
+## Tasks
+- [ ] Build feature (`src/x.py`) <!-- depends: schema -->
+EOF
+
+    run plan_annotate_resolved "$plan" 2 "src/x.py"
+    assert_success
+
+    local line2
+    line2=$(sed -n '2p' "$plan")
+    [[ "$line2" == '- [ ] Build feature (`src/x.py`) <!-- depends: schema --> <!-- resolved: src/x.py -->' ]]
+}
+
+@test "TAP-534: plan_annotate_resolved refuses to rewrite checked or non-task lines" {
+    local plan="$TEST_DIR/fix_plan.md"
+    cat > "$plan" <<'EOF'
+## Tasks
+- [x] Already done
+- [ ] Real task
+EOF
+
+    # Line 2 is a checked task — must NOT be rewritten
+    run plan_annotate_resolved "$plan" 2 "src/foo.py"
+    assert_success
+
+    local line2
+    line2=$(sed -n '2p' "$plan")
+    [[ "$line2" == "- [x] Already done" ]]
+
+    # Line 3 (the real unchecked task) is untouched
+    local line3
+    line3=$(sed -n '3p' "$plan")
+    [[ "$line3" == "- [ ] Real task" ]]
+}
+
+@test "TAP-534: plan_annotate_resolved validates inputs" {
+    local plan="$TEST_DIR/fix_plan.md"
+    echo "## Tasks" > "$plan"
+
+    # Missing path
+    run plan_annotate_resolved "$plan" 1 ""
+    assert_failure
+
+    # Non-numeric line number — must reject (prevents `awk -v ln=$(rm -rf /)`-style surprises)
+    run plan_annotate_resolved "$plan" "not-a-number" "src/foo.py"
+    assert_failure
+
+    # Missing file
+    run plan_annotate_resolved "$TEST_DIR/does-not-exist.md" 1 "src/foo.py"
+    assert_failure
+}
+
+@test "TAP-534: plan_annotate_resolved does not corrupt unrelated lines containing same text" {
+    local plan="$TEST_DIR/fix_plan.md"
+    cat > "$plan" <<'EOF'
+## Tasks
+- [ ] Build the auth flow
+- [ ] Also: build the auth flow
+EOF
+
+    # Line-index rewrite must only touch line 2; the old sed approach would
+    # have matched both lines because they share the substring "Build the auth flow".
+    run plan_annotate_resolved "$plan" 2 "src/auth.py"
+    assert_success
+
+    local line2 line3
+    line2=$(sed -n '2p' "$plan")
+    line3=$(sed -n '3p' "$plan")
+    [[ "$line2" == "- [ ] Build the auth flow <!-- resolved: src/auth.py -->" ]]
+    [[ "$line3" == "- [ ] Also: build the auth flow" ]]
+}

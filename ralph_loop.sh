@@ -1419,9 +1419,21 @@ should_exit_gracefully() {
     # 5. Check task source for completion
     # Fix #144: Only match valid markdown checkboxes, not date entries like [2026-01-29]
     if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        # TAP-536: A Linear API failure must NOT trip a "plan_complete" exit.
+        # The backend now distinguishes "exit 0 + value" (real count) from
+        # "exit non-zero" (API/network/parse error). On any error we abstain
+        # from this iteration's exit decision and let the next loop retry.
         local open_items done_items
-        open_items=$(linear_get_open_count 2>/dev/null) || open_items=0
-        done_items=$(linear_get_done_count 2>/dev/null) || done_items=0
+        if ! open_items=$(linear_get_open_count); then
+            log_status "WARN" "Linear API failure (open_count) — skipping exit gate this iteration" >&2
+            echo ""
+            return 0
+        fi
+        if ! done_items=$(linear_get_done_count); then
+            log_status "WARN" "Linear API failure (done_count) — skipping exit gate this iteration" >&2
+            echo ""
+            return 0
+        fi
         local total_items=$((open_items + done_items))
         if [[ $total_items -gt 0 ]] && [[ $open_items -eq 0 ]]; then
             log_status "WARN" "Exit condition: All Linear issues completed ($done_items/$total_items) in project '${RALPH_LINEAR_PROJECT}'" >&2
@@ -1809,9 +1821,11 @@ dry_run_simulate() {
     fi
 
     if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        # TAP-536: surface API errors but don't fail the dry-run; "?" signals
+        # "unknown" so operators can see the count is unreliable.
         local task_count done_count
-        task_count=$(linear_get_open_count 2>/dev/null) || task_count="?"
-        done_count=$(linear_get_done_count 2>/dev/null) || done_count="?"
+        task_count=$(linear_get_open_count) || task_count="?"
+        done_count=$(linear_get_done_count) || done_count="?"
         log_status "INFO" "[DRY-RUN]   Tasks (Linear/${RALPH_LINEAR_PROJECT}): $task_count open, $done_count done"
     elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local task_count
@@ -1907,12 +1921,19 @@ build_loop_context() {
 
     # Extract incomplete tasks from task source
     if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        # TAP-536: On API failure, mark counts as "unknown" instead of "0".
+        # Treating a failed lookup as 0 remaining can falsely encourage Claude
+        # to emit EXIT_SIGNAL: true.
         local incomplete_tasks
-        incomplete_tasks=$(linear_get_open_count 2>/dev/null) || incomplete_tasks=0
-        context+="Remaining tasks (Linear): ${incomplete_tasks}. "
+        if incomplete_tasks=$(linear_get_open_count); then
+            context+="Remaining tasks (Linear): ${incomplete_tasks}. "
+        else
+            log_status "WARN" "Linear API failure (open_count) — context will mark counts as unknown" >&2
+            context+="Remaining tasks (Linear): unknown (API error — do NOT emit EXIT_SIGNAL). "
+        fi
         # Inject Linear task source instructions for Claude
         local next_task
-        next_task=$(linear_get_next_task 2>/dev/null) || next_task=""
+        next_task=$(linear_get_next_task) || next_task=""
         context+="TASK SOURCE: Linear project '${RALPH_LINEAR_PROJECT}'. "
         if [[ -n "$next_task" ]]; then
             context+="Next issue: ${next_task}. "
@@ -2214,7 +2235,9 @@ ralph_continue_as_new() {
 
     # Extract current task from task source
     if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
-        current_task=$(linear_get_next_task 2>/dev/null) || current_task=""
+        # TAP-536: API errors leave current_task empty; structured error from
+        # the backend is already on stderr.
+        current_task=$(linear_get_next_task) || current_task=""
     elif [[ -f "$FIX_PLAN_FILE" ]]; then
         current_task=$(grep -m1 '^\s*-\s*\[\s*\]' "$FIX_PLAN_FILE" 2>/dev/null | sed 's/^[[:space:]]*-[[:space:]]*\[[[:space:]]*\][[:space:]]*//' || echo "")
     fi
@@ -2228,8 +2251,10 @@ ralph_continue_as_new() {
     # Count completed vs remaining tasks
     local completed_tasks=0 remaining_tasks=0
     if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
-        remaining_tasks=$(linear_get_open_count 2>/dev/null) || remaining_tasks=0
-        completed_tasks=$(linear_get_done_count 2>/dev/null) || completed_tasks=0
+        # TAP-536: snapshot path — defaults to 0 on API error. Structured error
+        # from the backend lands on stderr.
+        remaining_tasks=$(linear_get_open_count) || remaining_tasks=0
+        completed_tasks=$(linear_get_done_count) || completed_tasks=0
     elif [[ -f "$FIX_PLAN_FILE" ]]; then
         completed_tasks=$(grep -cE '^\s*-\s*\[x\]' "$FIX_PLAN_FILE" 2>/dev/null) || completed_tasks=0
         remaining_tasks=$(grep -cE '^\s*-\s*\[\s*\]' "$FIX_PLAN_FILE" 2>/dev/null) || remaining_tasks=0
@@ -4038,9 +4063,18 @@ main() {
     # so only 1 more EXIT_SIGNAL: true loop is needed (avoids zombie verification loops).
     local _pre_uncompleted=1
     if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
-        _pre_uncompleted=$(linear_get_open_count 2>/dev/null) || _pre_uncompleted=1
+        # TAP-536: API failure here defaults to "1 incomplete" (the safe answer
+        # — never pre-seeds completion_indicators on failure, so we don't get a
+        # zombie 1-loop verification cycle when Linear is down at startup).
         local _pre_completed
-        _pre_completed=$(linear_get_done_count 2>/dev/null) || _pre_completed=0
+        if ! _pre_uncompleted=$(linear_get_open_count); then
+            log_status "WARN" "Linear API failure (open_count) at startup pre-seed — assuming incomplete" >&2
+            _pre_uncompleted=1
+        fi
+        if ! _pre_completed=$(linear_get_done_count); then
+            log_status "WARN" "Linear API failure (done_count) at startup pre-seed — assuming none done" >&2
+            _pre_completed=0
+        fi
         if [[ $_pre_completed -eq 0 ]]; then
             _pre_uncompleted=1  # No tasks at all — treat as incomplete
         fi

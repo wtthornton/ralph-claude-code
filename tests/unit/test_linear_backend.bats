@@ -2,6 +2,7 @@
 # Unit tests for lib/linear_backend.sh
 # Uses bash function overriding to mock curl — no real HTTP calls are made.
 
+bats_require_minimum_version 1.5.0
 load '../helpers/test_helper'
 
 LINEAR_BACKEND="${BATS_TEST_DIRNAME}/../../lib/linear_backend.sh"
@@ -31,12 +32,16 @@ MOCK_BIN_DIR=""
 
 mock_curl_success() {
     local response="$1"
+    local http_code="${2:-200}"
     MOCK_BIN_DIR="$(mktemp -d)"
-    # Write the response to a file so the script can read it without quoting issues
     printf '%s' "$response" > "$MOCK_BIN_DIR/_response"
+    printf '%s' "$http_code" > "$MOCK_BIN_DIR/_http_code"
+    # The lib uses `curl -w '\n%{http_code}'` and splits the body from the
+    # trailing code. Mock that contract regardless of which arg looks like -w.
     cat > "$MOCK_BIN_DIR/curl" << 'SCRIPT'
 #!/bin/bash
 cat "$(dirname "$0")/_response"
+printf '\n%s' "$(cat "$(dirname "$0")/_http_code")"
 exit 0
 SCRIPT
     chmod +x "$MOCK_BIN_DIR/curl"
@@ -44,13 +49,27 @@ SCRIPT
 }
 
 mock_curl_failure() {
+    local exit_code="${1:-1}"
     MOCK_BIN_DIR="$(mktemp -d)"
+    printf '%s' "$exit_code" > "$MOCK_BIN_DIR/_exit_code"
     cat > "$MOCK_BIN_DIR/curl" << 'SCRIPT'
 #!/bin/bash
-exit 1
+exit "$(cat "$(dirname "$0")/_exit_code")"
 SCRIPT
     chmod +x "$MOCK_BIN_DIR/curl"
     export PATH="$MOCK_BIN_DIR:$PATH"
+}
+
+# TAP-536: simulate HTTP error response (e.g. 401 Unauthorized, 503 Server)
+mock_curl_http_error() {
+    local http_code="$1"
+    local body="${2:-}"
+    mock_curl_success "$body" "$http_code"
+}
+
+# TAP-536: simulate connection timeout (curl exit code 28)
+mock_curl_timeout() {
+    mock_curl_failure 28
 }
 
 restore_curl() {
@@ -89,10 +108,11 @@ restore_curl() {
 # linear_get_open_count (4 tests)
 # =============================================================================
 
-@test "linear_get_open_count: returns 0 when LINEAR_API_KEY is not set" {
+@test "linear_get_open_count: TAP-536 fails when LINEAR_API_KEY is not set" {
     export RALPH_LINEAR_PROJECT="My Project"
     run linear_get_open_count
-    assert_output "0"
+    assert_failure
+    [[ "$output" != *"0"* ]] || fail "must not silently emit a zero count on missing API key"
 }
 
 @test "linear_get_open_count: returns correct count from API response" {
@@ -113,23 +133,25 @@ restore_curl() {
     assert_output "0"
 }
 
-@test "linear_get_open_count: returns 0 on curl failure (fail-open)" {
+@test "linear_get_open_count: TAP-536 fails loudly on curl failure (no longer fail-open)" {
     export LINEAR_API_KEY="lin_api_test123"
     export RALPH_LINEAR_PROJECT="My Project"
     mock_curl_failure
     run linear_get_open_count
     restore_curl
-    assert_output "0"
+    assert_failure
+    [[ "$output" != *"0"* ]] || fail "must not silently emit a zero count on curl failure"
 }
 
 # =============================================================================
 # linear_get_done_count (4 tests)
 # =============================================================================
 
-@test "linear_get_done_count: returns 0 when LINEAR_API_KEY is not set" {
+@test "linear_get_done_count: TAP-536 fails when LINEAR_API_KEY is not set" {
     export RALPH_LINEAR_PROJECT="My Project"
     run linear_get_done_count
-    assert_output "0"
+    assert_failure
+    [[ "$output" != *"0"* ]] || fail "must not silently emit a zero count on missing API key"
 }
 
 @test "linear_get_done_count: returns correct count from API response" {
@@ -141,21 +163,25 @@ restore_curl() {
     assert_output "2"
 }
 
-@test "linear_get_done_count: returns 0 on curl failure (fail-open)" {
+@test "linear_get_done_count: TAP-536 fails loudly on curl failure (no longer fail-open)" {
     export LINEAR_API_KEY="lin_api_test123"
     export RALPH_LINEAR_PROJECT="My Project"
     mock_curl_failure
     run linear_get_done_count
     restore_curl
-    assert_output "0"
+    assert_failure
+    [[ "$output" != *"0"* ]] || fail "must not silently emit a zero count on curl failure"
 }
 
-@test "linear_get_done_count: returns 0 when nodes array is absent" {
+@test "linear_get_done_count: returns 0 when nodes array is absent (default //[])" {
     export LINEAR_API_KEY="lin_api_test123"
     export RALPH_LINEAR_PROJECT="My Project"
     mock_curl_success '{"data":{"issues":{}}}'
     run linear_get_done_count
     restore_curl
+    # `// []` defaults the missing nodes to an empty array, so length=0 is a
+    # valid happy-path answer (not a parse error).
+    assert_success
     assert_output "0"
 }
 
@@ -163,10 +189,10 @@ restore_curl() {
 # linear_get_next_task (7 tests)
 # =============================================================================
 
-@test "linear_get_next_task: returns empty string when LINEAR_API_KEY is not set" {
+@test "linear_get_next_task: TAP-536 fails when LINEAR_API_KEY is not set" {
     export RALPH_LINEAR_PROJECT="My Project"
     run linear_get_next_task
-    assert_output ""
+    assert_failure
 }
 
 @test "linear_get_next_task: returns single issue as IDENTIFIER: title" {
@@ -214,13 +240,102 @@ restore_curl() {
     assert_output ""
 }
 
-@test "linear_get_next_task: returns empty string on curl failure (fail-open)" {
+@test "linear_get_next_task: TAP-536 fails loudly on curl failure (no longer fail-open)" {
     export LINEAR_API_KEY="lin_api_test123"
     export RALPH_LINEAR_PROJECT="My Project"
     mock_curl_failure
     run linear_get_next_task
     restore_curl
-    assert_output ""
+    assert_failure
+}
+
+# =============================================================================
+# TAP-536: structured error logging + reason matrix (HTTP 401, 5xx, timeout, parse)
+# =============================================================================
+
+@test "TAP-536: 401 unauthorized returns non-zero with reason=http_401" {
+    export LINEAR_API_KEY="lin_api_bad"
+    export RALPH_LINEAR_PROJECT="My Project"
+    mock_curl_http_error 401 '{"error":"unauthorized"}'
+    run --separate-stderr linear_get_open_count
+    restore_curl
+    assert_failure
+    # stdout must be empty (no silent zero count) — error info goes to stderr.
+    [[ -z "$output" ]] || fail "expected empty stdout on 401, got: $output"
+    [[ "$stderr" == *"linear_api_error"* && "$stderr" == *"reason=http_401"* ]] || \
+        fail "expected 'linear_api_error: ... reason=http_401' on stderr, got: $stderr"
+}
+
+@test "TAP-536: 5xx server error returns non-zero with reason=http_503" {
+    export LINEAR_API_KEY="lin_api_test123"
+    export RALPH_LINEAR_PROJECT="My Project"
+    mock_curl_http_error 503 '{"error":"service unavailable"}'
+    run --separate-stderr linear_get_done_count
+    restore_curl
+    assert_failure
+    [[ -z "$output" ]] || fail "expected empty stdout on 503, got: $output"
+    [[ "$stderr" == *"reason=http_503"* ]] || \
+        fail "expected reason=http_503 on stderr, got: $stderr"
+}
+
+@test "TAP-536: connection timeout returns non-zero with reason=timeout" {
+    export LINEAR_API_KEY="lin_api_test123"
+    export RALPH_LINEAR_PROJECT="My Project"
+    mock_curl_timeout
+    run --separate-stderr linear_get_open_count
+    restore_curl
+    assert_failure
+    [[ -z "$output" ]] || fail "expected empty stdout on timeout, got: $output"
+    [[ "$stderr" == *"reason=timeout"* ]] || \
+        fail "expected reason=timeout on stderr, got: $stderr"
+}
+
+@test "TAP-536: malformed JSON returns non-zero with reason=parse" {
+    export LINEAR_API_KEY="lin_api_test123"
+    export RALPH_LINEAR_PROJECT="My Project"
+    # HTTP 200 with body that lacks the .data.issues.nodes path entirely.
+    # `.data.issues.nodes // []` defaults to []; jq returns "0" for length.
+    # To force a parse failure we feed jq a body that is not valid JSON at all.
+    mock_curl_success 'this is not json at all' 200
+    run --separate-stderr linear_get_open_count
+    restore_curl
+    assert_failure
+    [[ -z "$output" ]] || fail "expected empty stdout on parse error, got: $output"
+    [[ "$stderr" == *"reason=parse"* ]] || \
+        fail "expected reason=parse on stderr, got: $stderr"
+}
+
+@test "TAP-536: GraphQL error envelope (HTTP 200, .errors set) returns non-zero" {
+    export LINEAR_API_KEY="lin_api_test123"
+    export RALPH_LINEAR_PROJECT="My Project"
+    mock_curl_success '{"errors":[{"message":"Schema field deprecated"}]}' 200
+    run --separate-stderr linear_get_open_count
+    restore_curl
+    assert_failure
+    [[ -z "$output" ]] || fail "expected empty stdout on GraphQL error, got: $output"
+    [[ "$stderr" == *"reason=graphql_errors"* ]] || \
+        fail "expected reason=graphql_errors on stderr, got: $stderr"
+}
+
+@test "TAP-536: structured error log does not leak the API key" {
+    export LINEAR_API_KEY="lin_api_SECRET_TOKEN_xyz"
+    export RALPH_LINEAR_PROJECT="MySecretProjectName"
+    mock_curl_http_error 401 ''
+    run --separate-stderr linear_get_open_count
+    restore_curl
+    assert_failure
+    [[ "$stderr" != *"SECRET_TOKEN"* ]] || fail "API key leaked into stderr: $stderr"
+    [[ "$stderr" != *"MySecretProjectName"* ]] || fail "Project name leaked into stderr: $stderr"
+}
+
+@test "TAP-536: empty backlog (HTTP 200, [] nodes) still succeeds and prints 0" {
+    export LINEAR_API_KEY="lin_api_test123"
+    export RALPH_LINEAR_PROJECT="My Project"
+    mock_curl_success '{"data":{"issues":{"nodes":[]}}}'
+    run linear_get_open_count
+    restore_curl
+    assert_success
+    assert_output "0"
 }
 
 @test "linear_get_next_task: handles missing nodes key gracefully" {
@@ -229,5 +344,6 @@ restore_curl() {
     mock_curl_success '{"data":{"issues":{}}}'
     run linear_get_next_task
     restore_curl
+    assert_success
     assert_output ""
 }

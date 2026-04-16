@@ -147,17 +147,18 @@ plan_resolve_vague_tasks() {
     # Skip if claude CLI is not available (e.g., running in CI without Claude)
     command -v claude &>/dev/null || return 0
 
-    # Find unchecked tasks with zero file references and no resolved annotation
+    # Find unchecked tasks with zero file references and no resolved annotation.
+    # Emit line_num so we can rewrite by index (TAP-534) instead of sed regex.
     local vague_tasks
     vague_tasks=$(echo "$tasks_json" | jq -r '
         .[] | select(.checked == false and (.files | length) == 0) |
-        "\(.idx)\t\(.text)"
+        "\(.idx)\t\(.line_num)\t\(.text)"
     ' | head -"$max_resolve")
 
     [[ -z "$vague_tasks" ]] && return 0
 
     local resolved_count=0
-    while IFS=$'\t' read -r idx text; do
+    while IFS=$'\t' read -r idx line_num text; do
         [[ -z "$idx" ]] && continue
 
         # Skip if already has a resolved annotation
@@ -177,11 +178,10 @@ Return ONLY file paths relative to project root, one per line. Max 3 files. No e
             resolved_file=$(echo "$explorer_result" | head -1 | grep -oE '[a-zA-Z0-9_/./-]+\.[a-z]+' | head -1)
 
             if [[ -n "$resolved_file" && -f "$project_root/$resolved_file" ]]; then
-                # Annotate the task in fix_plan.md with resolved file
-                local escaped_text
-                escaped_text=$(printf '%s\n' "$text" | sed 's/[&/\]/\\&/g')
-                sed -i "s|${escaped_text}|${text} <!-- resolved: ${resolved_file} -->|" "$fix_plan"
-                resolved_count=$((resolved_count + 1))
+                # Annotate the task in fix_plan.md (TAP-534: safe append by line index)
+                if plan_annotate_resolved "$fix_plan" "$line_num" "$resolved_file"; then
+                    resolved_count=$((resolved_count + 1))
+                fi
             fi
         fi
     done <<< "$vague_tasks"
@@ -190,6 +190,54 @@ Return ONLY file paths relative to project root, one per line. Max 3 files. No e
         # Guard: plan_opt_log may not be defined yet (PLANOPT-5)
         declare -f plan_opt_log &>/dev/null && \
             plan_opt_log "Explorer resolved $resolved_count vague tasks to file paths"
+    fi
+}
+
+# plan_annotate_resolved — Append `<!-- resolved: PATH -->` to a task line by index
+#
+# Safe replacement (TAP-534) using awk + ENVIRON to avoid sed regex injection from
+# task text or paths containing `|`, `&`, `\`, or other regex/sed metacharacters.
+#
+# Behavior:
+#   - Only rewrites the line at $line_num if it still starts with `- [ ]`
+#     (defends against file edits that happened between parse and annotate).
+#   - Appends ` <!-- resolved: PATH -->` to the existing line instead of
+#     reconstructing it from parsed text — preserves any existing metadata.
+#
+# Args:
+#   $1 fix_plan      — path to fix_plan.md
+#   $2 line_num      — 1-based line number to annotate
+#   $3 resolved_file — file path to record (raw, unescaped)
+#
+# Returns: 0 on successful write, 1 on validation/IO failure.
+#
+plan_annotate_resolved() {
+    local fix_plan="$1"
+    local line_num="$2"
+    local resolved_file="$3"
+
+    [[ ! -f "$fix_plan" ]] && return 1
+    [[ -z "$line_num" || -z "$resolved_file" ]] && return 1
+    [[ "$line_num" =~ ^[0-9]+$ ]] || return 1
+
+    local tmp="${fix_plan}.resolve.tmp"
+
+    # ENVIRON[] avoids awk's `-v` escape-sequence interpretation, so backslashes
+    # and other special characters in `resolved_file` are passed through verbatim.
+    if NEW_ANNOTATION=" <!-- resolved: ${resolved_file} -->" \
+       awk -v ln="$line_num" '
+        NR==ln && $0 ~ /^- \[ \]/ {
+            print $0 ENVIRON["NEW_ANNOTATION"]
+            next
+        }
+        { print }
+    ' "$fix_plan" > "$tmp"; then
+        mv "$tmp" "$fix_plan"
+        rm -f "$tmp" 2>/dev/null  # WSL/NTFS orphan-temp guard (matches on-stop.sh pattern)
+        return 0
+    else
+        rm -f "$tmp" 2>/dev/null
+        return 1
     fi
 }
 
@@ -789,6 +837,7 @@ plan_annotate_batches() {
 # =============================================================================
 export -f plan_parse_tasks
 export -f plan_resolve_vague_tasks
+export -f plan_annotate_resolved
 export -f plan_extract_module
 export -f plan_phase_rank
 export -f plan_size_rank
