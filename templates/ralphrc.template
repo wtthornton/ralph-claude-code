@@ -66,7 +66,27 @@ SESSION_CONTINUITY=true
 SESSION_EXPIRY_HOURS=24
 
 # =============================================================================
-# TASK SOURCES
+# TASK BACKEND
+# =============================================================================
+
+# Task backend: "file" (default) reads from .ralph/fix_plan.md
+#               "linear" reads from a Linear project via the Linear API
+# Switching to "linear" requires LINEAR_API_KEY and RALPH_LINEAR_PROJECT below.
+RALPH_TASK_SOURCE="file"
+
+# Linear project name (required when RALPH_TASK_SOURCE=linear)
+# Must exactly match the project name in your Linear workspace.
+# RALPH_LINEAR_PROJECT="Ralph Continuous Coding"
+
+# Linear team name (optional — used in log messages only)
+# RALPH_LINEAR_TEAM="TappsCodingAgents"
+
+# Linear personal API key (can also be set as environment variable)
+# Generate at: https://linear.app/settings/api
+# LINEAR_API_KEY=""
+
+# =============================================================================
+# TASK SOURCES (legacy import — separate from RALPH_TASK_SOURCE)
 # =============================================================================
 
 # Where to import tasks from (comma-separated)

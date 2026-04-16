@@ -23,6 +23,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/audit.sh" ]] && source "$SCRIPT_DIR/lib/audit.sh"
 [[ -f "$SCRIPT_DIR/lib/context_management.sh" ]] && source "$SCRIPT_DIR/lib/context_management.sh"
 [[ -f "$SCRIPT_DIR/lib/tracing.sh" ]] && source "$SCRIPT_DIR/lib/tracing.sh"
+[[ -f "$SCRIPT_DIR/lib/linear_backend.sh" ]] && source "$SCRIPT_DIR/lib/linear_backend.sh"
 
 # Version
 RALPH_VERSION="2.6.0"
@@ -43,6 +44,9 @@ TOKEN_COUNT_FILE="$RALPH_DIR/.token_count"
 TIMESTAMP_FILE="$RALPH_DIR/.last_reset"
 USE_TMUX=false
 RALPH_SERVICE=""           # Monorepo service scope (Issue #163)
+RALPH_TASK_SOURCE="file"   # Task backend: "file" (fix_plan.md) or "linear"
+RALPH_LINEAR_PROJECT=""    # Linear project name (required when RALPH_TASK_SOURCE=linear)
+RALPH_LINEAR_TEAM=""       # Linear team name (optional, used in log messages)
 
 # Save environment variable state BEFORE setting defaults
 # These are used by load_ralphrc() to determine which values came from environment
@@ -1412,10 +1416,20 @@ should_exit_gracefully() {
         return 0
     fi
     
-    # 5. Check fix_plan.md for completion
+    # 5. Check task source for completion
     # Fix #144: Only match valid markdown checkboxes, not date entries like [2026-01-29]
-    # Valid patterns: "- [ ]" (uncompleted) and "- [x]" or "- [X]" (completed)
-    if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
+    if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        local open_items done_items
+        open_items=$(linear_get_open_count 2>/dev/null) || open_items=0
+        done_items=$(linear_get_done_count 2>/dev/null) || done_items=0
+        local total_items=$((open_items + done_items))
+        if [[ $total_items -gt 0 ]] && [[ $open_items -eq 0 ]]; then
+            log_status "WARN" "Exit condition: All Linear issues completed ($done_items/$total_items) in project '${RALPH_LINEAR_PROJECT}'" >&2
+            echo "plan_complete"
+            return 0
+        fi
+    elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
+        # Valid patterns: "- [ ]" (uncompleted) and "- [x]" or "- [X]" (completed)
         local uncompleted_items
         uncompleted_items=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || uncompleted_items=0
         local completed_items
@@ -1794,7 +1808,12 @@ dry_run_simulate() {
         fi
     fi
 
-    if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
+    if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        local task_count done_count
+        task_count=$(linear_get_open_count 2>/dev/null) || task_count="?"
+        done_count=$(linear_get_done_count 2>/dev/null) || done_count="?"
+        log_status "INFO" "[DRY-RUN]   Tasks (Linear/${RALPH_LINEAR_PROJECT}): $task_count open, $done_count done"
+    elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local task_count
         task_count=$(grep -c '^\- \[ \]' "$RALPH_DIR/fix_plan.md" 2>/dev/null) || task_count=0
         local done_count
@@ -1886,9 +1905,21 @@ build_loop_context() {
     # Add loop number
     context="Loop #${loop_count}. "
 
-    # Extract incomplete tasks from fix_plan.md
+    # Extract incomplete tasks from task source
+    if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        local incomplete_tasks
+        incomplete_tasks=$(linear_get_open_count 2>/dev/null) || incomplete_tasks=0
+        context+="Remaining tasks (Linear): ${incomplete_tasks}. "
+        # Inject Linear task source instructions for Claude
+        local next_task
+        next_task=$(linear_get_next_task 2>/dev/null) || next_task=""
+        context+="TASK SOURCE: Linear project '${RALPH_LINEAR_PROJECT}'. "
+        if [[ -n "$next_task" ]]; then
+            context+="Next issue: ${next_task}. "
+        fi
+        context+="Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done when complete. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain."
     # Bug #3 Fix: Support indented markdown checkboxes with [[:space:]]* pattern
-    if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
+    elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local incomplete_tasks
         incomplete_tasks=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || incomplete_tasks=0
         context+="Remaining tasks: ${incomplete_tasks}. "
@@ -2181,8 +2212,10 @@ ralph_should_continue_as_new() {
 ralph_continue_as_new() {
     local current_task="" progress="" recommendation=""
 
-    # Extract current task from fix_plan (first unchecked item)
-    if [[ -f "$FIX_PLAN_FILE" ]]; then
+    # Extract current task from task source
+    if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        current_task=$(linear_get_next_task 2>/dev/null) || current_task=""
+    elif [[ -f "$FIX_PLAN_FILE" ]]; then
         current_task=$(grep -m1 '^\s*-\s*\[\s*\]' "$FIX_PLAN_FILE" 2>/dev/null | sed 's/^[[:space:]]*-[[:space:]]*\[[[:space:]]*\][[:space:]]*//' || echo "")
     fi
 
@@ -2194,7 +2227,10 @@ ralph_continue_as_new() {
 
     # Count completed vs remaining tasks
     local completed_tasks=0 remaining_tasks=0
-    if [[ -f "$FIX_PLAN_FILE" ]]; then
+    if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        remaining_tasks=$(linear_get_open_count 2>/dev/null) || remaining_tasks=0
+        completed_tasks=$(linear_get_done_count 2>/dev/null) || completed_tasks=0
+    elif [[ -f "$FIX_PLAN_FILE" ]]; then
         completed_tasks=$(grep -cE '^\s*-\s*\[x\]' "$FIX_PLAN_FILE" 2>/dev/null) || completed_tasks=0
         remaining_tasks=$(grep -cE '^\s*-\s*\[\s*\]' "$FIX_PLAN_FILE" 2>/dev/null) || remaining_tasks=0
     fi
@@ -3998,10 +4034,17 @@ main() {
     # Reset exit signals to prevent stale state from prior run causing premature exit (Issue #194)
     # This is unconditional: regardless of how the previous run ended (crash, SIGKILL, API limit exit),
     # every new ralph invocation starts with a clean exit-signal slate.
-    # However, if fix_plan is already 100% complete, pre-seed completion_indicators with 1
+    # However, if task source is already 100% complete, pre-seed completion_indicators with 1
     # so only 1 more EXIT_SIGNAL: true loop is needed (avoids zombie verification loops).
     local _pre_uncompleted=1
-    if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
+    if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        _pre_uncompleted=$(linear_get_open_count 2>/dev/null) || _pre_uncompleted=1
+        local _pre_completed
+        _pre_completed=$(linear_get_done_count 2>/dev/null) || _pre_completed=0
+        if [[ $_pre_completed -eq 0 ]]; then
+            _pre_uncompleted=1  # No tasks at all — treat as incomplete
+        fi
+    elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         _pre_uncompleted=$(grep -cE '^\s*- \[ \]' "$RALPH_DIR/fix_plan.md" 2>/dev/null) || _pre_uncompleted=0
         local _pre_completed
         _pre_completed=$(grep -cE '^\s*- \[[xX]\]' "$RALPH_DIR/fix_plan.md" 2>/dev/null) || _pre_completed=0

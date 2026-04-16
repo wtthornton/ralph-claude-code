@@ -61,6 +61,7 @@ bats tests/unit/test_cli_parsing.bats
 | `memory.sh` | Cross-session memory — episodic (what worked/failed), semantic (project index), decay/pruning (Phase 14) |
 | `import_graph.sh` | AST-based file dependency graph — Python `ast`, JS/TS `madge`/grep fallback. Cached in `.ralph/.import_graph.json` with mtime staleness detection. Async background rebuild, incremental invalidation via hooks. (PLANOPT epic) |
 | `plan_optimizer.sh` | Fix plan task reordering — parses fix_plan.md, resolves vague tasks via ralph-explorer (Haiku), detects dependencies via import graph + explicit metadata + phase convention, orders via Unix `tsort`, validates semantic equivalence before atomic write. Runs at session start for changed sections only. (PLANOPT epic) |
+| `linear_backend.sh` | Linear API task backend — `linear_get_open_count`, `linear_get_done_count`, `linear_get_next_task`, `linear_check_configured`. Used when `RALPH_TASK_SOURCE=linear`. All functions fail-open (return 0/"") so the loop degrades gracefully when the API is unreachable. |
 | ~~`response_analyzer.sh`~~ | Removed — response analysis handled by `on-stop.sh` hook → `status.json` |
 | ~~`file_protection.sh`~~ | Removed — file protection handled by PreToolUse hooks |
 
@@ -141,6 +142,8 @@ The main Ralph agent (Sonnet) handles routine work with task batching (up to 5 s
 
 **Agent evaluation framework (EVALS)**: Golden-file test infrastructure in `tests/evals/`. Deterministic suite (64 BATS tests, no LLM calls, <5 min) verifies exit gate, circuit breaker, tool restrictions, and hooks. Stochastic suite runs N golden-file comparisons with three-valued outcomes (Pass/Fail/Inconclusive) and Wilson score confidence intervals for nightly CI.
 
+**Linear task backend (`RALPH_TASK_SOURCE=linear`)**: When set, Ralph replaces all `fix_plan.md` reads with Linear GraphQL API calls. Five integration points in `ralph_loop.sh` branch on this variable: exit-condition check, dry-run status display, `build_loop_context()` (injects next issue + Linear MCP instructions into `--append-system-prompt`), `ralph_continue_as_new()` (saves open/done counts), and startup pre-seeding of exit signals. The backend is sourced from `lib/linear_backend.sh` at startup. Requires `LINEAR_API_KEY` and `RALPH_LINEAR_PROJECT` (exact project name in Linear). Claude must use Linear MCP tools to list issues, work the highest-priority one, and mark it Done — `fix_plan.md` is not read or modified in this mode.
+
 **Design documentation**: Reliability epics and stories live in **`docs/specs/`** (e.g. `epic-jsonl-stream-resilience.md`, `epic-multi-task-cascading-failures.md`). Long-term platform integration is drafted in `docs/specs/claude-code-2026-enhancements.md`.
 
 ### State Files (in `.ralph/` within managed projects)
@@ -167,6 +170,9 @@ Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 - `LOG_MAX_FILES` — Number of rotated log files to keep (default: 5)
 - `LOG_MAX_OUTPUT_FILES` — Max claude_output_*.log files to keep (default: 20)
 - `DRY_RUN` — Preview loop execution without API calls (also `--dry-run` flag)
+- `RALPH_TASK_SOURCE` — Task backend: `"file"` (default, reads `fix_plan.md`) or `"linear"` (reads from Linear API)
+- `RALPH_LINEAR_PROJECT` — Linear project name, must exactly match workspace (required when `RALPH_TASK_SOURCE=linear`)
+- `LINEAR_API_KEY` — Linear personal API key (generate at linear.app/settings/api; can be env var instead of `.ralphrc`)
 - `RALPH_NO_OPTIMIZE` — Disable automatic fix_plan.md reordering on session start
 - `RALPH_NO_EXPLORER_RESOLVE` — Disable ralph-explorer file resolution for vague tasks
 - `RALPH_MAX_EXPLORER_RESOLVE` — Max vague tasks to resolve per optimization run (default: 5)
