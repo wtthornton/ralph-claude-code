@@ -60,8 +60,9 @@ plan_parse_tasks() {
         }
 
         # Also extract bare paths (path/to/file.ext patterns)
+        # Uses 2-arg match() for mawk compatibility — RSTART/RLENGTH carry the match.
         tmp = text
-        while (match(tmp, /[a-zA-Z0-9_\/./-]+\.(py|ts|tsx|js|jsx|sh|json|yaml|yml|toml|md|css|html|go|rs|rb|java)/, m)) {
+        while (match(tmp, /[a-zA-Z0-9_./-]+\.(py|ts|tsx|js|jsx|sh|json|yaml|yml|toml|md|css|html|go|rs|rb|java)/)) {
             bare = substr(tmp, RSTART, RLENGTH)
             # Avoid duplicates from backtick extraction
             if (index(files, "\"" bare "\"") == 0) {
@@ -72,16 +73,30 @@ plan_parse_tasks() {
         }
 
         # Extract explicit metadata: <!-- id: foo -->
+        # Uses 2-arg match() + substr/sub for mawk compatibility (no capture-array form).
         task_id = ""
-        if (match(text, /<!-- *id: *([a-zA-Z0-9_-]+) *-->/, m)) task_id = m[1]
+        if (match(text, /<!-- *id: *[a-zA-Z0-9_-]+ *-->/)) {
+            id_part = substr(text, RSTART, RLENGTH)
+            sub(/<!-- *id: */, "", id_part)
+            sub(/ *-->.*/, "", id_part)
+            task_id = id_part
+        }
 
         # Extract explicit metadata: <!-- depends: bar -->
         depends = ""
-        if (match(text, /<!-- *depends: *([a-zA-Z0-9_-]+) *-->/, m)) depends = m[1]
+        if (match(text, /<!-- *depends: *[a-zA-Z0-9_-]+ *-->/)) {
+            dep_part = substr(text, RSTART, RLENGTH)
+            sub(/<!-- *depends: */, "", dep_part)
+            sub(/ *-->.*/, "", dep_part)
+            depends = dep_part
+        }
 
         # Extract resolved file: <!-- resolved: path/to/file.ext -->
-        if (match(text, /<!-- *resolved: *([a-zA-Z0-9_./-]+) *-->/, m)) {
-            resolved = m[1]
+        if (match(text, /<!-- *resolved: *[a-zA-Z0-9_./-]+ *-->/)) {
+            res_part = substr(text, RSTART, RLENGTH)
+            sub(/<!-- *resolved: */, "", res_part)
+            sub(/ *-->.*/, "", res_part)
+            resolved = res_part
             if (index(files, "\"" resolved "\"") == 0) {
                 if (files != "") files = files ","
                 files = files "\"" resolved "\""
@@ -466,7 +481,10 @@ plan_secondary_sort() {
         local mod_num
         mod_num=$((16#${mod_hash}))
 
-        local key=$(( rank * 100000 + (mod_num % 1000) * 1000 + phase * 100 + size * 10 + idx ))
+        # Key formula: module (primary) → phase → topo rank → size → original idx
+        # Module groups related tasks together; phase orders create→implement→test within
+        # a module; topo rank (from tsort) breaks phase ties while respecting import deps.
+        local key=$(( (mod_num % 1000) * 1000000 + phase * 10000 + rank * 100 + size * 10 + idx ))
         echo "$key $idx $section"
         rank=$((rank + 1))
     done <<< "$topo_order"
