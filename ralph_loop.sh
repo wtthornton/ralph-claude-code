@@ -25,6 +25,55 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/tracing.sh" ]] && source "$SCRIPT_DIR/lib/tracing.sh"
 [[ -f "$SCRIPT_DIR/lib/linear_backend.sh" ]] && source "$SCRIPT_DIR/lib/linear_backend.sh"
 
+# TAP-535: Bash 4+ required for `${BASH_VERSINFO[@]}`, mapfile/readarray, named
+# refs, and the rest of the modern bash features used throughout this script.
+if [[ -z "${BASH_VERSION:-}" ]] || (( ${BASH_VERSINFO[0]:-0} < 4 )); then
+    echo "FATAL: ralph_loop.sh requires Bash 4.0+ (got: ${BASH_VERSION:-unknown})" >&2
+    echo "       Install a newer bash via your package manager (Homebrew on macOS)." >&2
+    exit 1
+fi
+
+# TAP-535: pipefail makes `cmd1 | cmd2` propagate cmd1's failure so jq/grep
+# pipelines don't silently mask broken inputs. Applied AFTER library sourcing
+# so library code (which has its own conventions) is unaffected.
+set -o pipefail
+
+# TAP-535: atomic_write — write VALUE to FILE via a unique temp + rename.
+# Protects counters and other small state files from partial-write corruption
+# when the script is killed mid-write, and avoids zero-byte counter files that
+# silently default to 0 on the next read.
+#
+# Usage:   atomic_write <file> <value>
+# Stdout:  nothing
+# Exit:    0 on success, non-zero on any failure (target unchanged on failure)
+#
+# Notes:
+#   * Temp file uses `$$` + `$RANDOM` to stay unique across concurrent runs.
+#   * Best-effort `sync` is GNU-specific; ignored on macOS where it's a no-op.
+#   * The `mv -f` rename is atomic on the same filesystem (POSIX rename(2)).
+atomic_write() {
+    local target="$1"
+    local value="$2"
+    [[ -n "$target" ]] || return 1
+    local dir
+    dir=$(dirname -- "$target")
+    [[ -d "$dir" ]] || return 1
+    local tmp="${target}.tmp.$$.${RANDOM}"
+    if ! printf '%s\n' "$value" > "$tmp" 2>/dev/null; then
+        rm -f -- "$tmp" 2>/dev/null
+        return 1
+    fi
+    # Best-effort fsync on the temp file — GNU coreutils only. macOS `sync`
+    # ignores arguments and syncs the whole FS; we tolerate either by ignoring
+    # exit status. The rename below is the actual atomicity guarantee.
+    sync -- "$tmp" 2>/dev/null || true
+    if ! mv -f -- "$tmp" "$target"; then
+        rm -f -- "$tmp" 2>/dev/null
+        return 1
+    fi
+    return 0
+}
+
 # Version
 RALPH_VERSION="2.6.0"
 
@@ -748,10 +797,11 @@ init_call_tracking() {
     fi
 
     # Reset counters if it's a new hour (invocation + token counts)
+    # TAP-535: atomic_write protects counters from partial-write corruption.
     if [[ "$current_hour" != "$last_reset_hour" ]]; then
-        echo "0" > "$CALL_COUNT_FILE"
-        echo "0" > "$TOKEN_COUNT_FILE"  # Issue #223
-        echo "$current_hour" > "$TIMESTAMP_FILE"
+        atomic_write "$CALL_COUNT_FILE" "0" || log_status "ERROR" "Failed to reset CALL_COUNT_FILE"
+        atomic_write "$TOKEN_COUNT_FILE" "0" || log_status "ERROR" "Failed to reset TOKEN_COUNT_FILE"  # Issue #223
+        atomic_write "$TIMESTAMP_FILE" "$current_hour" || log_status "ERROR" "Failed to write TIMESTAMP_FILE"
         log_status "INFO" "Call counter reset for new hour: $current_hour"
     fi
 
@@ -1274,7 +1324,8 @@ increment_call_counter() {
     calls_made=$(_read_call_count)
 
     ((calls_made++))
-    echo "$calls_made" > "$CALL_COUNT_FILE"
+    # TAP-535: atomic_write — prevents zero-byte counter on SIGTERM mid-write.
+    atomic_write "$CALL_COUNT_FILE" "$calls_made" || log_status "ERROR" "Failed to persist CALL_COUNT_FILE"
     echo "$calls_made"
 }
 
@@ -1293,7 +1344,8 @@ accumulate_tokens() {
         local current_tokens
         current_tokens=$(_read_token_count)
         local new_total=$((current_tokens + tokens_this_call))
-        echo "$new_total" > "$TOKEN_COUNT_FILE"
+        # TAP-535: atomic_write — token counter must survive partial writes.
+        atomic_write "$TOKEN_COUNT_FILE" "$new_total" || log_status "ERROR" "Failed to persist TOKEN_COUNT_FILE"
         log_status "INFO" "Tokens this call: $tokens_this_call (total: $new_total/$MAX_TOKENS_PER_HOUR)"
     fi
 }
@@ -1323,10 +1375,10 @@ wait_for_reset() {
     done
     printf "\n"
     
-    # Reset counters (invocation + tokens)
-    echo "0" > "$CALL_COUNT_FILE"
-    echo "0" > "$TOKEN_COUNT_FILE"  # Issue #223
-    echo "$(date +%Y%m%d%H)" > "$TIMESTAMP_FILE"
+    # Reset counters (invocation + tokens) — TAP-535: atomic_write for safety.
+    atomic_write "$CALL_COUNT_FILE" "0" || log_status "ERROR" "Failed to reset CALL_COUNT_FILE"
+    atomic_write "$TOKEN_COUNT_FILE" "0" || log_status "ERROR" "Failed to reset TOKEN_COUNT_FILE"  # Issue #223
+    atomic_write "$TIMESTAMP_FILE" "$(date +%Y%m%d%H)" || log_status "ERROR" "Failed to write TIMESTAMP_FILE"
     log_status "SUCCESS" "Rate limit reset! Ready for new calls."
 }
 
@@ -4183,7 +4235,9 @@ main() {
     while true; do
         loop_count=$((loop_count + 1))
         persistent_loops=$((persistent_loops + 1))
-        echo "$persistent_loops" > "$persistent_loop_file"
+        # TAP-535: atomic_write so the lifetime loop counter cannot be zeroed
+        # by a SIGTERM landing between the redirection's truncate and write.
+        atomic_write "$persistent_loop_file" "$persistent_loops" || log_status "ERROR" "Failed to persist persistent_loop_file"
 
         # CTXMGMT-3: Track per-session iteration count
         _session_iteration_count=$((_session_iteration_count + 1))
