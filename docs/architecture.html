@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ralph — Autonomous AI Development Loop - Architecture Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+
+/* HomeIQ Design System — Architecture Report */
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #12121a;
+  --bg-tertiary: #1e1e2a;
+  --card-bg: rgba(18, 18, 26, 0.95);
+  --card-bg-alt: rgba(30, 30, 42, 0.95);
+  --card-border: rgba(63, 63, 90, 0.5);
+  --accent-primary: #14b8a6;
+  --accent-secondary: #d4a847;
+  --accent-glow: rgba(20, 184, 166, 0.12);
+  --text-primary: #fafafa;
+  --text-secondary: #d4d4d8;
+  --text-tertiary: #a1a1aa;
+  --text-muted: #71717a;
+  --focus-ring: rgba(20, 184, 166, 0.5);
+  --shadow-card: 0 4px 6px -1px rgba(0,0,0,0.3), 0 0 0 1px rgba(63,63,90,0.3);
+  --shadow-hover: 0 4px 12px -2px rgba(0,0,0,0.25);
+  --radius-md: 0.25rem;
+  --radius-lg: 0.375rem;
+  --radius-xl: 0.5rem;
+  --motion-fast: 150ms;
+  --motion-normal: 250ms;
+  --ease-enter: cubic-bezier(0.4, 0, 0.2, 1);
+  --font-display: 'Outfit', 'Inter', system-ui, sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.45;
+  font-size: 0.875rem;
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1, 'cv11' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+
+/* Focus */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) { outline: none; }
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.15); }
+  50% { box-shadow: 0 0 20px 4px rgba(20, 184, 166, 0.08); }
+}
+
+/* Hero */
+.hero {
+  background: linear-gradient(135deg, #0a0a0f 0%, #12121a 30%, #1e1e2a 70%, #0d3d38 100%);
+  padding: 80px 40px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: radial-gradient(circle at 30% 50%, rgba(20,184,166,0.1) 0%, transparent 50%),
+              radial-gradient(circle at 70% 80%, rgba(212,168,71,0.06) 0%, transparent 50%);
+  animation: pulseGlow 8s ease-in-out infinite;
+}
+.hero-content { position: relative; z-index: 1; max-width: 800px; margin: 0 auto; }
+.hero-title {
+  font-family: var(--font-display);
+  font-size: 2.25rem; font-weight: 700;
+  letter-spacing: -0.025em; margin-bottom: 12px;
+  color: var(--text-primary);
+}
+.hero-subtitle {
+  font-size: 1rem; color: var(--text-secondary);
+  margin-bottom: 16px; line-height: 1.6;
+}
+.hero-arch {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  margin-top: 8px;
+}
+.arch-badge-hero {
+  display: inline-block;
+  padding: 5px 18px; border-radius: 8px;
+  font-weight: 800; font-size: 0.8rem; letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.hero-arch svg { border-radius: 10px; }
+.hero-meta {
+  font-size: 0.75rem; color: var(--accent-primary);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+/* Sections */
+.section {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 48px 40px;
+  animation: fadeIn 0.4s var(--ease-enter) both;
+}
+.section-title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+  position: relative;
+  padding-bottom: 12px;
+}
+.section-title::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0;
+  width: 48px; height: 3px;
+  background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+  border-radius: 2px;
+}
+.section > p {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin-bottom: 24px;
+  max-width: 900px;
+}
+
+/* Purpose block */
+.purpose-block {
+  background: linear-gradient(135deg, var(--card-bg), var(--card-bg-alt));
+  border: 1px solid var(--card-border);
+  border-left: 3px solid var(--accent-primary);
+  border-radius: var(--radius-lg);
+  padding: 24px 28px;
+  margin-bottom: 32px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-card);
+}
+.purpose-block h3 {
+  font-family: var(--font-display);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--accent-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+.purpose-text {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* Stats grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.stat-card {
+  background: linear-gradient(135deg, var(--card-bg), var(--card-bg-alt));
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  text-align: center;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-card);
+  transition: transform var(--motion-fast) var(--ease-enter),
+              box-shadow var(--motion-fast) var(--ease-enter);
+  animation: fadeInScale 0.4s var(--ease-enter) both;
+}
+.stat-card:nth-child(1) { animation-delay: 0.05s; }
+.stat-card:nth-child(2) { animation-delay: 0.1s; }
+.stat-card:nth-child(3) { animation-delay: 0.15s; }
+.stat-card:nth-child(4) { animation-delay: 0.2s; }
+.stat-card:nth-child(5) { animation-delay: 0.25s; }
+.stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-hover);
+}
+.stat-number {
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+}
+.stat-label {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+/* Meta badges */
+.meta-details {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.meta-badge {
+  background: linear-gradient(135deg, var(--card-bg), var(--card-bg-alt));
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+/* Diagram container */
+.diagram-container {
+  background: linear-gradient(135deg, var(--card-bg), var(--card-bg-alt));
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin: 24px 0;
+  overflow-x: auto;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-card);
+}
+.diagram-container svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Component cards */
+.component-card {
+  background: linear-gradient(135deg, var(--card-bg), var(--card-bg-alt));
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-card);
+  transition: transform var(--motion-fast) var(--ease-enter),
+              box-shadow var(--motion-fast) var(--ease-enter);
+  animation: fadeIn 0.4s var(--ease-enter) both;
+}
+.component-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-hover);
+}
+.component-header {
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.component-name {
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+}
+.component-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: rgba(255,255,255,0.75);
+  font-family: var(--font-mono);
+}
+.component-body {
+  padding: 20px;
+}
+.component-description {
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-size: 0.875rem;
+}
+.submodule-list {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--card-border);
+}
+.submodule-list h4 {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.submodule-list ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.submodule-list li {
+  background: var(--bg-primary);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: 3px 10px;
+  font-size: 0.75rem;
+}
+.submodule-list li code {
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: 0.7em;
+}
+
+/* API surface */
+.api-module {
+  margin-bottom: 20px;
+}
+.api-module-path {
+  font-size: 0.8125rem;
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--card-border);
+  margin-bottom: 10px;
+}
+.api-class {
+  background: linear-gradient(135deg, var(--card-bg), var(--card-bg-alt));
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  margin-bottom: 8px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.api-class-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.api-class-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+}
+.api-bases {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+.api-doc {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  margin-bottom: 6px;
+}
+.api-methods {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.api-methods code {
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: 0.7em;
+}
+
+/* Tech stack */
+.dep-group {
+  margin-bottom: 20px;
+}
+.dep-group h4 {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.dep-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dep-tag {
+  background: linear-gradient(135deg, var(--card-bg), var(--card-bg-alt));
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: border-color var(--motion-fast) var(--ease-enter),
+              transform var(--motion-fast) var(--ease-enter);
+}
+.dep-tag:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-2px);
+}
+.dep-tag.dep-dev {
+  border-style: dashed;
+  color: var(--text-tertiary);
+}
+
+/* Skip link */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 8px;
+  background: var(--accent-primary);
+  color: var(--bg-primary);
+  padding: 8px 16px;
+  z-index: 100;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: var(--radius-md);
+  transition: top 0.2s var(--ease-enter);
+}
+.skip-link:focus {
+  top: 8px;
+}
+
+/* TOC */
+.toc-section {
+  padding: 24px 40px;
+}
+.toc {
+  background: linear-gradient(135deg, var(--card-bg), var(--card-bg-alt));
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+}
+.toc-title {
+  font-family: var(--font-display);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.toc-list {
+  list-style: none;
+}
+.toc-list li {
+  margin-bottom: 6px;
+}
+.toc-list a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.8125rem;
+}
+.toc-list a:hover {
+  color: var(--accent-primary);
+}
+
+/* Back to top */
+.back-to-top {
+  color: var(--accent-primary);
+  text-decoration: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.back-to-top:hover {
+  text-decoration: underline;
+}
+
+/* Footer */
+.footer {
+  text-align: center;
+  padding: 32px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  border-top: 1px solid var(--card-border);
+  margin-top: 32px;
+}
+.footer strong {
+  color: var(--accent-primary);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* High contrast */
+@media (prefers-contrast: high) {
+  .component-card, .stat-card, .api-class { border: 2px solid currentColor; }
+}
+
+/* Print */
+@media print {
+  body { background: white; color: black; }
+  .hero { background: #f0f0f0; color: black; }
+  .hero-title, .hero-subtitle, .hero-meta { color: black; }
+  .stat-number { color: black; -webkit-text-fill-color: black; }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .hero { padding: 48px 20px; }
+  .hero-title { font-size: 1.5rem; }
+  .section { padding: 32px 20px; }
+  .component-header { flex-direction: column; gap: 6px; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Light theme (TappMCP style guide) */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-primary: #f8f9fc;
+    --bg-secondary: #f0f1f5;
+    --card-bg: rgba(255, 255, 255, 0.92);
+    --card-bg-alt: rgba(245, 245, 250, 0.95);
+    --card-border: rgba(0, 0, 0, 0.08);
+    --accent-primary: #0d9488;
+    --accent-secondary: #b8941f;
+    --text-primary: #1a1a2e;
+    --text-secondary: #4a4a5e;
+    --text-muted: #9ca3af;
+  }
+  body { color: var(--text-primary); }
+  .hero { background: linear-gradient(135deg, #f8f9fc 0%, #f0f1f5 30%, #e5e7ed 70%, #ccfbf1 100%); }
+  .stat-number { color: var(--accent-primary); }
+}
+
+</style>
+</head>
+<body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+<section class="hero">
+  <div class="hero-content">
+    <h1 class="hero-title">Ralph — Autonomous AI Development Loop</h1>
+    <p class="hero-subtitle">Architecture Reference: Bash Loop + Python SDK v2.1.0</p>
+    <p class="hero-meta">Architecture Report</p>
+  </div>
+</section>
+
+<section class="section document-purpose" id="main-content">
+  <h2 class="section-title">Document Purpose</h2>
+  <div class="purpose-block">
+    <h3>Audience &amp; Use</h3>
+    <p class="purpose-text">This report is for <strong>developers and architects</strong>. It explains how components fit together, why they are structured this way, and what constraints apply. Use it to understand the system before making changes, justify architectural decisions, and plan refactors.</p>
+  </div>
+</section>
+<section class="section toc-section">
+  <nav class="toc" aria-label="Table of contents">
+    <h3 class="toc-title">Contents</h3>
+    <ul class="toc-list">
+      <li><a href="#executive-summary">Executive Summary</a></li>
+      <li><a href="#api-surface">Public API Surface</a></li>
+      <li><a href="#tech-stack">Technology Stack</a></li>
+      <li><a href="#health-insights">Architecture Health</a></li>
+    </ul>
+  </nav>
+</section>
+<section class="section" id="executive-summary" role="region" aria-labelledby="exec-summary-heading">
+<h2 class="section-title" id="exec-summary-heading">Executive Summary</h2>
+<p><strong>Why this matters:</strong> Quick overview for stakeholders; key metrics support risk assessment and technical debt visibility.</p>
+
+<div class="purpose-block">
+  <h3>Purpose &amp; Intent</h3>
+  <p class="purpose-text">Architecture Reference: Bash Loop + Python SDK v2.1.0</p>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-number">0</div>
+    <div class="stat-label">Packages</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">0</div>
+    <div class="stat-label">Modules</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">50</div>
+    <div class="stat-label">Public Classes</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">0</div>
+    <div class="stat-label">Public APIs (fns + methods)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">0</div>
+    <div class="stat-label">External Imports</div>
+  </div>
+</div>
+<div class="meta-details">
+<span class="meta-badge">v2.6.0</span>
+<span class="meta-badge">MIT</span>
+</div>
+</section>
+
+<section class="section" id="data-flow" role="region" aria-labelledby="data-flow-heading">
+<h2 class="section-title" id="data-flow-heading">Data Flow Pipeline</h2>
+<p><strong>Why this matters:</strong> Understanding runtime flow helps trace how input moves through layers toward output. Each stage represents a processing boundary.</p>
+<div class="purpose-block"><p class="purpose-text">Single-package or minimal project; data flow diagram requires at least two logical layers.</p></div>
+</section>
+
+
+<section class="section" id="api-surface">
+<h2 class="section-title">Public API Surface</h2>
+<p>The public API surface defines the contract between this project and its consumers. Classes listed below represent publicly accessible interfaces that external code may depend upon. This is a curated selection of the 50 public classes discovered.</p>
+<div class="api-module">
+  <h4 class="api-module-path">sdk/ralph_sdk/agent.py</h4>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">DecompositionHint</code>
+    </div>
+    <p class="api-doc">Hint that a task should be decomposed into smaller sub-tasks.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">IterationRecord</code>
+    </div>
+    <p class="api-doc">Record of a single iteration&#x27;s key metrics for history tracking.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">RalphAgentInterface</code> <span class="api-bases">extends Protocol</span>
+    </div>
+    <p class="api-doc">Abstract interface for Ralph agent implementations (CLI and SDK).</p>
+    <div class="api-methods">Methods: <code>run_iteration</code>, <code>should_exit</code>, <code>check_rate_limit</code>, <code>check_circuit_breaker</code></div>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">TaskInput</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Union type for task input — handles fix_plan.md and TheStudio TaskPackets.</p>
+    <div class="api-methods">Methods: <code>validate_prompt</code>, <code>validate_payload</code>, <code>from_ralph_dir</code>, <code>from_task_packet</code></div>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">TaskResult</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Output compatible with status.json and TheStudio signals.</p>
+    <div class="api-methods">Methods: <code>to_signal</code></div>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">ProgressSnapshot</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Point-in-time snapshot of agent progress.</p>
+  </div>
+  <p class="api-doc"><em>+3 more classes</em></p>
+</div>
+<div class="api-module">
+  <h4 class="api-module-path">sdk/ralph_sdk/circuit_breaker.py</h4>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">StallDetectorResult</code>
+    </div>
+    <p class="api-doc">Result from a stall detector check.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">FastTripDetector</code>
+    </div>
+    <p class="api-doc">Detect consecutive 0-tool-use runs completing in &lt;threshold seconds.</p>
+    <div class="api-methods">Methods: <code>record</code>, <code>reset</code>, <code>consecutive_count</code></div>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">DeferredTestDetector</code>
+    </div>
+    <p class="api-doc">Detect consecutive TESTS_STATUS: DEFERRED loops.</p>
+    <div class="api-methods">Methods: <code>record</code>, <code>reset</code>, <code>consecutive_count</code></div>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">ConsecutiveTimeoutDetector</code>
+    </div>
+    <p class="api-doc">Detect consecutive timeout iterations.</p>
+    <div class="api-methods">Methods: <code>record</code>, <code>reset</code>, <code>consecutive_count</code></div>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">CircuitBreaker</code>
+    </div>
+    <p class="api-doc">Active circuit breaker with sliding window failure detection.</p>
+    <div class="api-methods">Methods: <code>can_proceed</code>, <code>record_success</code>, <code>record_failure</code>, <code>record_no_progress</code>, <code>record_fast_iteration</code>, <code>record_deferred_tests</code>, <code>record_timeout</code>, <code>reset</code> <em>+1 more</em></div>
+  </div>
+</div>
+<div class="api-module">
+  <h4 class="api-module-path">sdk/ralph_sdk/config.py</h4>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">RalphConfig</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Configuration for Ralph SDK agent.</p>
+    <div class="api-methods">Methods: <code>validate_output_format</code>, <code>validate_teammate_mode</code>, <code>load</code>, <code>to_dict</code>, <code>to_json</code></div>
+  </div>
+</div>
+<div class="api-module">
+  <h4 class="api-module-path">sdk/ralph_sdk/context.py</h4>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">ContextManager</code>
+    </div>
+    <p class="api-doc">Manages progressive loading of fix_plan.md content.</p>
+    <div class="api-methods">Methods: <code>estimate_tokens</code>, <code>trim_fix_plan</code></div>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">PromptParts</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Split prompt into stable prefix (cacheable) and dynamic suffix.</p>
+    <div class="api-methods">Methods: <code>full_prompt</code></div>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">PromptCacheStats</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Tracks prompt cache hit/miss statistics.</p>
+    <div class="api-methods">Methods: <code>hit_rate</code>, <code>record</code></div>
+  </div>
+</div>
+<div class="api-module">
+  <h4 class="api-module-path">sdk/ralph_sdk/converters.py</h4>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">ComplexityBand</code> <span class="api-bases">extends str, Enum</span>
+    </div>
+    <p class="api-doc">Task complexity classification for max_turns scaling.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">TrustTier</code> <span class="api-bases">extends str, Enum</span>
+    </div>
+    <p class="api-doc">Trust level determining permission mode.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">RiskFlag</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">A risk flag attached to a task packet.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">ContextPack</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">A context file/resource to include.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">IntentSpecInput</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Ralph-side mirror of TheStudio IntentSpec (no TheStudio dependency).</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">TaskPacketInput</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Ralph-side mirror of TheStudio TaskPacket (no TheStudio dependency).</p>
+  </div>
+</div>
+<div class="api-module">
+  <h4 class="api-module-path">sdk/ralph_sdk/cost.py</h4>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">ModelPricing</code>
+    </div>
+    <p class="api-doc">Pricing per model in USD per 1M tokens.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">AlertLevel</code> <span class="api-bases">extends str, Enum</span>
+    </div>
+    <p class="api-doc">Budget alert level.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">IterationCost</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Cost for a single iteration.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">ModelCostBreakdown</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Cost breakdown for a single model.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">SessionCost</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Aggregate cost for the entire session.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">BudgetStatus</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Budget status after a budget check.</p>
+  </div>
+  <p class="api-doc"><em>+4 more classes</em></p>
+</div>
+<div class="api-module">
+  <h4 class="api-module-path">sdk/ralph_sdk/evidence.py</h4>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">TestEvidence</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Extracted test execution results.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">LintEvidence</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Extracted lint/formatting results.</p>
+  </div>
+
+  <div class="api-class">
+    <div class="api-class-header">
+      <code class="api-class-name">EvidenceBundle</code> <span class="api-bases">extends BaseModel</span>
+    </div>
+    <p class="api-doc">Structured evidence bundle compatible with TheStudio schema.</p>
+  </div>
+</div>
+<p style="color:var(--text-muted);font-size:0.75rem;">Showing 30 of 50 public classes. 20 additional classes omitted for brevity.</p>
+</section>
+<section class="section" id="tech-stack" role="region" aria-labelledby="tech-stack-heading">
+<h2 class="section-title" id="tech-stack-heading">Technology Stack</h2>
+<p><strong>Why this matters:</strong> Understanding dependencies helps set up your environment, assess supply-chain risk, and plan upgrades.</p>
+<p>The technology stack represents the foundation upon which this project is built. Each dependency has been selected to address specific technical requirements, from core framework capabilities to development tooling. Understanding these dependencies helps developers set up their environment and appreciate the design choices made.</p>
+<div class="dep-group">
+  <h4>Development Dependencies</h4>
+  <div class="dep-tags">
+    <span class="dep-tag dep-dev">bats</span>
+    <span class="dep-tag dep-dev">bats-assert</span>
+    <span class="dep-tag dep-dev">bats-support</span>
+  </div>
+</div>
+</section>
+<section class="section" id="health-insights">
+<h2 class="section-title">Architecture Health</h2>
+<p>Key indicators for technical leadership assessing system maturity, maintainability risk, and architectural fitness.</p>
+<div class="stats-grid">
+
+<div class="stat-card">
+  <div class="stat-number" style="color:var(--accent-secondary)">Low</div>
+  <div class="stat-label">Modularity</div>
+</div>
+
+<div class="stat-card">
+  <div class="stat-number">0</div>
+  <div class="stat-label">Avg Modules/Package</div>
+</div>
+
+<div class="stat-card">
+  <div class="stat-number" style="color:var(--accent-primary)">Low</div>
+  <div class="stat-label">External Coupling</div>
+</div>
+
+<div class="stat-card">
+  <div class="stat-number">0%</div>
+  <div class="stat-label">Class Coverage</div>
+</div>
+</div>
+<div class="purpose-block">
+<h3>Recommendations</h3>
+<p class="purpose-text">Architecture appears well-structured. Continue monitoring package boundaries as the codebase evolves.</p>
+</div>
+</section>
+
+<footer class="footer">
+  <p><a href="#" class="back-to-top">Back to top</a></p>
+  <p>Generated by <strong>DocsMCP</strong> &mdash; Architecture Report</p>
+  <p style="margin-top:6px">
+    0 packages &middot; 0 modules &middot;
+    50 public classes &middot; 2026-04-16 19:51 UTC
+  </p>
+</footer>
+</body>
+</html>

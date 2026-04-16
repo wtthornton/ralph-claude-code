@@ -1,6 +1,6 @@
 # Ralph CLI Reference
 
-**Version**: v1.4.0 | **Platform**: Linux, macOS, WSL, Git Bash (Windows)
+**Version**: v2.6.0 | **Platform**: Linux, macOS, WSL, Git Bash (Windows)
 
 ## Commands
 
@@ -23,8 +23,9 @@ ralph [OPTIONS]
 | `--status` | `-s` | Show current status and exit | — |
 | `--monitor` | `-m` | Start with tmux dashboard | false |
 | `--verbose` | `-v` | Verbose progress logging | false |
-| `--live` | `-l` | Real-time Claude output | false |
+| `--live` | `-l` | Real-time Claude output (JSONL stream) | false |
 | `--timeout MIN` | `-t` | Per-iteration timeout (1-120) | 15 |
+| `--dry-run` | — | Preview loop without API calls | false |
 
 ### Session & Recovery
 
@@ -43,11 +44,10 @@ ralph [OPTIONS]
 |------|-------------|---------|
 | `--output-format FORMAT` | `json` or `text` | json |
 | `--allowed-tools TOOLS` | Comma-separated tool list | (see .ralphrc) |
-| `--dry-run` | Preview without API calls | false |
 | `--log-max-size MB` | Max ralph.log size before rotation | 10 |
 | `--log-max-files NUM` | Max rotated log files | 5 |
 
-### SDK Mode (v1.3.0+)
+### SDK Mode
 
 | Flag | Description |
 |------|-------------|
@@ -55,7 +55,7 @@ ralph [OPTIONS]
 | `--sdk-model MODEL` | Claude model for SDK mode |
 | `--sdk-max-turns NUM` | Max turns per iteration |
 
-### Observability (v1.5.0+)
+### Observability
 
 | Flag | Description |
 |------|-------------|
@@ -65,7 +65,7 @@ ralph [OPTIONS]
 | `--rollback` | Restore latest backup |
 | `--rollback-list` | List available backups |
 
-### GitHub Issues (v1.7.0+)
+### GitHub Issues
 
 | Flag | Description |
 |------|-------------|
@@ -78,7 +78,7 @@ ralph [OPTIONS]
 | `--batch-issues NUMS` | Comma-separated issue numbers |
 | `--stop-on-failure` | Stop batch on first failure |
 
-### Sandbox (v1.8.0+)
+### Sandbox
 
 | Flag | Description |
 |------|-------------|
@@ -101,12 +101,14 @@ ralph [OPTIONS]
 |---------|-------------|
 | `ralph-setup NAME` | Create new Ralph project |
 | `ralph-enable` | Interactive setup wizard for existing projects |
-| `ralph-enable-ci` | Non-interactive setup (CI/automation) |
+| `ralph-enable-ci` | Non-interactive setup (CI/automation, JSON output) |
 | `ralph-import FILE` | Convert PRD/spec to Ralph tasks |
 | `ralph-monitor` | Standalone tmux dashboard |
 | `ralph-migrate` | Migrate to `.ralph/` directory structure |
 | `ralph-sdk` | Direct SDK entry point |
-| `ralph-doctor` | Verify all dependencies |
+| `ralph-doctor` | Verify all dependencies and hook drift |
+| `ralph-upgrade` | Upgrade Ralph installation to latest version |
+| `ralph-upgrade-project` | Propagate runtime files (hooks, templates) to existing managed projects |
 
 ## Configuration Files
 
@@ -118,9 +120,32 @@ ralph [OPTIONS]
 4. `.ralphrc` (bash, human-readable)
 5. Built-in defaults
 
-### .ralphrc
+### .ralphrc Key Variables
 
 Bash file sourced at startup. See `templates/ralphrc.template` for all options.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CLAUDE_CODE_CMD` | CLI command to invoke | `"claude"` |
+| `CLAUDE_OUTPUT_FORMAT` | `json` or `text` | `json` |
+| `ALLOWED_TOOLS` | Tool permission whitelist | (see template) |
+| `CLAUDE_USE_CONTINUE` | Session continuity toggle | true |
+| `CLAUDE_AUTO_UPDATE` | Auto-update CLI at startup | true |
+| `CB_COOLDOWN_MINUTES` | Circuit breaker recovery wait | 30 |
+| `CB_AUTO_RESET` | Bypass CB cooldown for unattended runs | false |
+| `LOG_MAX_SIZE_MB` | Max ralph.log size before rotation | 10 |
+| `LOG_MAX_FILES` | Number of rotated logs to keep | 5 |
+| `LOG_MAX_OUTPUT_FILES` | Max claude_output_*.log files | 20 |
+| `DRY_RUN` | Simulate loop without API calls | false |
+| `RALPH_TASK_SOURCE` | Task backend: `"file"` or `"linear"` | `"file"` |
+| `RALPH_LINEAR_PROJECT` | Linear project name (exact match) | — |
+| `LINEAR_API_KEY` | Linear personal API key | — |
+| `RALPH_NO_OPTIMIZE` | Disable fix_plan.md auto-reordering | false |
+| `RALPH_NO_EXPLORER_RESOLVE` | Disable explorer file resolution for vague tasks | false |
+| `RALPH_MAX_EXPLORER_RESOLVE` | Max vague tasks to resolve per run | 5 |
+| `RALPH_MAX_SESSION_ITERATIONS` | Continue-As-New trigger (iterations) | 20 |
+| `RALPH_MAX_SESSION_AGE_MINUTES` | Continue-As-New trigger (age) | 120 |
+| `RALPH_CONTINUE_AS_NEW_ENABLED` | Enable Continue-As-New pattern | true |
 
 ### ralph.config.json
 
@@ -133,6 +158,24 @@ JSON alternative to `.ralphrc`. See `templates/ralph.config.json` for schema.
   "dryRun": false
 }
 ```
+
+## Security & Reliability Notes
+
+### Atomic State Writes (TAP-535)
+
+All counter and state-file writes use `atomic_write <file> <value>` — write to a temp path, fsync, then `mv -f` into place. A SIGTERM between write and truncate cannot leave a zero-byte counter. `set -o pipefail` is enabled so jq/grep pipelines fail loudly.
+
+### Hook Resilience (TAP-538)
+
+`on-stop.sh` self-heals a corrupt `.circuit_breaker_state` — if the JSON is invalid, the hook reinitializes to `{state: CLOSED}` and emits a `WARN:` line instead of crashing the loop. `ralph-doctor` compares project hooks against `~/.ralph/templates/hooks/` and warns on drift.
+
+### Linear Backend Fail-Loud (TAP-536)
+
+When `RALPH_TASK_SOURCE=linear`, any API/network/parse error causes the count/task functions to print nothing to stdout and return non-zero. Callers distinguish "exit non-zero" (unknown — abstain) from "exit 0 + value" (real result). A transient outage cannot trip a false `plan_complete` exit.
+
+### Command Injection Guards (TAP-534/533)
+
+`sed`/`eval` patterns in `ralph_loop.sh` sanitized against injection via untrusted task content.
 
 ## Common Recipes
 
@@ -149,12 +192,22 @@ ralph --calls 20 --timeout 30
 # Preview without API calls
 ralph --dry-run
 
-# SDK mode
-ralph --sdk --sdk-model claude-opus-4-20250514
+# SDK mode with a specific model
+ralph --sdk --sdk-model claude-opus-4-6
 
 # GitHub issue workflow
 ralph --issue 42 --live
 
-# Check health
+# Linear task backend
+RALPH_TASK_SOURCE=linear RALPH_LINEAR_PROJECT="My Project" ralph --live
+
+# Optimize fix_plan.md task order
+# (runs automatically at session start unless RALPH_NO_OPTIMIZE=true)
+ralph  # auto-optimizes on start
+
+# Check health and hook drift
 ralph-doctor
+
+# Upgrade project hooks to latest templates
+ralph-upgrade-project
 ```

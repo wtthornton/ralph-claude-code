@@ -1,33 +1,4 @@
-<p align="center">
-  <h1 align="center">Ralph for Claude Code</h1>
-  <p align="center">
-    <strong>Autonomous AI development loop with intelligent exit detection and rate limiting</strong>
-  </p>
-</p>
-
-<p align="center">
-  <a href="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml"><img src="https://github.com/frankbria/ralph-claude-code/actions/workflows/test.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/version-2.6.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-1026%20passing-green" alt="Tests">
-  <a href="https://github.com/frankbria/ralph-claude-code/issues"><img src="https://img.shields.io/github/issues/frankbria/ralph-claude-code" alt="GitHub Issues"></a>
-  <a href="https://github.com/hesreallyhim/awesome-claude-code"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome Claude Code"></a>
-  <a href="https://x.com/FrankBria18044"><img src="https://img.shields.io/twitter/follow/FrankBria18044?style=social" alt="Follow on X"></a>
-</p>
-
-<p align="center">
-  <a href="#quick-start">Quick Start</a> &bull;
-  <a href="#features">Features</a> &bull;
-  <a href="#how-it-works">How It Works</a> &bull;
-  <a href="#configuration">Configuration</a> &bull;
-  <a href="#contributing">Contributing</a>
-</p>
-
----
-
-Ralph is an implementation of Geoffrey Huntley's technique for Claude Code named after [Ralph Wiggum](https://ghuntley.com/ralph/). It enables continuous autonomous development cycles where Claude Code iteratively improves your project until completion, with built-in safeguards to prevent infinite loops and API overuse.
-
-**Install once, use everywhere** — Ralph becomes a global command available in any directory.
+# ralph-claude-code
 
 ## What's New in v2.6.0
 
@@ -167,7 +138,6 @@ INSTALL ONCE              USE EVERYWHERE
 git clone https://github.com/frankbria/ralph-claude-code.git
 cd ralph-claude-code
 ./install.sh
-# If ./install.sh fails with CRLF errors on WSL, use: bash install.sh
 ```
 
 This adds `ralph`, `ralph-monitor`, `ralph-setup`, `ralph-import`, `ralph-migrate`, `ralph-enable`, and `ralph-enable-ci` to your PATH.
@@ -181,11 +151,9 @@ This adds `ralph`, `ralph-monitor`, `ralph-setup`, `ralph-import`, `ralph-migrat
 If you use [Nix](https://nixos.org/) with flakes enabled, you can run Ralph without cloning:
 
 ```bash
-# Try it instantly (no install needed)
 nix shell github:frankbria/ralph-claude-code
 ralph --version
 
-# Or enter a development shell with all dependencies
 git clone https://github.com/frankbria/ralph-claude-code.git
 cd ralph-claude-code
 nix develop
@@ -194,14 +162,11 @@ nix develop
 ### 2. Set up a project
 
 ```bash
-# Option A: Enable in existing project (recommended)
 cd my-project
 ralph-enable                    # Interactive wizard
 
-# Option B: Import existing requirements
 ralph-import requirements.md my-app
 
-# Option C: Create from scratch
 ralph-setup my-project
 ```
 
@@ -308,30 +273,23 @@ MAX_TOKENS_PER_HOUR=0            # 0 = disabled; set to e.g. 500000 to cap token
 CLAUDE_TIMEOUT_MINUTES=15
 CLAUDE_OUTPUT_FORMAT="json"
 
-# Tool permissions
 ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),..."
 
-# Session management
 SESSION_CONTINUITY=true
 SESSION_EXPIRY_HOURS=24
 
-# Circuit breaker
 CB_NO_PROGRESS_THRESHOLD=3
 CB_COOLDOWN_MINUTES=30
 CB_AUTO_RESET=false
 
-# Log rotation
 LOG_MAX_SIZE_MB=10               # Rotate ralph.log at this size
 LOG_MAX_FILES=5                  # Rotated log files to keep
 LOG_MAX_OUTPUT_FILES=20          # Max claude_output_*.log files
 
-# Dry-run mode
 DRY_RUN=false                    # Also: ralph --dry-run
 
-# Monitoring
 KEEP_MONITOR_AFTER_EXIT=false    # Keep tmux panes alive after loop exits
 
-# Agent teams (experimental)
 RALPH_ENABLE_TEAMS=false
 RALPH_MAX_TEAMMATES=2
 ```
@@ -498,3 +456,48 @@ MIT License — see [LICENSE](LICENSE).
   <a href="TESTING.md">Testing</a> &bull;
   <a href="docs/specs/EPIC-STORY-INDEX.md">Epic Index</a>
 </p>
+
+<!-- docsmcp:start:table-of-contents -->
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Development](#development)
+- [License](#license)
+<!-- docsmcp:end:table-of-contents -->
+
+<!-- docsmcp:start:installation -->
+## Installation
+
+```bash
+npm install ralph-claude-code
+```
+<!-- docsmcp:end:installation -->
+
+<!-- docsmcp:start:usage -->
+## Usage
+
+```javascript
+const ralph_claude_code = require("ralph-claude-code");
+```
+<!-- docsmcp:end:usage -->
+
+<!-- docsmcp:start:api-reference -->
+## API Reference
+
+See the [API documentation](docs/api.md) for detailed reference.
+<!-- docsmcp:end:api-reference -->
+
+<!-- docsmcp:start:development -->
+## Development
+
+```bash
+git clone https://github.com/wtthornton/ralph-claude-code.git
+cd ralph-claude-code
+
+npm install
+
+npm test
+```
+<!-- docsmcp:end:development -->
