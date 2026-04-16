@@ -191,6 +191,15 @@ rm -f "$local_tmp" 2>/dev/null  # WSL-1: catch cross-fs copy+unlink orphans
 
 # PERF: Update circuit breaker in a single jq call (was: 2-3 separate jq + mktemp + mv per branch)
 if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
+  # TAP-538: Guard against corrupt CB state. If jq cannot parse the file the
+  # downstream `jq … > tmp && mv` pattern silently no-ops and the state stays
+  # corrupt forever. Re-initialize to a safe skeleton and emit a WARN line so
+  # the hook still exits 0 (preserving the loop) instead of crashing.
+  if ! jq -e 'type == "object"' "$RALPH_DIR/.circuit_breaker_state" >/dev/null 2>&1; then
+    echo "[$(date '+%H:%M:%S')] WARN: .circuit_breaker_state is corrupt — reinitializing to CLOSED" >&2
+    printf '%s\n' '{"state":"CLOSED","consecutive_no_progress":0,"consecutive_permission_denials":0,"total_opens":0}' \
+      > "$RALPH_DIR/.circuit_breaker_state"
+  fi
   local_tmp=$(mktemp "$RALPH_DIR/.circuit_breaker_state.XXXXXX")
   if [[ "$files_modified" -gt 0 || "$tasks_done" -gt 0 ]]; then
     # Progress detected — reset no-progress counter, permission denials, and close

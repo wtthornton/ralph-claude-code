@@ -107,6 +107,8 @@ question_count=0
 if [[ -n "$response_text" ]]; then
   for pattern in "${QUESTION_PATTERNS[@]}"; do
     count=$(echo "$response_text" | grep -ciE "$pattern" 2>/dev/null || echo "0")
+    count=$(echo "$count" | tr -cd '0-9')
+    count=${count:-0}
     question_count=$((question_count + count))
   done
   [[ "$question_count" -gt 0 ]] && asking_questions="true"
@@ -118,13 +120,16 @@ has_permission_denials="false"
 permission_denial_count=0
 if [[ -n "$response_text" ]]; then
   permission_denial_count=$(echo "$response_text" | grep -ciE '(permission denied|tool not allowed|not in allowed|disallowed tool|not permitted)' 2>/dev/null || echo "0")
+  permission_denial_count=$(echo "$permission_denial_count" | tr -cd '0-9')
+  permission_denial_count=${permission_denial_count:-0}
   [[ "$permission_denial_count" -gt 0 ]] && has_permission_denials="true"
 fi
 
 # Count actual files modified (from PostToolUse tracking)
 actual_files_modified=0
 if [[ -f "$RALPH_DIR/.files_modified_this_loop" ]]; then
-  actual_files_modified=$(sort -u "$RALPH_DIR/.files_modified_this_loop" | wc -l | tr -d '[:space:]')
+  actual_files_modified=$(sort -u "$RALPH_DIR/.files_modified_this_loop" | wc -l | tr -cd '0-9')
+  actual_files_modified=${actual_files_modified:-0}
 fi
 
 # Use the higher of reported vs actual (defense-in-depth)
@@ -155,6 +160,13 @@ fi
 [[ "$loop_count" =~ ^[0-9]+$ ]] || loop_count=0
 loop_count=$((loop_count + 1))
 
+# Sanitize all numeric/boolean fields for valid JSON output (MINGW/CRLF safety)
+[[ "$question_count" =~ ^[0-9]+$ ]] || question_count=0
+[[ "$permission_denial_count" =~ ^[0-9]+$ ]] || permission_denial_count=0
+[[ "$files_modified" =~ ^[0-9]+$ ]] || files_modified=0
+[[ "$asking_questions" == "true" ]] || asking_questions="false"
+[[ "$has_permission_denials" == "true" ]] || has_permission_denials="false"
+
 # Write status.json (atomic write via temp file)
 # PERF: Use printf for timestamp instead of date subprocess where possible
 local_tmp=$(mktemp "$RALPH_DIR/status.json.XXXXXX")
@@ -179,6 +191,15 @@ rm -f "$local_tmp" 2>/dev/null  # WSL-1: catch cross-fs copy+unlink orphans
 
 # PERF: Update circuit breaker in a single jq call (was: 2-3 separate jq + mktemp + mv per branch)
 if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
+  # TAP-538: Guard against corrupt CB state. If jq cannot parse the file the
+  # downstream `jq … > tmp && mv` pattern silently no-ops and the state stays
+  # corrupt forever. Re-initialize to a safe skeleton and emit a WARN line so
+  # the hook still exits 0 (preserving the loop) instead of crashing.
+  if ! jq -e 'type == "object"' "$RALPH_DIR/.circuit_breaker_state" >/dev/null 2>&1; then
+    echo "[$(date '+%H:%M:%S')] WARN: .circuit_breaker_state is corrupt — reinitializing to CLOSED" >&2
+    printf '%s\n' '{"state":"CLOSED","consecutive_no_progress":0,"consecutive_permission_denials":0,"total_opens":0}' \
+      > "$RALPH_DIR/.circuit_breaker_state"
+  fi
   local_tmp=$(mktemp "$RALPH_DIR/.circuit_breaker_state.XXXXXX")
   if [[ "$files_modified" -gt 0 || "$tasks_done" -gt 0 ]]; then
     # Progress detected — reset no-progress counter, permission denials, and close

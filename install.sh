@@ -495,6 +495,34 @@ echo ""
 
 echo "GitHub integration (optional):"
 check "gh CLI" "gh --version" "optional"
+echo ""
+
+# TAP-538: hooks drift check — compare .ralph/hooks/*.sh against the
+# installed templates/hooks/*.sh. Drift means a project is running a
+# stale hook that may be missing security or sanity hardening.
+echo "Hooks drift (vs ~/.ralph/templates/hooks):"
+TPL_HOOKS_DIR="${HOME}/.ralph/templates/hooks"
+RT_HOOKS_DIR=".ralph/hooks"
+if [[ ! -d "$TPL_HOOKS_DIR" ]]; then
+    echo "  [SKIP] template hooks dir not found at $TPL_HOOKS_DIR"
+elif [[ ! -d "$RT_HOOKS_DIR" ]]; then
+    echo "  [SKIP] no project-local .ralph/hooks/ in CWD ($(pwd))"
+else
+    drift_found=0
+    for tpl in "$TPL_HOOKS_DIR"/*.sh; do
+        [[ -e "$tpl" ]] || continue
+        bn=$(basename "$tpl")
+        rt="$RT_HOOKS_DIR/$bn"
+        if [[ ! -f "$rt" ]]; then
+            echo "  [WARN] missing in project: $bn (template has it)"
+            drift_found=1
+        elif ! diff -q "$rt" "$tpl" >/dev/null 2>&1; then
+            echo "  [WARN] drift: $bn differs from template — re-run 'ralph-upgrade' to sync"
+            drift_found=1
+        fi
+    done
+    [[ $drift_found -eq 0 ]] && echo "  [OK] all hooks match templates"
+fi
 DOCTOREOF
     chmod +x "$INSTALL_DIR/ralph-doctor"
 
