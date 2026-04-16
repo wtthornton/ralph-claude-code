@@ -90,6 +90,12 @@ EOF
 echo "Ralph enable CI running"
 EOF
 
+    cat > "$MOCK_SOURCE_DIR/ralph_upgrade_project.sh" << 'EOF'
+#!/bin/bash
+# Mock ralph_upgrade_project.sh
+echo "Ralph upgrade-project running"
+EOF
+
     # Create mock lib files for new enable functionality
     cat > "$MOCK_SOURCE_DIR/lib/enable_core.sh" << 'EOF'
 #!/bin/bash

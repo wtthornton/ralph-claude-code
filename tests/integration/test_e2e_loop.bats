@@ -65,7 +65,9 @@ MOCKEOF
 @test "E2E: --version exits cleanly" {
     run bash "$RALPH_SCRIPT" --version
     [ "$status" -eq 0 ]
-    [[ "$output" == ralph\ 1.* ]]
+    # Match `ralph X.Y.Z` for any current major (1.x, 2.x, …). The previous
+    # `ralph 1.*` glob silently became stale on each major bump.
+    [[ "$output" =~ ^ralph\ [0-9]+\.[0-9]+\.[0-9]+ ]]
 }
 
 @test "E2E: --status with no status file" {
