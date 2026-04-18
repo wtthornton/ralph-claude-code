@@ -1260,26 +1260,46 @@ detect_stuck_loop() {
     return 1
 }
 
-# Update status JSON for external monitoring
+# Update status JSON for external monitoring.
+# MERGE-1: Merge with existing status.json so on-stop.sh fields (linear_*, loop_model,
+# cache stats, subagent counts) survive across update_status calls. Also always read
+# the fresh .call_count from disk — the caller's $calls_made arg may be stale.
 update_status() {
     local loop_count=$1
-    local calls_made=$2
+    local _caller_calls=$2
     local last_action=$3
     local status=$4
     local exit_reason=${5:-""}
-    
-    cat > "$STATUS_FILE" << STATUSEOF
-{
-    "timestamp": "$(get_iso_timestamp)",
-    "loop_count": $loop_count,
-    "calls_made_this_hour": $calls_made,
-    "max_calls_per_hour": $MAX_CALLS_PER_HOUR,
-    "last_action": "$last_action",
-    "status": "$status",
-    "exit_reason": "$exit_reason",
-    "next_reset": "$(get_next_hour_time)"
-}
-STATUSEOF
+
+    # Prefer on-disk counter over caller's arg (counter is incremented post-invocation).
+    local calls_made
+    calls_made=$(_read_call_count 2>/dev/null || echo "${_caller_calls:-0}")
+    [[ "$calls_made" =~ ^[0-9]+$ ]] || calls_made="${_caller_calls:-0}"
+
+    local _tmp
+    _tmp=$(mktemp "${STATUS_FILE}.XXXXXX")
+    local _loop_fields
+    _loop_fields=$(jq -n \
+        --arg ts "$(get_iso_timestamp)" \
+        --argjson lc "$loop_count" \
+        --argjson cm "$calls_made" \
+        --argjson mc "$MAX_CALLS_PER_HOUR" \
+        --arg la "$last_action" \
+        --arg st "$status" \
+        --arg er "$exit_reason" \
+        --arg nr "$(get_next_hour_time)" \
+        '{timestamp:$ts, loop_count:$lc, calls_made_this_hour:$cm, max_calls_per_hour:$mc, last_action:$la, status:$st, exit_reason:$er, next_reset:$nr}' 2>/dev/null)
+
+    if [[ -f "$STATUS_FILE" ]] && jq -e 'type == "object"' "$STATUS_FILE" >/dev/null 2>&1; then
+        # Merge: existing status.json + loop fields (loop fields win on overlap).
+        printf '%s' "$_loop_fields" | jq -s --slurpfile prev "$STATUS_FILE" '$prev[0] * .[0]' > "$_tmp" 2>/dev/null \
+            || printf '%s' "$_loop_fields" > "$_tmp"
+    else
+        printf '%s' "$_loop_fields" > "$_tmp"
+    fi
+
+    mv "$_tmp" "$STATUS_FILE"
+    rm -f "$_tmp" 2>/dev/null  # WSL-1 safety
 }
 
 # PERF: Helper to read call count without cat subprocess
@@ -3513,7 +3533,11 @@ END {
             if command -v stdbuf &>/dev/null; then
                 _stdbuf_prefix="stdbuf -oL"
             fi
-            if $_stdbuf_prefix portable_timeout ${timeout_seconds}s "${CLAUDE_CMD_ARGS[@]}" < /dev/null > "$output_file" 2>&1 &
+            # portable_timeout is a shell function, so it must be the first
+            # word of the command line — `stdbuf` cannot exec it. Invert the
+            # order: portable_timeout runs the `timeout` binary, which can
+            # then exec stdbuf, which execs the final Claude command.
+            if portable_timeout ${timeout_seconds}s $_stdbuf_prefix "${CLAUDE_CMD_ARGS[@]}" < /dev/null > "$output_file" 2>&1 &
             then
                 :  # Continue to wait loop
             else

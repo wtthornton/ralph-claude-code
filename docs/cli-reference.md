@@ -211,3 +211,37 @@ ralph-doctor
 # Upgrade project hooks to latest templates
 ralph-upgrade-project
 ```
+
+## `ralph-upgrade-project`
+
+Propagates updated runtime files (hooks, agent definitions, template merges) from the global Ralph install (`~/.ralph/`) into existing managed projects. Does **not** re-run `ralph-enable` or touch task state. Use this after running `ralph-upgrade` (which updates the global install) to sync your projects.
+
+### Usage
+
+```bash
+ralph-upgrade-project /path/to/project       # upgrade one project
+ralph-upgrade-project --all                  # discover and upgrade all projects
+ralph-upgrade-project --dry-run /path        # preview without changes
+ralph-upgrade-project --all --yes            # skip confirmation
+ralph-upgrade-project --all --search-dir /c/cursor   # custom discovery root
+```
+
+### Three-tier upgrade policy
+
+| Tier | Files | Behavior |
+|------|-------|----------|
+| **Tier 1** (always overwrite) | Hook scripts in `.ralph/hooks/`, agent definitions in `.claude/agents/` | Replaced with latest template |
+| **Tier 2** (merge only) | `.ralphrc`, `.claude/settings.json` | Appends missing sections and hooks; preserves your overrides |
+| **Tier 3** (never touch) | `fix_plan.md`, `status.json`, `.circuit_breaker_state`, session IDs | Untouched |
+
+Backups of replaced Tier 1/2 files are written to `.ralph/.upgrade-backups/YYYY-MM-DD-HHMMSS/` (max 5 kept per project).
+
+### Typical workflow
+
+```bash
+ralph-upgrade                           # 1. update global install
+ralph-upgrade-project --all --dry-run   # 2. preview project changes
+ralph-upgrade-project --all             # 3. apply
+ralph-doctor                            # 4. verify hook parity
+```
+

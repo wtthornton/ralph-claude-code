@@ -486,7 +486,7 @@ const ralph_claude_code = require("ralph-claude-code");
 <!-- docsmcp:start:api-reference -->
 ## API Reference
 
-See the [API documentation](docs/api.md) for detailed reference.
+See the [API reference](docs/api-reference.md), [CLI reference](docs/cli-reference.md), [SDK guide](docs/sdk-guide.md), and [operations runbook](docs/OPERATIONS.md) for detailed reference.
 <!-- docsmcp:end:api-reference -->
 
 <!-- docsmcp:start:development -->
