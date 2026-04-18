@@ -1279,13 +1279,49 @@ EOF
     [[ "$func_body" == *"is_error"* ]]
 }
 
-@test "is_error:true with exit code 0 returns non-zero from execute_claude_code" {
+@test "is_error:true returns non-zero from execute_claude_code (any exit code)" {
     local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
-    # Verify the is_error block returns 1 (error) not 0 (success)
-    # Extract the is_error handling block and check it returns 1
-    run grep -A 20 'json_is_error.*==.*true' "$script"
+    # Verify the is_error block returns non-zero (1 for generic API err, 4 for monthly cap).
+    # Widened from -A 20 to -A 40 because the monthly-cap branch now sits between the
+    # "is_error == true" guard and the generic "return 1" path.
+    run grep -A 40 'json_is_error.*==.*true' "$script"
     assert_success
     [[ "$output" == *"return 1"* ]]
+    [[ "$output" == *"return 4"* ]]
+}
+
+@test "is_error:true classifier runs before exit_code branching (monthly-cap fix)" {
+    local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
+    # Regression guard: the is_error:true check must NOT be nested inside
+    # `if [ $exit_code -eq 0 ]`, otherwise non-zero exits with is_error:true
+    # (e.g. monthly spend-cap 400s) fall through to the generic retry path.
+    # Verify the is_error guard appears BEFORE the exit_code==0 branch.
+    local is_error_line exit_code_line
+    is_error_line=$(grep -n '_ralph_json_is_error.*==.*true' "$script" | head -1 | cut -d: -f1)
+    exit_code_line=$(grep -n 'if \[ \$exit_code -eq 0 \]' "$script" | head -1 | cut -d: -f1)
+    [[ -n "$is_error_line" ]]
+    [[ -n "$exit_code_line" ]]
+    [[ "$is_error_line" -lt "$exit_code_line" ]]
+}
+
+@test "monthly Anthropic spend-cap error is detected and returns code 4" {
+    local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
+    # Verify the cap-detection grep + return-4 path are wired up
+    run grep -A 10 'specified API usage limit' "$script"
+    assert_success
+    [[ "$output" == *"MONTHLY_CAP_DATE"* ]]
+    [[ "$output" == *"return 4"* ]]
+}
+
+@test "fast-trip detector reads LAST_INVOCATION_DURATION (not local invocation_start_epoch)" {
+    local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
+    # Regression guard: the parent-loop fast-trip detector previously read
+    # ${invocation_start_epoch:-} which was local-scoped to execute_claude_code,
+    # so it always defaulted to 30 and never tripped. Verify the new path uses
+    # the exported global instead.
+    run grep -B 5 -A 4 'Fast failure detected' "$script"
+    assert_success
+    [[ "$output" == *"LAST_INVOCATION_DURATION"* ]]
 }
 
 @test "is_error detection handles flat JSON format" {

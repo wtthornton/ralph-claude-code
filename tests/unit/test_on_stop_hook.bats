@@ -114,3 +114,92 @@ JSON
         "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
     assert_success
 }
+
+# =============================================================================
+# EXIT-CLEAN: Claude's `EXIT_SIGNAL: true + STATUS: COMPLETE` with 0/0 changes
+# is a legitimate clean-exit signal, not stagnation. The hook must not increment
+# consecutive_no_progress in that case (otherwise empty-plan launches burn 3
+# Claude calls before the no-progress CB trips).
+# =============================================================================
+
+# Helper: build a Claude response payload with a RALPH_STATUS block.
+_status_block_input() {
+    local exit_signal="$1" status="$2" tasks="$3" files="$4"
+    local body="Result.
+
+---RALPH_STATUS---
+STATUS: ${status}
+TASKS_COMPLETED_THIS_LOOP: ${tasks}
+FILES_MODIFIED: ${files}
+TESTS_STATUS: NOT_RUN
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: ${exit_signal}
+RECOMMENDATION: Test payload.
+---END_RALPH_STATUS---"
+    jq -Rs '{result: .}' <<<"$body"
+}
+
+@test "EXIT-CLEAN: EXIT_SIGNAL=true + STATUS=COMPLETE + 0/0 RESETS no-progress (does NOT increment)" {
+    # Pre-seed: no-progress already at 2 (one more 'no progress' would trip on threshold=3).
+    printf '%s\n' \
+        '{"state":"CLOSED","consecutive_no_progress":2,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_status_block_input true COMPLETE 0 0)"
+    assert_success
+
+    # Counter must be reset to 0, state must remain CLOSED — exit_signal is a
+    # request for clean shutdown, not a stagnation indicator.
+    run jq -r '.consecutive_no_progress' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "0"
+    run jq -r '.state' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "CLOSED"
+}
+
+@test "EXIT-CLEAN guard: EXIT_SIGNAL=false + 0/0 STILL increments no-progress (regression guard)" {
+    # Same seed; this time EXIT_SIGNAL=false (no clean-exit request).
+    # Hook must STILL count this as no-progress and trip the CB at threshold=3.
+    printf '%s\n' \
+        '{"state":"CLOSED","consecutive_no_progress":2,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_status_block_input false IN_PROGRESS 0 0)"
+    assert_success
+
+    run jq -r '.consecutive_no_progress' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "3"
+    run jq -r '.state' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "OPEN"
+}
+
+@test "EXIT-CLEAN guard: EXIT_SIGNAL=true but STATUS!=COMPLETE does NOT bypass no-progress" {
+    # Defensive: only honor exit-clean when BOTH signals agree. EXIT_SIGNAL=true
+    # without STATUS=COMPLETE is ambiguous — fall through to normal classification.
+    printf '%s\n' \
+        '{"state":"CLOSED","consecutive_no_progress":2,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_status_block_input true PARTIAL 0 0)"
+    assert_success
+
+    # Should be treated as no-progress and trip.
+    run jq -r '.consecutive_no_progress' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "3"
+}
+
+@test "EXIT-CLEAN: status.json after EXIT_SIGNAL=true is valid JSON (Bug 1 regression guard)" {
+    # The grep -c || echo 0 pattern previously injected a stray '0\n' into status.json,
+    # which broke ralph_loop.sh's downstream jq reads. Template was fixed via tr -cd '0-9'.
+    # This test asserts status.json stays valid JSON across the EXIT_SIGNAL=true path.
+    printf '%s\n' \
+        '{"state":"CLOSED","consecutive_no_progress":0,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    printf '{"loop_count": 5}' > "$TEST_TEMP_DIR/.ralph/status.json"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_status_block_input true COMPLETE 0 0)"
+    assert_success
+
+    # status.json must be valid JSON with exit_signal field intact.
+    run jq -e 'type == "object" and .exit_signal == "true"' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_success
+}

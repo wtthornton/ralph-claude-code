@@ -233,3 +233,70 @@ check_exit_gate() {
     run check_exit_gate_safe
     assert_failure  # Should continue — no exit_signals means 0 indicators
 }
+
+# =============================================================================
+# PREFLIGHT-EMPTY-PLAN EVAL — empty fix_plan.md must short-circuit BEFORE Claude
+# is invoked. This is the eval that would have caught the tapps-brain regression
+# (3 wasted Claude calls / CB false-trip on empty plan).
+# =============================================================================
+
+# Helper: run the live should_exit_gracefully against a given fix_plan content.
+# Returns plan_complete on the empty cases, "" on cases with unchecked work.
+_preflight_check() {
+    local plan_content="$1"
+    printf '%s' "$plan_content" > "$RALPH_DIR/fix_plan.md"
+    printf '%s' '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}' \
+        > "$EXIT_SIGNALS_FILE"
+    printf '%s' '{"loop_count": 1, "exit_signal": "false"}' > "$STATUS_FILE"
+    printf '%s' '{"state":"CLOSED","consecutive_no_progress":0,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$RALPH_DIR/.circuit_breaker_state"
+
+    bash -c "
+set +u
+RALPH_DIR='$RALPH_DIR'
+EXIT_SIGNALS_FILE='$EXIT_SIGNALS_FILE'
+RALPH_TASK_SOURCE=file
+MAX_CONSECUTIVE_TEST_LOOPS=3
+MAX_CONSECUTIVE_DONE_SIGNALS=2
+CB_PERMISSION_DENIAL_THRESHOLD=2
+RALPH_USE_AGENT=false
+log_status() { :; }
+check_agent_support() { return 1; }
+source <(awk '/^should_exit_gracefully\\(\\) \\{/,/^\\}/' '${RALPH_LOOP}')
+should_exit_gracefully 2>/dev/null
+"
+}
+
+@test "PREFLIGHT EVAL: empty fix_plan.md (only headers) short-circuits to plan_complete" {
+    # Reproduces the tapps-brain regression: file present, just headers, zero
+    # checkboxes. Pre-flight must catch this before Claude is invoked.
+    run _preflight_check "# Plan
+
+## EPIC-070 — Done
+
+(all stories archived)
+"
+    assert_success
+    assert_output "plan_complete"
+}
+
+@test "PREFLIGHT EVAL: completely blank fix_plan.md short-circuits to plan_complete" {
+    run _preflight_check ""
+    assert_success
+    assert_output "plan_complete"
+}
+
+@test "PREFLIGHT EVAL: fix_plan.md with one unchecked item does NOT short-circuit" {
+    run _preflight_check "- [ ] do something"
+    assert_success
+    assert_output ""
+}
+
+@test "PREFLIGHT EVAL: all checked + zero unchecked still short-circuits" {
+    run _preflight_check "- [x] task A
+- [x] task B
+- [X] task C
+"
+    assert_success
+    assert_output "plan_complete"
+}

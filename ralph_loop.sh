@@ -151,6 +151,8 @@ CONSECUTIVE_TIMEOUT_COUNT=0
 MAX_CONSECUTIVE_FAST_FAILURES="${MAX_CONSECUTIVE_FAST_FAILURES:-3}"
 CONSECUTIVE_FAST_FAILURE_COUNT=0
 LAST_TOOL_COUNT=0  # Exported from execute_claude_code for fast-trip detection
+LAST_INVOCATION_DURATION=0  # Exported from execute_claude_code; invocation_start_epoch is local-scoped so the parent loop can't read it directly
+MONTHLY_CAP_DATE=""  # Set by execute_claude_code when an Anthropic monthly spend cap is detected (YYYY-MM-DD or empty)
 
 # LOGFIX-6: Stall detection for persistent deferred tests
 CB_MAX_DEFERRED_TESTS="${CB_MAX_DEFERRED_TESTS:-5}"
@@ -1507,8 +1509,18 @@ should_exit_gracefully() {
             return 0
         fi
         local total_items=$((open_items + done_items))
-        if [[ $total_items -gt 0 ]] && [[ $open_items -eq 0 ]]; then
-            log_status "WARN" "Exit condition: All Linear issues completed ($done_items/$total_items) in project '${RALPH_LINEAR_PROJECT}'" >&2
+        # PREFLIGHT-EMPTY-PLAN (Linear branch): zero open issues = nothing to do
+        # this iteration, regardless of whether the project has any done items.
+        # Same rationale as the fix_plan.md branch: exit clean rather than burn
+        # a Claude call into an empty backlog. Operator restarts after seeding work.
+        # NOTE: open_items=0 here is an authoritative count (TAP-536 contract);
+        # API failures took the abstain path above and never reach this check.
+        if [[ $open_items -eq 0 ]]; then
+            if [[ $total_items -gt 0 ]]; then
+                log_status "WARN" "Exit condition: All Linear issues completed ($done_items/$total_items) in project '${RALPH_LINEAR_PROJECT}'" >&2
+            else
+                log_status "WARN" "Exit condition: Linear project '${RALPH_LINEAR_PROJECT}' has zero open issues (no work seeded)" >&2
+            fi
             echo "plan_complete"
             return 0
         fi
@@ -1516,12 +1528,30 @@ should_exit_gracefully() {
         # Valid patterns: "- [ ]" (uncompleted) and "- [x]" or "- [X]" (completed)
         local uncompleted_items
         uncompleted_items=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || uncompleted_items=0
+        # Strip any whitespace/newlines from grep -c output to keep arithmetic safe
+        # (mirrors the on-stop.sh fix for the same grep -c pitfall).
+        uncompleted_items=$(echo "$uncompleted_items" | tr -cd '0-9'); uncompleted_items=${uncompleted_items:-0}
         local completed_items
         completed_items=$(grep -cE "^[[:space:]]*- \[[xX]\]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || completed_items=0
+        completed_items=$(echo "$completed_items" | tr -cd '0-9'); completed_items=${completed_items:-0}
         local total_items=$((uncompleted_items + completed_items))
 
-        if [[ $total_items -gt 0 ]] && [[ $completed_items -eq $total_items ]]; then
-            log_status "WARN" "Exit condition: All fix_plan.md items completed ($completed_items/$total_items)" >&2
+        # PREFLIGHT-EMPTY-PLAN: Zero unchecked items means there's nothing to do this
+        # iteration — exit cleanly rather than burning a Claude call on an empty plan.
+        # Three cases lead here:
+        #   1. All items completed (total>0, completed==total) — original condition.
+        #   2. fix_plan.md has only headers / explanatory text, no checkboxes at all
+        #      (total==0). This is the EPIC-just-finished state where the next campaign
+        #      hasn't been populated yet — Claude would just respond "nothing to do"
+        #      every loop until the no-progress CB trips after 3 wasted calls.
+        #   3. Mixed file with some checked items but zero open ones.
+        # In all three, exiting now beats spinning. Operator restarts after editing the plan.
+        if [[ $uncompleted_items -eq 0 ]]; then
+            if [[ $total_items -gt 0 ]]; then
+                log_status "WARN" "Exit condition: All fix_plan.md items completed ($completed_items/$total_items)" >&2
+            else
+                log_status "WARN" "Exit condition: fix_plan.md has zero unchecked tasks (file present but empty of work)" >&2
+            fi
             echo "plan_complete"
             return 0
         fi
@@ -3645,33 +3675,55 @@ EOF
     # Claude Code spawns these as grandchildren that survive CLI exit on Windows.
     ralph_cleanup_orphaned_mcp
 
-    if [ $exit_code -eq 0 ]; then
-        # Check for is_error:true — API error despite exit code 0 (Issue #134, #199)
-        # Claude CLI can return exit code 0 with is_error:true for API 400 errors,
-        # OAuth token expiry, and tool use concurrency issues.
-        # This check MUST happen before progress file write and save_claude_session.
-        if [[ -f "$output_file" ]]; then
-            local json_is_error
-            json_is_error=$(jq -r '.is_error // false' "$output_file" 2>/dev/null || echo "false")
-            if [[ "$json_is_error" == "true" ]]; then
-                local error_msg
-                error_msg=$(jq -r '.result // "unknown API error"' "$output_file" 2>/dev/null || echo "unknown API error")
-                log_status "ERROR" "❌ Claude CLI returned is_error:true despite exit code 0: $error_msg"
-                echo '{"status": "failed", "error": "is_error:true", "timestamp": "'$(date '+%Y-%m-%d %H:%M:%S')'"}' > "$PROGRESS_FILE"
+    # Expose invocation duration to caller so the fast-trip detector in the main
+    # loop can see it (invocation_start_epoch is local-scoped to this function).
+    if [[ -n "${invocation_start_epoch:-}" ]]; then
+        LAST_INVOCATION_DURATION=$(( $(date +%s) - invocation_start_epoch ))
+    fi
 
-                # Reset session to prevent infinite retry with bad session ID
-                if echo "$error_msg" | grep -qi "tool.use.concurrency\|concurrency"; then
-                    reset_session "tool_use_concurrency_error"
-                    log_status "WARN" "Session reset due to tool use concurrency error. Retrying with fresh session."
-                else
-                    reset_session "api_error_is_error_true"
-                    log_status "WARN" "Session reset due to API error (is_error:true). Retrying with fresh session."
-                fi
-                return 1
+    # Unified is_error:true classifier — runs BEFORE branching on exit_code so that
+    # the same JSON-level error is handled identically whether the CLI exited 0 or
+    # non-zero. Previously this check only ran when exit_code==0 (Issue #134, #199),
+    # which let monthly-spend-cap 400s (which can come back with non-zero exit) fall
+    # through to the generic "execution failed → 30s retry" path and burn calls
+    # against an immovable wall.
+    if [[ -f "$output_file" ]]; then
+        local _ralph_json_is_error
+        _ralph_json_is_error=$(jq -r '.is_error // false' "$output_file" 2>/dev/null || echo "false")
+        if [[ "$_ralph_json_is_error" == "true" ]]; then
+            local _ralph_error_msg
+            _ralph_error_msg=$(jq -r '.result // "unknown API error"' "$output_file" 2>/dev/null || echo "unknown API error")
+            echo '{"status": "failed", "error": "is_error:true", "timestamp": "'$(date '+%Y-%m-%d %H:%M:%S')'"}' > "$PROGRESS_FILE"
+
+            # Monthly spend cap (console.anthropic.com → Limits) — terminal until the reset date.
+            # Example: "You have reached your specified API usage limits. You will regain access on 2026-05-01 at 00:00 UTC."
+            # Retrying every 30s for days/weeks is pointless and noisy; surface the date and halt.
+            if echo "$_ralph_error_msg" | grep -qiE "specified API usage limit|regain access on"; then
+                MONTHLY_CAP_DATE=$(echo "$_ralph_error_msg" \
+                    | grep -oE "regain access on [0-9]{4}-[0-9]{2}-[0-9]{2}" \
+                    | head -1 \
+                    | grep -oE "[0-9]{4}-[0-9]{2}-[0-9]{2}")
+                log_status "ERROR" "🛑 Monthly Anthropic API spend cap reached (exit_code=$exit_code). Access returns: ${MONTHLY_CAP_DATE:-unknown}"
+                log_status "ERROR" "    Raise the cap at console.anthropic.com → Limits, or wait until ${MONTHLY_CAP_DATE:-the reset date}."
+                return 4
             fi
-        fi
 
-        # Clear progress file (only after is_error check passes)
+            log_status "ERROR" "❌ Claude CLI returned is_error:true (exit_code=$exit_code): $_ralph_error_msg"
+
+            # Reset session to prevent infinite retry with a poisoned session ID.
+            if echo "$_ralph_error_msg" | grep -qi "tool.use.concurrency\|concurrency"; then
+                reset_session "tool_use_concurrency_error"
+                log_status "WARN" "Session reset due to tool use concurrency error. Retrying with fresh session."
+            else
+                reset_session "api_error_is_error_true"
+                log_status "WARN" "Session reset due to API error (is_error:true). Retrying with fresh session."
+            fi
+            return 1
+        fi
+    fi
+
+    if [ $exit_code -eq 0 ]; then
+        # Clear progress file (is_error:true was already classified above)
         echo '{"status": "completed", "timestamp": "'$(date '+%Y-%m-%d %H:%M:%S')'"}' > "$PROGRESS_FILE"
 
         log_status "SUCCESS" "✅ Claude Code execution completed successfully"
@@ -4415,6 +4467,41 @@ main() {
             log_status "ERROR" "🛑 Circuit breaker has opened - halting loop"
             log_status "INFO" "Run 'ralph --reset-circuit' to reset the circuit breaker after addressing issues"
             break
+        elif [ $exec_result -eq 4 ]; then
+            # Monthly Anthropic API spend cap — terminal until the reset date.
+            # Sleeping for days/weeks is not viable; surface the date and halt cleanly.
+            # Trip the circuit breaker so a future restart sees OPEN until manually cleared.
+            reset_session "monthly_api_spend_cap"
+            local _cap_date="${MONTHLY_CAP_DATE:-unknown}"
+            local _total_opens
+            _total_opens=$(jq -r '.total_opens // 0' "$CB_STATE_FILE" 2>/dev/null || echo "0")
+            _total_opens=$((_total_opens + 1))
+            cat > "$CB_STATE_FILE" << CBEOF
+{
+    "state": "$CB_STATE_OPEN",
+    "last_change": "$(get_iso_timestamp)",
+    "opened_at": "$(get_iso_timestamp)",
+    "consecutive_no_progress": 0,
+    "total_opens": $_total_opens,
+    "reason": "monthly_api_spend_cap: access returns ${_cap_date}"
+}
+CBEOF
+            update_status "$loop_count" "$(_read_call_count)" "monthly_cap" "stopped" "monthly_api_spend_cap"
+
+            echo ""
+            echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}║  MONTHLY API SPEND CAP REACHED                            ║${NC}"
+            echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            echo -e "${YELLOW}Your Anthropic monthly spend limit has been hit.${NC}"
+            echo -e "${YELLOW}Access returns: ${GREEN}${_cap_date}${NC}"
+            echo ""
+            echo -e "${YELLOW}Next steps:${NC}"
+            echo -e "  ${GREEN}•${NC} Raise the cap at console.anthropic.com → Limits, then run 'ralph --reset-circuit' and re-run."
+            echo -e "  ${GREEN}•${NC} Or wait until ${_cap_date} and re-run 'ralph'."
+            echo ""
+            log_status "ERROR" "🛑 Halting loop — monthly API spend cap (returns ${_cap_date})"
+            break
         elif [ $exec_result -eq 2 ]; then
             # Issue #102: API plan limit / Extra Usage exhaustion — parse reset time and auto-sleep
             update_status "$loop_count" "$(_read_call_count)" "api_limit" "paused"
@@ -4499,11 +4586,10 @@ main() {
             update_status "$loop_count" "$(_read_call_count)" "failed" "error"
 
             # LOGFIX-4: Fast-trip circuit breaker on broken invocations
-            # Detect rapid failures with 0 tool calls (e.g., missing stdin, bad prompt)
-            local _exec_duration=30
-            if [[ -n "${invocation_start_epoch:-}" ]]; then
-                _exec_duration=$(( $(date +%s) - invocation_start_epoch ))
-            fi
+            # Detect rapid failures with 0 tool calls (e.g., missing stdin, bad prompt).
+            # NOTE: invocation_start_epoch is local-scoped inside execute_claude_code, so
+            # the function exports LAST_INVOCATION_DURATION for us to read here.
+            local _exec_duration=${LAST_INVOCATION_DURATION:-30}
             if [[ ${LAST_TOOL_COUNT:-0} -eq 0 && $_exec_duration -lt 30 ]]; then
                 CONSECUTIVE_FAST_FAILURE_COUNT=$((CONSECUTIVE_FAST_FAILURE_COUNT + 1))
                 log_status "WARN" "Fast failure detected: 0 tools, ${_exec_duration}s ($CONSECUTIVE_FAST_FAILURE_COUNT/$MAX_CONSECUTIVE_FAST_FAILURES)"

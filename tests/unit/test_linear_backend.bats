@@ -347,3 +347,79 @@ restore_curl() {
     assert_success
     assert_output ""
 }
+
+# ---------------------------------------------------------------------------
+# PREFLIGHT-EMPTY-PLAN (Linear backend) — Bug 3 regression tests.
+# These exercise should_exit_gracefully from ralph_loop.sh directly, with the
+# linear_get_open_count / linear_get_done_count functions stubbed in bash.
+# Three contracts to verify:
+#   (a) open=0   \u2192 exit "plan_complete"     (legitimate empty backlog)
+#   (b) open>0   \u2192 continue (return "")     (work to do)
+#   (c) error    \u2192 abstain (return "")      (TAP-536 fail-loud)
+# ---------------------------------------------------------------------------
+
+# Helper: invoke the live should_exit_gracefully with a Linear stub.
+_run_should_exit_with_linear_stub() {
+    local open_exit=$1 open_value=$2 done_exit=$3 done_value=$4
+
+    local ralph_dir="$TEST_TEMP_DIR/.ralph"
+    mkdir -p "$ralph_dir"
+    printf '%s' '{"test_only_loops": [], "done_signals": [], "completion_indicators": []}' \
+        > "$ralph_dir/.exit_signals"
+    printf '%s' '{"loop_count": 1, "exit_signal": "false"}' > "$ralph_dir/status.json"
+    printf '%s' '{"state":"CLOSED","consecutive_no_progress":0,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$ralph_dir/.circuit_breaker_state"
+
+    bash -c "
+set +u
+RALPH_DIR='$ralph_dir'
+EXIT_SIGNALS_FILE='$ralph_dir/.exit_signals'
+RALPH_TASK_SOURCE=linear
+RALPH_LINEAR_PROJECT='Test Project'
+MAX_CONSECUTIVE_TEST_LOOPS=3
+MAX_CONSECUTIVE_DONE_SIGNALS=2
+CB_PERMISSION_DENIAL_THRESHOLD=2
+RALPH_USE_AGENT=false
+log_status() { :; }
+check_agent_support() { return 1; }
+linear_get_open_count() { echo '$open_value'; return $open_exit; }
+linear_get_done_count() { echo '$done_value'; return $done_exit; }
+source <(awk '/^should_exit_gracefully\\(\\) \\{/,/^\\}/' '${BATS_TEST_DIRNAME}/../../ralph_loop.sh')
+should_exit_gracefully 2>/dev/null
+"
+}
+
+@test "PREFLIGHT (Linear): open=0 returns plan_complete (legitimate empty backlog)" {
+    run _run_should_exit_with_linear_stub 0 0 0 5
+    assert_success
+    assert_output "plan_complete"
+}
+
+@test "PREFLIGHT (Linear): open=0 done=0 returns plan_complete (project has no issues at all)" {
+    # Edge case: brand-new project with nothing seeded. Same outcome \u2014 exit clean.
+    run _run_should_exit_with_linear_stub 0 0 0 0
+    assert_success
+    assert_output "plan_complete"
+}
+
+@test "PREFLIGHT (Linear): open>0 continues (returns empty string)" {
+    run _run_should_exit_with_linear_stub 0 3 0 7
+    assert_success
+    assert_output ""
+}
+
+@test "PREFLIGHT (Linear): linear_get_open_count failure ABSTAINS (TAP-536 fail-loud)" {
+    # When the API errors, the backend exits non-zero and the gate must NOT
+    # interpret \"unknown\" as \"empty\" \u2014 we abstain (return empty) so the
+    # next loop can retry. CRITICAL: a transient outage must not trip plan_complete.
+    run _run_should_exit_with_linear_stub 1 "" 0 5
+    assert_success
+    assert_output ""
+}
+
+@test "PREFLIGHT (Linear): linear_get_done_count failure ABSTAINS (TAP-536 fail-loud)" {
+    # Same contract for done_count.
+    run _run_should_exit_with_linear_stub 0 0 1 ""
+    assert_success
+    assert_output ""
+}

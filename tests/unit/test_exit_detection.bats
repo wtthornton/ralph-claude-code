@@ -76,14 +76,17 @@ should_exit_gracefully() {
 
     # 4. Check fix_plan.md for completion
     # Fix #144: Only match valid markdown checkboxes, not date entries like [2026-01-29]
+    # PREFLIGHT-EMPTY-PLAN: zero unchecked items = exit cleanly, even if total_items=0
+    # (file has only headers / no tasks defined yet). Mirrors the live function.
     if [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local uncompleted_items
         local completed_items
         uncompleted_items=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || uncompleted_items=0
+        uncompleted_items=$(echo "$uncompleted_items" | tr -cd '0-9'); uncompleted_items=${uncompleted_items:-0}
         completed_items=$(grep -cE "^[[:space:]]*- \[[xX]\]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || completed_items=0
-        local total_items=$((uncompleted_items + completed_items))
+        completed_items=$(echo "$completed_items" | tr -cd '0-9'); completed_items=${completed_items:-0}
 
-        if [[ $total_items -gt 0 ]] && [[ $completed_items -eq $total_items ]]; then
+        if [[ $uncompleted_items -eq 0 ]]; then
             echo "plan_complete"
             return 0
         fi
@@ -220,11 +223,40 @@ EOF
     assert_equal "$result" "test_saturation"
 }
 
-# Test 16: fix_plan.md with no checkboxes
-@test "should_exit_gracefully handles fix_plan with no checkboxes" {
+# Test 16: PREFLIGHT-EMPTY-PLAN — fix_plan with NO checkboxes exits cleanly.
+# Was previously expected to return "" (continue), but spinning on an empty plan
+# wastes 3 Claude calls before the no-progress CB trips. With the pre-flight fix,
+# zero-unchecked-items always exits with plan_complete (file backend).
+@test "should_exit_gracefully exits clean on fix_plan with no checkboxes (PREFLIGHT-EMPTY-PLAN)" {
     cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
 # Fix Plan
 This is just text, no tasks yet.
+EOF
+
+    result=$(should_exit_gracefully || true)
+    assert_equal "$result" "plan_complete"
+}
+
+# PREFLIGHT-EMPTY-PLAN regression: fix_plan with only headers (real tapps-brain case)
+@test "should_exit_gracefully exits clean on fix_plan with only headers (no tasks defined)" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+# Ralph Fix Plan — EPIC-070
+
+## EPIC-070: Remote-First Brain as a Shared Service
+
+(all stories archived)
+EOF
+
+    result=$(should_exit_gracefully || true)
+    assert_equal "$result" "plan_complete"
+}
+
+# PREFLIGHT-EMPTY-PLAN guard: file with at least one unchecked task must NOT exit.
+@test "should_exit_gracefully continues with even one unchecked item" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+# Plan
+- [x] done
+- [ ] still TODO
 EOF
 
     result=$(should_exit_gracefully || true)
