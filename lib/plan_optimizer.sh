@@ -732,32 +732,37 @@ plan_section_hashes() {
 
     [[ ! -f "$fix_plan" ]] && return 1
 
-    awk '
-    /^## / {
-        if (section_text != "") {
-            cmd = "printf \"%s\" \"" section_text "\" | sha256sum 2>/dev/null || printf \"%s\" \"" section_text "\" | shasum -a 256 2>/dev/null"
-            cmd | getline hash
-            close(cmd)
-            split(hash, h, " ")
-            print section_name "\t" h[1]
-        }
-        section_name = $0
-        section_text = ""
-        next
+    # Hasher is selected once; never concatenate task text into a shell
+    # command string (TAP-622: awk `cmd | getline` invokes /bin/sh and
+    # externally-sourced fix_plan.md content would execute as code).
+    local -a hasher
+    if command -v sha256sum >/dev/null 2>&1; then
+        hasher=(sha256sum)
+    elif command -v shasum >/dev/null 2>&1; then
+        hasher=(shasum -a 256)
+    else
+        return 1
+    fi
+
+    local section_name=""
+    local section_text=""
+    local line hash
+    _plan_emit_section() {
+        [[ -z "$section_name" || -z "$section_text" ]] && return 0
+        hash=$(printf '%s' "$section_text" | "${hasher[@]}" | awk '{print $1}')
+        printf '%s\t%s\n' "$section_name" "$hash"
     }
-    /^- \[ \]/ {
-        section_text = section_text $0 "\n"
-    }
-    END {
-        if (section_text != "") {
-            cmd = "printf \"%s\" \"" section_text "\" | sha256sum 2>/dev/null || printf \"%s\" \"" section_text "\" | shasum -a 256 2>/dev/null"
-            cmd | getline hash
-            close(cmd)
-            split(hash, h, " ")
-            print section_name "\t" h[1]
-        }
-    }
-    ' "$fix_plan"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" == "## "* ]]; then
+            _plan_emit_section
+            section_name="$line"
+            section_text=""
+        elif [[ "$line" == "- [ ]"* ]]; then
+            section_text+="$line"$'\n'
+        fi
+    done < "$fix_plan"
+    _plan_emit_section
+    unset -f _plan_emit_section
 }
 
 # plan_changed_sections — Detect which sections have changed since last optimization

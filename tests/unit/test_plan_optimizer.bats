@@ -460,3 +460,50 @@ EOF
     [[ "$line2" == "- [ ] Build the auth flow <!-- resolved: src/auth.py -->" ]]
     [[ "$line3" == "- [ ] Also: build the auth flow" ]]
 }
+
+@test "TAP-622: plan_section_hashes does not execute shell via task content" {
+    local plan="$TEST_DIR/fix_plan.md"
+    local marker="$TEST_DIR/pwn_marker"
+    cat > "$plan" <<EOF
+## Tasks
+- [ ] benign task
+- [ ] bad "\$(touch $marker)" inline
+- [ ] another \`touch $marker\` task
+EOF
+
+    run plan_section_hashes "$plan"
+    assert_success
+    # Hash line must still be produced
+    [[ "$output" == *"## Tasks"$'\t'* ]]
+    # Shell substitution inside the task text MUST NOT have executed
+    [[ ! -e "$marker" ]]
+}
+
+@test "TAP-622: plan_section_hashes is stable for benign content" {
+    local plan="$TEST_DIR/fix_plan.md"
+    cat > "$plan" <<'EOF'
+## Tasks
+- [ ] One
+- [ ] Two
+EOF
+
+    local out1 out2
+    out1=$(plan_section_hashes "$plan")
+    out2=$(plan_section_hashes "$plan")
+    [[ "$out1" == "$out2" ]]
+    [[ "$out1" == *"## Tasks"$'\t'* ]]
+}
+
+@test "TAP-622: plan_section_hashes detects checkbox flip" {
+    local plan="$TEST_DIR/fix_plan.md"
+    cat > "$plan" <<'EOF'
+## Tasks
+- [ ] One
+- [ ] Two
+EOF
+    local before after
+    before=$(plan_section_hashes "$plan")
+    sed -i 's/- \[ \] One/- [x] One/' "$plan"
+    after=$(plan_section_hashes "$plan")
+    [[ "$before" != "$after" ]]
+}
