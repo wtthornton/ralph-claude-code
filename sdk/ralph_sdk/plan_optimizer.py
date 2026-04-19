@@ -16,7 +16,6 @@ Semantic equivalence validation before write (Bazel-inspired).
 
 from __future__ import annotations
 
-import hashlib
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -279,17 +278,19 @@ def _sort_key(task: Task, topo_rank: int) -> tuple[int, str, int, int, int]:
 # =============================================================================
 
 
-def _validate_equivalence(before: list[Task], after: list[Task]) -> bool:
-    """Verify task set is unchanged after reordering (Bazel-inspired)."""
-    if len(before) != len(after):
+def _validate_equivalence(before_raw: frozenset[str], after: list[Task]) -> bool:
+    """Verify task set is unchanged after reordering (Bazel-inspired).
+
+    TAP-628: the previous implementation compared `sorted(t.text for t in
+    before)` against `sorted(t.text for t in after)` where `after` was a
+    permutation of the *same* Task objects — so the two sides were always
+    identical and the guard could never trip. Snapshot raw_line from the
+    pre-transform input as a frozenset so any dedup / filter / rename in the
+    sort pipeline is caught.
+    """
+    if len(before_raw) != len(after):
         return False
-    before_hash = hashlib.sha256(
-        "\n".join(sorted(t.text for t in before)).encode()
-    ).hexdigest()
-    after_hash = hashlib.sha256(
-        "\n".join(sorted(t.text for t in after)).encode()
-    ).hexdigest()
-    return before_hash == after_hash
+    return before_raw == frozenset(t.raw_line for t in after)
 
 
 # =============================================================================
@@ -337,13 +338,16 @@ def optimize_plan(
     # Map topo_order back to task indices and apply secondary sort
     topo_rank_map = {unchecked[pos].idx: rank for rank, pos in enumerate(topo_order) if pos < len(unchecked)}
 
+    # Snapshot invariant *before* any transformation (TAP-628)
+    unchecked_raw = frozenset(t.raw_line for t in unchecked)
+
     reordered = sorted(
         unchecked,
         key=lambda t: _sort_key(t, topo_rank_map.get(t.idx, t.idx)),
     )
 
     # Validate semantic equivalence
-    if not _validate_equivalence(unchecked, reordered):
+    if not _validate_equivalence(unchecked_raw, reordered):
         return OptimizeResult(changed=False, reason="ABORT: task content changed during reorder")
 
     # Check if order actually changed
