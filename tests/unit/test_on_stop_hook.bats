@@ -203,3 +203,82 @@ RECOMMENDATION: Test payload.
     run jq -e 'type == "object" and .exit_signal == "true"' "$TEST_TEMP_DIR/.ralph/status.json"
     assert_success
 }
+
+# =============================================================================
+# COST-EXTRACT: total_cost_usd and token usage live in the live stream-json file
+# under .ralph/logs/, NOT in the official ~/.claude/projects/<proj>/<sess>.jsonl
+# transcript. The hook must fall through to the stream file so loop_cost_usd and
+# loop_input_tokens / loop_output_tokens are non-zero on real loops.
+# Regression: tapps-brain status.json showed loop_cost_usd=0 across all loops
+# despite cache token counts being populated correctly (3.1M read / 180K create
+# per loop), because both INPUT and transcript_path lacked a "type":"result" line.
+# =============================================================================
+
+@test "COST-EXTRACT: hook reads total_cost_usd from .ralph/logs/ stream when transcript lacks result line" {
+    # Set up a minimal stream-json log mirroring what `claude --output-format stream-json`
+    # writes during a real loop. Only the result line carries cost.
+    mkdir -p "$TEST_TEMP_DIR/.ralph/logs"
+    cat > "$TEST_TEMP_DIR/.ralph/logs/claude_output_2099-01-01_00-00-00.log" <<'STREAM'
+{"type":"system","subtype":"init","session_id":"abc123"}
+{"type":"assistant","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":1000,"cache_creation_input_tokens":500}}}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":1.234567,"usage":{"input_tokens":42,"output_tokens":99,"cache_read_input_tokens":3136400,"cache_creation_input_tokens":180230}}
+STREAM
+
+    # Provide INPUT with a transcript_path that has NO result line — matches what
+    # ~/.claude/projects/<proj>/<sess>.jsonl actually looks like in agent mode.
+    local transcript="$TEST_TEMP_DIR/.ralph/transcript.jsonl"
+    cat > "$transcript" <<'JSONL'
+{"type":"user","message":{"content":"go"}}
+{"type":"assistant","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":42,"output_tokens":99,"cache_read_input_tokens":3136400,"cache_creation_input_tokens":180230}}}
+JSONL
+
+    printf '%s\n' \
+        '{"state":"CLOSED","consecutive_no_progress":0,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+
+    local input
+    input=$(jq -n --arg tp "$transcript" \
+        '{transcript_path: $tp, result: "Did work.\n\n---RALPH_STATUS---\nSTATUS: IN_PROGRESS\nTASKS_COMPLETED_THIS_LOOP: 1\nFILES_MODIFIED: 3\nTESTS_STATUS: NOT_RUN\nWORK_TYPE: IMPLEMENTATION\nEXIT_SIGNAL: false\nRECOMMENDATION: keep going\n---END_RALPH_STATUS---"}')
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$input"
+    assert_success
+
+    # Cost and token counts must reflect the stream's result line, not zero.
+    run jq -r '.loop_cost_usd' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "1.234567"
+    run jq -r '.loop_input_tokens' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "42"
+    run jq -r '.loop_output_tokens' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "99"
+}
+
+@test "COST-EXTRACT: hook prefers _stream.log-suffixed sibling's NON-suffixed live file" {
+    # ralph_loop.sh post-processing creates *_stream.log as a backup AFTER the
+    # hook fires, then overwrites the original .log with just the result line.
+    # Pre-existing _stream.log files from prior loops must not shadow the current
+    # loop's live stream when picking newest-by-mtime.
+    mkdir -p "$TEST_TEMP_DIR/.ralph/logs"
+
+    # Older _stream.log backup from a previous loop ($1.99 — wrong answer).
+    cat > "$TEST_TEMP_DIR/.ralph/logs/claude_output_2098-01-01_00-00-00_stream.log" <<'OLD'
+{"type":"result","total_cost_usd":1.99,"usage":{"input_tokens":1,"output_tokens":1}}
+OLD
+    # Make sure mtime is older.
+    touch -t 209801010000 "$TEST_TEMP_DIR/.ralph/logs/claude_output_2098-01-01_00-00-00_stream.log"
+
+    # Current live stream — newer mtime, lower cost — this is the correct source.
+    cat > "$TEST_TEMP_DIR/.ralph/logs/claude_output_2099-01-01_00-00-00.log" <<'NEW'
+{"type":"result","total_cost_usd":0.42,"usage":{"input_tokens":7,"output_tokens":13}}
+NEW
+
+    printf '%s\n' \
+        '{"state":"CLOSED","consecutive_no_progress":0,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_status_block_input false IN_PROGRESS 1 1)"
+    assert_success
+
+    # Must read the non-suffixed .log (the live stream), not the older _stream.log backup.
+    run jq -r '.loop_cost_usd' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "0.42"
+}

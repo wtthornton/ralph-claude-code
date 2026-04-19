@@ -136,7 +136,7 @@ CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-15}"
 CLAUDE_OUTPUT_FORMAT="${CLAUDE_OUTPUT_FORMAT:-json}"
 # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
 # Issue #154: Store default so we can detect user customization (needed for agent mode fallback)
-RALPH_DEFAULT_ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *)"
+RALPH_DEFAULT_ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*"
 CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-$RALPH_DEFAULT_ALLOWED_TOOLS}"
 CLAUDE_USE_CONTINUE="${CLAUDE_USE_CONTINUE:-true}"
 CLAUDE_SESSION_FILE="$RALPH_DIR/.claude_session_id" # Session ID persistence file
@@ -2040,7 +2040,7 @@ build_loop_context() {
         if [[ -n "$next_task" ]]; then
             context+="Next issue: ${next_task}. "
         fi
-        context+="Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done when complete. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain."
+        context+="Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned with the implementation (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means the commits are on the \`main\` branch, not just on a feature branch. Before marking Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists on main; if the work is only on a branch, either merge it (if you have permission) or post a Linear comment listing the unmerged commit SHAs and leave the ticket in its current state. Do NOT mark Done based on a 'work complete on branch X' comment without verifying main. Use 'In Review' ONLY when blocked on external input you cannot resolve (missing credentials, human budget approval, upstream decision). Do NOT use 'In Review' as a default conservative state — Ralph's next-task query excludes 'In Review', so tickets left there become invisible and pile up. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain."
     # Bug #3 Fix: Support indented markdown checkboxes with [[:space:]]* pattern
     elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local incomplete_tasks
@@ -2091,8 +2091,17 @@ build_loop_context() {
         fi
     fi
 
-    # Limit total length to ~500 chars
-    echo "${context:0:500}"
+    # TAP-585 (epic TAP-583): Inject MCP "when to use" guidance, gated on the
+    # capability flags set by ralph_probe_mcp_servers() at startup. Without
+    # explicit guidance Claude defaults to Read/Grep/Bash for things docs-mcp
+    # could do better/cheaper. tapps-mcp block deferred until its tool surface
+    # is inventoried (see TAP-583 open question).
+    if [[ "${RALPH_MCP_DOCS_AVAILABLE:-false}" == "true" ]]; then
+        context+="docs-mcp available: prefer mcp__docs-mcp__* (docs_generate_adr/changelog/architecture, docs_check_links/drift/freshness, docs_module_map) for docs/ADR/changelog/README/API tasks instead of hand-writing. "
+    fi
+
+    # Limit total length to ~800 chars (raised from 500 to fit MCP guidance — TAP-585)
+    echo "${context:0:800}"
 }
 
 # Get session file age in hours (cross-platform)
@@ -2935,6 +2944,63 @@ ralph_mcp_failure_summary() {
 
     log_status "WARN" "MCP servers failed this session ($count): $servers"
     log_status "INFO" "Check MCP configuration: claude mcp list"
+}
+
+# =============================================================================
+# TAP-584 (epic TAP-583): Probe global MCP server availability ONCE at startup.
+# Sets RALPH_MCP_TAPPS_AVAILABLE / RALPH_MCP_DOCS_AVAILABLE in the environment.
+# Downstream stories (TAP-585 prompt guidance, TAP-588 counters, TAP-587 sub-
+# agents) gate on these flags so a missing MCP doesn't trigger false-positive
+# guidance pointing Claude at tools that don't exist.
+#
+# Fail-loud, never fail-stop: probe errors (timeout, parse failure, CLI missing)
+# set both flags `false` + WARN, loop continues normally. Same posture as the
+# TAP-536 fail-loud Linear handling — never abstain into a destructive default.
+# =============================================================================
+ralph_probe_mcp_servers() {
+    export RALPH_MCP_TAPPS_AVAILABLE="false"
+    export RALPH_MCP_DOCS_AVAILABLE="false"
+
+    if ! command -v "$CLAUDE_CODE_CMD" &>/dev/null; then
+        log_status "WARN" "MCP probe skipped: '$CLAUDE_CODE_CMD' not in PATH"
+        return 0
+    fi
+
+    # 5s upper bound — a hung MCP transport must not stall startup.
+    local probe_output
+    if ! probe_output=$(portable_timeout 5s $CLAUDE_CODE_CMD mcp list 2>&1); then
+        log_status "WARN" "MCP probe failed: '$CLAUDE_CODE_CMD mcp list' returned non-zero or timed out"
+        return 0
+    fi
+
+    # Match a line where the server name appears as a column / key, AND the
+    # same line contains a positive status indicator. Tolerant of formatting
+    # variations across CLI versions; conservative fallback when in doubt is
+    # "unavailable" so we never inject prompt guidance for an absent server.
+    if echo "$probe_output" | grep -E '(^|[[:space:]])tapps-mcp([[:space:]:]|$)' \
+       | grep -qiE '(connected|✓|ok|ready|running)'; then
+        RALPH_MCP_TAPPS_AVAILABLE="true"
+        log_status "INFO" "MCP probe: tapps-mcp reachable"
+    else
+        log_status "WARN" "MCP probe: tapps-mcp NOT reachable — Ralph will not steer Claude toward it"
+    fi
+
+    if echo "$probe_output" | grep -E '(^|[[:space:]])docs-mcp([[:space:]:]|$)' \
+       | grep -qiE '(connected|✓|ok|ready|running)'; then
+        RALPH_MCP_DOCS_AVAILABLE="true"
+        log_status "INFO" "MCP probe: docs-mcp reachable"
+    else
+        log_status "WARN" "MCP probe: docs-mcp NOT reachable — Ralph will not steer Claude toward it"
+    fi
+}
+
+# TAP-584: Print a 2-line capability summary for `ralph --mcp-status`. Runs the
+# probe (so the user can debug "why isn't Ralph using the MCP" without grepping
+# logs), then prints both flag values regardless of probe outcome.
+ralph_print_mcp_status() {
+    ralph_probe_mcp_servers >&2
+    echo "tapps-mcp: ${RALPH_MCP_TAPPS_AVAILABLE:-false}"
+    echo "docs-mcp:  ${RALPH_MCP_DOCS_AVAILABLE:-false}"
 }
 
 # =============================================================================
@@ -4113,6 +4179,10 @@ main() {
     # UPKEEP-2: Initialize MCP failure tracking for this session
     ralph_init_mcp_tracking
 
+    # TAP-584 (epic TAP-583): Probe global MCP availability so downstream stories
+    # (TAP-585 prompt guidance, TAP-588 counters) can gate on the result.
+    ralph_probe_mcp_servers
+
     # XPLAT-2: Validate hooks at startup
     ralph_validate_hooks
 
@@ -4653,6 +4723,7 @@ IMPORTANT: This command must be run from a Ralph project directory.
 
 Options:
     -V, --version           Show version and exit
+    --mcp-status            Probe configured MCP servers (tapps-mcp, docs-mcp) and exit
     -h, --help              Show this help message
     -c, --calls NUM         Set max calls per hour (default: $MAX_CALLS_PER_HOUR)
     -p, --prompt FILE       Set prompt file (default: $PROMPT_FILE)
@@ -4761,6 +4832,12 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -V|--version)
             echo "ralph $RALPH_VERSION"
+            exit 0
+            ;;
+        --mcp-status)
+            # TAP-584: Probe + print capability summary so users can debug
+            # "why isn't Ralph using the MCP" without grepping logs.
+            ralph_print_mcp_status
             exit 0
             ;;
         -h|--help)

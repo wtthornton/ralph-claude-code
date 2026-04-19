@@ -28,11 +28,20 @@ record_metric() {
     local cb_state="CLOSED"
     local completed_task=""
 
+    # TAP-588 (epic TAP-583): include MCP-call counts so trend analysis can
+    # answer "what % of loops actually used docs-mcp / tapps-mcp?"
+    local mcp_tapps_calls=0
+    local mcp_docs_calls=0
+
     if [[ -f "$status_file" ]] && command -v jq &>/dev/null; then
         work_type=$(jq -r '.WORK_TYPE // "UNKNOWN"' "$status_file" 2>/dev/null)
         exit_signal=$(jq -r '.EXIT_SIGNAL // false' "$status_file" 2>/dev/null)
         cb_state=$(jq -r '.circuit_breaker_state // "CLOSED"' "$status_file" 2>/dev/null)
         completed_task=$(jq -r '.COMPLETED_TASK // ""' "$status_file" 2>/dev/null)
+        mcp_tapps_calls=$(jq -r '.loop_mcp_calls.tapps_mcp // 0' "$status_file" 2>/dev/null)
+        mcp_docs_calls=$(jq -r '.loop_mcp_calls.docs_mcp // 0' "$status_file" 2>/dev/null)
+        [[ "$mcp_tapps_calls" =~ ^[0-9]+$ ]] || mcp_tapps_calls=0
+        [[ "$mcp_docs_calls"  =~ ^[0-9]+$ ]] || mcp_docs_calls=0
     fi
 
     local call_count=0
@@ -50,7 +59,7 @@ record_metric() {
 
     # Build JSON line (no jq dependency — manual construction)
     local metric_line
-    metric_line=$(printf '{"timestamp":"%s","loop_count":%s,"session_id":"%s","work_type":"%s","exit_signal":%s,"api_calls":%s,"circuit_breaker_state":"%s","completed_task":"%s"}' \
+    metric_line=$(printf '{"timestamp":"%s","loop_count":%s,"session_id":"%s","work_type":"%s","exit_signal":%s,"api_calls":%s,"circuit_breaker_state":"%s","completed_task":"%s","mcp_tapps_calls":%s,"mcp_docs_calls":%s}' \
         "$timestamp" \
         "$loop_count" \
         "$session_id" \
@@ -58,7 +67,9 @@ record_metric() {
         "$exit_signal" \
         "$call_count" \
         "$cb_state" \
-        "$(echo "$completed_task" | sed 's/"/\\"/g' | head -c 200)")
+        "$(echo "$completed_task" | sed 's/"/\\"/g' | head -c 200)" \
+        "$mcp_tapps_calls" \
+        "$mcp_docs_calls")
 
     echo "$metric_line" >> "$month_file"
 }

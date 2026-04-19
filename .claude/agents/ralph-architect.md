@@ -14,6 +14,7 @@ tools:
   - Agent(ralph-explorer, ralph-tester, ralph-reviewer)
   - TodoWrite
   - WebFetch
+  - mcp__docs-mcp__*
 disallowedTools:
   - Bash(git clean *)
   - Bash(git rm *)
