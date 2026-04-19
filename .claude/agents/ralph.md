@@ -10,7 +10,7 @@ tools:
   - Glob
   - Grep
   - Bash
-  - Agent(ralph-explorer, ralph-tester, ralph-reviewer, ralph-architect)
+  - Task
   - TodoWrite
   - WebFetch
 disallowedTools:
