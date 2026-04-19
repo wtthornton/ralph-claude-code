@@ -40,32 +40,35 @@ import_graph_build_python() {
 
     mkdir -p "$(dirname "$cache_file")" 2>/dev/null || true
 
-    python3 -c "
-import ast, json, pathlib, sys
+    # TAP-633: pass project_root via env, not heredoc interpolation — a path
+    # containing triple quotes (''' …) would otherwise escape the Python
+    # string literal and execute arbitrary code during session-start.
+    PROJECT_ROOT="$project_root" python3 -c '
+import ast, json, os, pathlib, sys
 
 graph = {}
-root = pathlib.Path('''${project_root}''').resolve()
-skip = {'node_modules', '.venv', '__pycache__', '.git', '.ralph'}
+root = pathlib.Path(os.environ["PROJECT_ROOT"]).resolve()
+skip = {"node_modules", ".venv", "__pycache__", ".git", ".ralph"}
 
-for f in root.rglob('*.py'):
+for f in root.rglob("*.py"):
     # Skip excluded directories
     if any(part in skip for part in f.parts):
         continue
     try:
-        tree = ast.parse(f.read_text(encoding='utf-8', errors='ignore'))
+        tree = ast.parse(f.read_text(encoding="utf-8", errors="ignore"))
         deps = []
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
-                mod_path = node.module.replace('.', '/')
-                for ext in ['.py', '/__init__.py']:
+                mod_path = node.module.replace(".", "/")
+                for ext in [".py", "/__init__.py"]:
                     candidate = root / (mod_path + ext)
                     if candidate.exists():
                         deps.append(str(candidate.relative_to(root)))
                         break
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    mod_path = alias.name.replace('.', '/')
-                    for ext in ['.py', '/__init__.py']:
+                    mod_path = alias.name.replace(".", "/")
+                    for ext in [".py", "/__init__.py"]:
                         candidate = root / (mod_path + ext)
                         if candidate.exists():
                             deps.append(str(candidate.relative_to(root)))
@@ -76,7 +79,7 @@ for f in root.rglob('*.py'):
         pass
 
 json.dump(graph, sys.stdout, indent=2)
-" > "$cache_file" 2>/dev/null || echo '{}' > "$cache_file"
+' > "$cache_file" 2>/dev/null || echo '{}' > "$cache_file"
 }
 
 # ---------------------------------------------------------------------------
@@ -113,46 +116,44 @@ import_graph_build_js() {
     fi
 
     # Fallback: grep-based extraction via python3 (less accurate but zero dependencies)
-    python3 -c "
-import json, re, pathlib, sys
+    # TAP-633: pass project_root via env to avoid heredoc injection.
+    PROJECT_ROOT="$project_root" python3 -c '
+import json, os, re, pathlib, sys
 
 graph = {}
-root = pathlib.Path('''${project_root}''').resolve()
-skip = {'node_modules', '.venv', '__pycache__', '.git', '.ralph'}
+root = pathlib.Path(os.environ["PROJECT_ROOT"]).resolve()
+skip = {"node_modules", ".venv", "__pycache__", ".git", ".ralph"}
 
-for ext in ['*.js', '*.jsx', '*.ts', '*.tsx']:
+for ext in ["*.js", "*.jsx", "*.ts", "*.tsx"]:
     for f in root.rglob(ext):
         if any(part in skip for part in f.parts):
             continue
         try:
-            content = f.read_text(encoding='utf-8', errors='ignore')
-            # Match: import ... from 'path'  and  require('path')
+            content = f.read_text(encoding="utf-8", errors="ignore")
             imports = re.findall(
-                r'''(?:import\s+.*?from\s+['\"](.+?)['\"]|require\(['\"](.+?)['\"]\))''',
+                r"(?:import\s+.*?from\s+[\x27\x22](.+?)[\x27\x22]|require\([\x27\x22](.+?)[\x27\x22]\))",
                 content
             )
             resolved = []
             for m in imports:
                 dep = m[0] or m[1]
-                if not dep.startswith('.'):
-                    continue  # Skip bare package imports
+                if not dep.startswith("."):
+                    continue
                 candidate = (f.parent / dep).resolve()
-                found = False
-                for try_ext in ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.js']:
+                for try_ext in ["", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.js"]:
                     full = pathlib.Path(str(candidate) + try_ext)
                     if full.exists():
                         try:
                             resolved.append(str(full.relative_to(root)))
                         except ValueError:
                             pass
-                        found = True
                         break
             graph[str(f.relative_to(root))] = sorted(set(resolved))
         except (UnicodeDecodeError, OSError):
             pass
 
 json.dump(graph, sys.stdout, indent=2)
-" > "$cache_file" 2>/dev/null || echo '{}' > "$cache_file"
+' > "$cache_file" 2>/dev/null || echo '{}' > "$cache_file"
 }
 
 # ---------------------------------------------------------------------------

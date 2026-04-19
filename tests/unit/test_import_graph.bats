@@ -302,3 +302,37 @@ pkey() {
     # The .stale flag should exist
     [[ -f "${IMPORT_GRAPH_CACHE}.stale" ]]
 }
+
+@test "TAP-633: import_graph_build_python does not execute shell via project_root" {
+    # A directory name containing Python string-escape sequences must not be
+    # interpolated into the python3 -c script body. Pre-fix, a crafted path
+    # could execute arbitrary code during session-start.
+    local evil_dir
+    evil_dir="$BATS_TEST_TMPDIR/pwn_dir_$$"
+    mkdir -p "$evil_dir"
+    echo "print('x')" > "$evil_dir/script.py"
+    local cache="$BATS_TEST_TMPDIR/cache.json"
+    local marker="$BATS_TEST_TMPDIR/pwn_marker_$$"
+
+    # Path containing triple-quote escape attempt
+    local attack_root="$evil_dir/''')+(__import__('os').system('touch $marker'))+('''"
+    mkdir -p "$attack_root" 2>/dev/null || attack_root="$evil_dir"
+
+    import_graph_build_python "$attack_root" "$cache"
+
+    [[ ! -e "$marker" ]]
+    run jq -e 'type == "object"' "$cache"
+    assert_success
+}
+
+@test "TAP-633: import_graph_build_python handles paths with spaces + quotes" {
+    local spaced="$BATS_TEST_TMPDIR/a dir/b dir"
+    mkdir -p "$spaced"
+    echo "import os" > "$spaced/script.py"
+    local cache="$BATS_TEST_TMPDIR/cache.json"
+
+    import_graph_build_python "$spaced" "$cache"
+
+    run jq -e 'type == "object"' "$cache"
+    assert_success
+}
