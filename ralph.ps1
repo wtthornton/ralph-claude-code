@@ -81,28 +81,31 @@ No bash environment found. Ralph requires one of:
     exit 1
 }
 
-# Build the argument string
-$argString = ""
-if ($RalphArgs) {
-    $argString = ($RalphArgs | ForEach-Object {
-        if ($_ -match '\s') { "'$_'" } else { $_ }
-    }) -join " "
-}
+# TAP-641: pass user arguments as argv, not as an interpolated `bash -c`
+# string. The previous implementation joined args into a single string and
+# passed it to `bash -c`, so embedded single quotes, `$`, backticks, and
+# `;` were interpreted by bash — command injection via any caller that
+# controls argv (CI runner, VS Code task, .lnk).
+#
+# PowerShell's splatting (@RalphArgs) forwards each element as a distinct
+# argv token, so the downstream bash process receives them verbatim as
+# $1..$N and no shell parsing is applied to their contents.
+$SafeArgs = @()
+if ($RalphArgs) { $SafeArgs = @($RalphArgs) }
 
-# Execute based on bash type
 switch ($bashInfo.Type) {
     "wsl" {
         $unixScript = Convert-ToUnixPath $ralphScript
-        & wsl.exe bash -c "$unixScript $argString"
+        & wsl.exe -- bash $unixScript @SafeArgs
     }
     "gitbash" {
         # Git Bash uses /c/path/to/file style
         $gitBashPath = $ralphScript -replace '\\', '/'
         $gitBashPath = $gitBashPath -replace '^([A-Za-z]):', { '/' + $_.Groups[1].Value.ToLower() }
-        & $bashInfo.Path -c "$gitBashPath $argString"
+        & $bashInfo.Path $gitBashPath @SafeArgs
     }
     "bash" {
-        & $bashInfo.Path -c "$ralphScript $argString"
+        & $bashInfo.Path $ralphScript @SafeArgs
     }
 }
 
