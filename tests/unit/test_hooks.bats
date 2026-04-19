@@ -255,6 +255,125 @@ teardown() {
     [[ "$status" -eq 2 ]]
 }
 
+# TAP-624: Bypass regressions — each of these MUST block (was allowed pre-fix).
+# Use jq to build the stdin JSON so test strings don't fight bash quoting.
+_tap624_run() {
+    local cmd="$1"
+    local payload
+    payload=$(jq -cn --arg c "$cmd" '{tool_input: {command: $c}}')
+    CLAUDE_PROJECT_DIR="$TEST_DIR" run bash "$PROJECT_ROOT/templates/hooks/validate-command.sh" <<< "$payload"
+}
+
+@test "TAP-624: blocks 'rm --recursive /tmp/x' (long flag)" {
+    _tap624_run "rm --recursive /tmp/x"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'rm  -rf /tmp/x' (double space)" {
+    _tap624_run "rm  -rf /tmp/x"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'rm -fR /tmp/x' (capital-R cluster)" {
+    _tap624_run "rm -fR /tmp/x"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'rm -Rf /tmp/x'" {
+    _tap624_run "rm -Rf /tmp/x"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'find / -delete'" {
+    _tap624_run "find / -delete"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'truncate -s 0 .ralph/fix_plan.md'" {
+    _tap624_run "truncate -s 0 .ralph/fix_plan.md"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'ln -sf / .ralph/shortcut'" {
+    _tap624_run "ln -sf / .ralph/shortcut"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'chmod -x .ralph/hooks/on-stop.sh'" {
+    _tap624_run "chmod -x .ralph/hooks/on-stop.sh"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks plain 'cp foo .ralph/PROMPT.md'" {
+    _tap624_run "cp foo .ralph/PROMPT.md"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks plain 'mv foo .claude/settings.json'" {
+    _tap624_run "mv foo .claude/settings.json"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'python3 -c ...'" {
+    _tap624_run "python3 -c \"import os\""
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'perl -e ...'" {
+    _tap624_run "perl -e \"print 1\""
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'git commit --amend'" {
+    _tap624_run "git commit --amend"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'git commit --fixup=abc'" {
+    _tap624_run "git commit --fixup=abc123"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'git push origin HEAD:main -f' (flag after refspec)" {
+    _tap624_run "git push origin HEAD:main -f"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: still allows 'git push --force-with-lease'" {
+    _tap624_run "git push --force-with-lease"
+    assert_success
+}
+
+@test "TAP-624: blocks 'tee .ralph/PROMPT.md'" {
+    _tap624_run "tee .ralph/PROMPT.md"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: blocks 'sed -i s/x/y/ .ralph/fix_plan.md' (write to protected path)" {
+    _tap624_run "sed -i s/x/y/ .ralph/fix_plan.md"
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-624: still allows 'rm /tmp/file.txt' (non-recursive, non-protected)" {
+    _tap624_run "rm /tmp/file.txt"
+    assert_success
+}
+
+@test "TAP-624: still allows 'git status'" {
+    _tap624_run "git status"
+    assert_success
+}
+
+@test "TAP-624: still allows 'python3 script.py' (no -c flag)" {
+    _tap624_run "python3 script.py"
+    assert_success
+}
+
+@test "TAP-624: .ralph/hooks/validate-command.sh is byte-identical to template" {
+    diff "$PROJECT_ROOT/templates/hooks/validate-command.sh" \
+         "$PROJECT_ROOT/.ralph/hooks/validate-command.sh"
+}
+
 @test "HOOKS-5: protect-ralph-files.sh exists" {
     [[ -f "$PROJECT_ROOT/templates/hooks/protect-ralph-files.sh" ]]
 }
@@ -282,6 +401,50 @@ teardown() {
 @test "HOOKS-5: protect-ralph-files.sh allows status.json updates" {
     run bash -c 'echo "{\"tool_input\": {\"file_path\": \".ralph/status.json\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
     assert_success
+}
+
+# TAP-623: .claude/ control-plane guard
+@test "TAP-623: protect-ralph-files.sh blocks .claude/settings.json" {
+    run bash -c 'echo "{\"tool_input\": {\"file_path\": \".claude/settings.json\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-623: protect-ralph-files.sh blocks .claude/settings.local.json" {
+    run bash -c 'echo "{\"tool_input\": {\"file_path\": \"/tmp/proj/.claude/settings.local.json\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-623: protect-ralph-files.sh blocks .claude/agents/ralph.md" {
+    run bash -c 'echo "{\"tool_input\": {\"file_path\": \".claude/agents/ralph.md\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-623: protect-ralph-files.sh blocks .claude/hooks/on-stop.sh" {
+    run bash -c 'echo "{\"tool_input\": {\"file_path\": \".claude/hooks/on-stop.sh\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-623: protect-ralph-files.sh blocks .claude/commands/foo.md" {
+    run bash -c 'echo "{\"tool_input\": {\"file_path\": \".claude/commands/foo.md\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
+    [[ "$status" -eq 2 ]]
+}
+
+@test "TAP-623: protect-ralph-files.sh does not block unrelated 'myclaude/settings.json'" {
+    # Must anchor on /.claude/ — not match any directory ending with claude.
+    run bash -c 'echo "{\"tool_input\": {\"file_path\": \"src/myclaude/settings.json\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
+    assert_success
+}
+
+@test "TAP-623: protect-ralph-files.sh does not block unrelated 'notralph/fix_plan.md'" {
+    # fix_plan.md allow must anchor on /.ralph/ — not match the suffix alone.
+    run bash -c 'echo "{\"tool_input\": {\"file_path\": \"src/notralph/fix_plan.md\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
+    assert_success
+}
+
+@test "TAP-623: .ralph/hooks/protect-ralph-files.sh is byte-identical to template" {
+    # TAP-538 template-parity rule: repo's runtime hook must not drift from template.
+    diff "$PROJECT_ROOT/templates/hooks/protect-ralph-files.sh" \
+         "$PROJECT_ROOT/.ralph/hooks/protect-ralph-files.sh"
 }
 
 # =============================================================================
