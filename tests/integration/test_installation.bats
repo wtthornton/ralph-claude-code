@@ -496,6 +496,7 @@ EOF
     assert_file_exists "$TEST_INSTALL_DIR/ralph-enable"
     assert_file_exists "$TEST_INSTALL_DIR/ralph-enable-ci"
     assert_file_exists "$TEST_INSTALL_DIR/ralph-upgrade"
+    assert_file_exists "$TEST_INSTALL_DIR/ralph-upgrade-project"
 
     # Run uninstall
     run run_install uninstall
@@ -510,6 +511,33 @@ EOF
     assert_file_not_exists "$TEST_INSTALL_DIR/ralph-enable"
     assert_file_not_exists "$TEST_INSTALL_DIR/ralph-enable-ci"
     assert_file_not_exists "$TEST_INSTALL_DIR/ralph-upgrade"
+    # TAP-638: ralph-upgrade-project wrapper must be cleaned up by uninstall
+    assert_file_not_exists "$TEST_INSTALL_DIR/ralph-upgrade-project"
+}
+
+@test "TAP-638: every install.sh-registered wrapper appears in uninstall lists" {
+    # Regression guard: whenever install.sh adds a new wrapper under
+    # INSTALL_DIR, that command must also appear in both uninstall.sh loops
+    # and install.sh's uninstall case. Otherwise the next release leaves a
+    # dangling wrapper on PATH after the user uninstalls (the TAP-638 bug).
+    local installed_cmds
+    installed_cmds=$(grep -oE 'chmod \+x "\$INSTALL_DIR/ralph[-a-z]*"' "$PROJECT_ROOT/install.sh" | \
+                     sed 's|chmod +x "\$INSTALL_DIR/||; s|"||' | sort -u)
+
+    local missing=0
+    while IFS= read -r cmd; do
+        [[ -z "$cmd" ]] && continue
+        if ! grep -q "$cmd" "$PROJECT_ROOT/uninstall.sh"; then
+            echo "uninstall.sh is missing wrapper: $cmd" >&2
+            missing=1
+        fi
+        # install.sh's "uninstall" case block must also remove it
+        if ! sed -n '/^    uninstall)/,/^        ;;$/p' "$PROJECT_ROOT/install.sh" | grep -q "$cmd"; then
+            echo "install.sh uninstall case is missing wrapper: $cmd" >&2
+            missing=1
+        fi
+    done <<< "$installed_cmds"
+    [[ "$missing" -eq 0 ]]
 }
 
 @test "install.sh uninstall cleans up directories" {

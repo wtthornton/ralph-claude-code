@@ -44,7 +44,7 @@ check_installation() {
     local installed=false
 
     # Check for any of the Ralph commands
-    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade; do
+    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade ralph-upgrade-project; do
         if [ -f "$INSTALL_DIR/$cmd" ]; then
             installed=true
             break
@@ -59,7 +59,7 @@ check_installation() {
     if [ "$installed" = false ]; then
         log "WARN" "Ralph does not appear to be installed"
         echo "Checked locations:"
-        echo "  - $INSTALL_DIR/{ralph,ralph-monitor,ralph-setup,ralph-import,ralph-migrate,ralph-enable,ralph-enable-ci,ralph-sdk,ralph-doctor}"
+        echo "  - $INSTALL_DIR/{ralph,ralph-monitor,ralph-setup,ralph-import,ralph-migrate,ralph-enable,ralph-enable-ci,ralph-sdk,ralph-doctor,ralph-upgrade,ralph-upgrade-project}"
         echo "  - $RALPH_HOME"
         exit 0
     fi
@@ -76,7 +76,7 @@ show_removal_plan() {
 
     # Commands
     echo "Commands in $INSTALL_DIR:"
-    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade; do
+    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade ralph-upgrade-project; do
         if [ -f "$INSTALL_DIR/$cmd" ]; then
             echo "  - $cmd"
         fi
@@ -119,7 +119,7 @@ remove_commands() {
     log "INFO" "Removing Ralph commands..."
 
     local removed=0
-    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade; do
+    for cmd in ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade ralph-upgrade-project; do
         if [ -f "$INSTALL_DIR/$cmd" ]; then
             rm -f "$INSTALL_DIR/$cmd"
             removed=$((removed + 1))

@@ -5,6 +5,9 @@
 # Windows/WSL: If ./install.sh fails with "invalid option" or "$'\r': command not found",
 # run: bash install.sh   (or normalize CRLF: sed -i 's/\r$//' install.sh in WSL)
 set -e
+# TAP-636: surface pipeline failures (sed | tr) so a failed sed doesn't silently
+# install a zero-byte ralph_loop.sh.
+set -o pipefail
 
 # Configuration
 INSTALL_DIR="$HOME/.local/bin"
@@ -336,16 +339,23 @@ EOF
 # Install global ralph_loop.sh
 install_ralph_loop() {
     log "INFO" "Installing global ralph_loop.sh..."
-    
-    # Create modified ralph_loop.sh for global operation (strip CR for WSL/Windows CRLF source)
-    sed \
-        -e "s|RALPH_HOME=\"\$HOME/.ralph\"|RALPH_HOME=\"\$HOME/.ralph\"|g" \
-        -e "s|\$script_dir/ralph_monitor.sh|\$RALPH_HOME/ralph_monitor.sh|g" \
-        -e "s|\$script_dir/ralph_loop.sh|\$RALPH_HOME/ralph_loop.sh|g" \
-        "$SCRIPT_DIR/ralph_loop.sh" | tr -d $'\r' > "$RALPH_HOME/ralph_loop.sh"
-    
+
+    # TAP-636: previously this used sed | tr without pipefail and targeted
+    # `$script_dir` (lowercase) — ralph_loop.sh uses `$SCRIPT_DIR`, so the
+    # sed rules never matched and the whole pipeline was effectively just a
+    # CRLF stripper. A failing sed would also slip past `set -e` because the
+    # pipeline's exit came from `tr`. Replace with tmp + tr + `bash -n` syntax
+    # check + atomic mv so silent zero-byte installs can't happen.
+    local tmp="$RALPH_HOME/ralph_loop.sh.install.tmp.$$"
+    tr -d $'\r' < "$SCRIPT_DIR/ralph_loop.sh" > "$tmp"
+    if ! bash -n "$tmp"; then
+        rm -f "$tmp"
+        log "ERROR" "Deployed ralph_loop.sh failed syntax check"
+        return 1
+    fi
+    mv -f "$tmp" "$RALPH_HOME/ralph_loop.sh"
     chmod +x "$RALPH_HOME/ralph_loop.sh"
-    
+
     log "SUCCESS" "Global ralph_loop.sh installed"
 }
 
@@ -826,7 +836,7 @@ case "${1:-install}" in
         rm -f "$INSTALL_DIR/ralph" "$INSTALL_DIR/ralph-monitor" "$INSTALL_DIR/ralph-setup" \
               "$INSTALL_DIR/ralph-import" "$INSTALL_DIR/ralph-migrate" "$INSTALL_DIR/ralph-enable" \
               "$INSTALL_DIR/ralph-enable-ci" "$INSTALL_DIR/ralph-sdk" "$INSTALL_DIR/ralph-doctor" \
-              "$INSTALL_DIR/ralph-upgrade"
+              "$INSTALL_DIR/ralph-upgrade" "$INSTALL_DIR/ralph-upgrade-project"
         rm -rf "$RALPH_HOME"
         log "SUCCESS" "Ralph for Claude Code uninstalled"
         ;;
