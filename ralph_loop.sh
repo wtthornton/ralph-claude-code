@@ -1845,6 +1845,7 @@ ralph_validate_hooks() {
                         rm -f "${_settings_tmp:-}"
                         log_status "ERROR" "Failed to safely patch $project_settings — leaving unchanged"
                     fi
+                fi
             fi
         fi
     fi
