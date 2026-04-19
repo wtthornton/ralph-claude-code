@@ -164,10 +164,10 @@ class FileStateBackend(RalphStateBackend):
         except ValueError:
             return 0
 
-    async def _write_text(self, path: Path, content: str) -> None:
-        """Write text to a file."""
-        async with aiofiles.open(path, "w", encoding="utf-8") as f:
-            await f.write(content)
+    # NOTE: _write_text removed in TAP-625 — every text writer now uses
+    # _atomic_write so a SIGTERM between truncate and write can no longer
+    # leave a zero-byte counter that silently reads back as 0 (rate-limit
+    # bypass). Mirrors the bash atomic_write helper from TAP-535.
 
     # --- Status ---
 
@@ -197,13 +197,13 @@ class FileStateBackend(RalphStateBackend):
         return await self._read_int(self.ralph_dir / ".call_count")
 
     async def write_call_count(self, count: int) -> None:
-        await self._write_text(self.ralph_dir / ".call_count", f"{count}\n")
+        await self._atomic_write(self.ralph_dir / ".call_count", f"{count}\n")
 
     async def read_last_reset(self) -> int:
         return await self._read_int(self.ralph_dir / ".last_reset")
 
     async def write_last_reset(self, timestamp: int) -> None:
-        await self._write_text(self.ralph_dir / ".last_reset", f"{timestamp}\n")
+        await self._atomic_write(self.ralph_dir / ".last_reset", f"{timestamp}\n")
 
     # --- Session ---
 
@@ -211,7 +211,7 @@ class FileStateBackend(RalphStateBackend):
         return await self._read_text(self.ralph_dir / ".claude_session_id")
 
     async def write_session_id(self, session_id: str) -> None:
-        await self._write_text(self.ralph_dir / ".claude_session_id", session_id + "\n")
+        await self._atomic_write(self.ralph_dir / ".claude_session_id", session_id + "\n")
 
     # --- Task Plan ---
 
@@ -219,7 +219,7 @@ class FileStateBackend(RalphStateBackend):
         return await self._read_text(self.ralph_dir / "fix_plan.md")
 
     async def write_fix_plan(self, content: str) -> None:
-        await self._write_text(self.ralph_dir / "fix_plan.md", content)
+        await self._atomic_write(self.ralph_dir / "fix_plan.md", content)
 
     # --- Session Lifecycle (SDK-CONTEXT-3) ---
 

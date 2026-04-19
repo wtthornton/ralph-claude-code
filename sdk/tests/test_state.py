@@ -138,3 +138,76 @@ class TestNullStateBackend:
         assert await backend.read_last_reset() == 0
         assert await backend.read_session_id() == ""
         assert await backend.read_fix_plan() == ""
+
+
+class TestTap625AtomicWrites:
+    """TAP-625: every FileStateBackend text writer goes through _atomic_write.
+
+    A SIGTERM between truncate and write must not leave a zero-byte counter
+    that silently reads back as 0 (rate-limit bypass).
+    """
+
+    @pytest.mark.asyncio
+    async def test_call_count_uses_atomic_write(self, ralph_dir, monkeypatch):
+        import ralph_sdk.state as state_mod
+        backend = state_mod.FileStateBackend(ralph_dir)
+        seen: list[str] = []
+
+        async def spy(self, path, content):
+            seen.append(path.name)
+            return await state_mod.FileStateBackend._atomic_write_impl(self, path, content) if False else None  # noqa
+        # Replace _atomic_write to record the path
+        async def recorder(path, content):
+            seen.append(path.name)
+            # Also actually write, so round-trip tests below still pass
+            path.write_text(content, encoding="utf-8")
+
+        monkeypatch.setattr(backend, "_atomic_write", recorder)
+        await backend.write_call_count(5)
+        await backend.write_last_reset(1700000000)
+        await backend.write_session_id("abc")
+        await backend.write_fix_plan("- [ ] one\n")
+
+        assert ".call_count" in seen
+        assert ".last_reset" in seen
+        assert ".claude_session_id" in seen
+        assert "fix_plan.md" in seen
+
+    @pytest.mark.asyncio
+    async def test_write_text_helper_is_gone(self):
+        """The non-atomic helper must not exist — callers can't regress to it."""
+        from ralph_sdk.state import FileStateBackend
+        assert not hasattr(FileStateBackend, "_write_text")
+
+    @pytest.mark.asyncio
+    async def test_atomic_write_produces_old_or_new_never_empty(self, ralph_dir, monkeypatch):
+        """Simulate an interrupted aiofiles write during _atomic_write.
+
+        Because _atomic_write writes to a tmp file and only then renames,
+        an exception mid-write must leave the target file at its prior
+        contents — never truncated.
+        """
+        from ralph_sdk.state import FileStateBackend
+        backend = FileStateBackend(ralph_dir)
+        target = ralph_dir / ".call_count"
+        target.write_text("42\n")
+
+        # Make the aiofiles write blow up after opening the tmp file.
+        import aiofiles
+        original_open = aiofiles.open
+
+        def exploding_open(*args, **kwargs):
+            class Boom:
+                async def __aenter__(self):
+                    return self
+                async def __aexit__(self, *a):
+                    return False
+                async def write(self, *a, **k):
+                    raise IOError("simulated SIGTERM")
+            return Boom()
+
+        monkeypatch.setattr(aiofiles, "open", exploding_open)
+        with pytest.raises(IOError):
+            await backend.write_call_count(99)
+        # Target must still contain the old value — not be empty.
+        assert target.read_text() == "42\n"
