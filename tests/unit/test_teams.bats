@@ -105,8 +105,8 @@ teardown() {
     grep -q "background: true" "$PROJECT_ROOT/.claude/agents/ralph-bg-tester.md"
 }
 
-@test "TEAMS-3: ralph-bg-tester.md uses model: sonnet" {
-    grep -q "model: sonnet" "$PROJECT_ROOT/.claude/agents/ralph-bg-tester.md"
+@test "TEAMS-3: ralph-bg-tester.md uses model: haiku" {
+    grep -q "model: haiku" "$PROJECT_ROOT/.claude/agents/ralph-bg-tester.md"
 }
 
 @test "TEAMS-3: ralph-bg-tester.md has Bash tool" {
