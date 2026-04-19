@@ -108,6 +108,52 @@ EOF
 # Robustness: filenames with spaces are handled safely (was hazard with `cat $files`)
 # =============================================================================
 
+_seed_status() {
+    # Build a status.json with a hostile COMPLETED_TASK payload using jq so
+    # all escaping is exact.
+    local payload="$1"
+    jq -n --arg task "$payload" \
+        '{WORK_TYPE:"IMPLEMENTATION", EXIT_SIGNAL:false, circuit_breaker_state:"CLOSED",
+          COMPLETED_TASK:$task, loop_mcp_calls:{tapps_mcp:0, docs_mcp:0}}' \
+        > "$RALPH_DIR/status.json"
+}
+
+@test "TAP-651: record_metric escapes control chars in completed_task" {
+    local hostile=$'task with \\backslash\nand newline\tand tab "and quote"'
+    _seed_status "$hostile"
+    record_metric
+
+    local file
+    file=$(ls "$METRICS_DIR"/*.jsonl 2>/dev/null | head -1)
+    [[ -n "$file" ]]
+    # Whole file must parse as valid JSONL — pre-fix the \n + \\ payload
+    # would have produced invalid JSON via the hand-rolled printf escaping.
+    run jq -s '.' "$file"
+    assert_success
+    run jq -r '.completed_task' "$file"
+    assert_success
+    [[ "$output" == *"backslash"* ]]
+    [[ "$output" == *"newline"* ]]
+    [[ "$output" == *"quote"* ]]
+}
+
+@test "TAP-651: record_metric produces valid JSONL for a multi-byte UTF-8 task" {
+    # 201 codepoints of €; jq's [0:200] slice is codepoint-aware, so output
+    # must be exactly 200 codepoints and still parse as valid JSON.
+    local utf8=""
+    local i
+    for i in {1..201}; do utf8+="€"; done
+    _seed_status "$utf8"
+    record_metric
+
+    local file
+    file=$(ls "$METRICS_DIR"/*.jsonl 2>/dev/null | head -1)
+    run jq -s '.' "$file"
+    assert_success
+    run jq -r '.completed_task | length' "$file"
+    [[ "$output" == "200" ]]
+}
+
 @test "TAP-533: file path with spaces is processed without word splitting" {
     # Even though metric files are normally YYYY-MM.jsonl, simulate a hostile
     # filename to prove the array-quoted path is robust.

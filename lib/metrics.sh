@@ -57,19 +57,32 @@ record_metric() {
         session_id=$(cat "$session_file" 2>/dev/null | head -1)
     fi
 
-    # Build JSON line (no jq dependency — manual construction)
+    # TAP-651: build the JSONL line with jq so arbitrary content in
+    # completed_task (backslashes, control chars, quotes) is properly
+    # escaped and multi-byte UTF-8 isn't truncated mid-character. jq's
+    # string slicing is codepoint-aware.
     local metric_line
-    metric_line=$(printf '{"timestamp":"%s","loop_count":%s,"session_id":"%s","work_type":"%s","exit_signal":%s,"api_calls":%s,"circuit_breaker_state":"%s","completed_task":"%s","mcp_tapps_calls":%s,"mcp_docs_calls":%s}' \
-        "$timestamp" \
-        "$loop_count" \
-        "$session_id" \
-        "$work_type" \
-        "$exit_signal" \
-        "$call_count" \
-        "$cb_state" \
-        "$(echo "$completed_task" | sed 's/"/\\"/g' | head -c 200)" \
-        "$mcp_tapps_calls" \
-        "$mcp_docs_calls")
+    metric_line=$(jq -cn \
+        --arg timestamp "$timestamp" \
+        --arg session_id "$session_id" \
+        --arg work_type "$work_type" \
+        --arg cb_state "$cb_state" \
+        --arg completed_task "$completed_task" \
+        --argjson loop_count "${loop_count:-0}" \
+        --argjson exit_signal "${exit_signal:-false}" \
+        --argjson call_count "${call_count:-0}" \
+        --argjson mcp_tapps_calls "${mcp_tapps_calls:-0}" \
+        --argjson mcp_docs_calls "${mcp_docs_calls:-0}" \
+        '{timestamp: $timestamp,
+          loop_count: $loop_count,
+          session_id: $session_id,
+          work_type: $work_type,
+          exit_signal: $exit_signal,
+          api_calls: $call_count,
+          circuit_breaker_state: $cb_state,
+          completed_task: $completed_task[0:200],
+          mcp_tapps_calls: $mcp_tapps_calls,
+          mcp_docs_calls: $mcp_docs_calls}')
 
     echo "$metric_line" >> "$month_file"
 }

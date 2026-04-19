@@ -32,6 +32,13 @@ ralph_import_issue() {
         return 1
     fi
 
+    # TAP-651: reject anything that isn't a plain positive integer so a
+    # crafted --issue '0,"evil":"x"' can't splice into the metadata JSON.
+    if [[ ! "$issue_num" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Error: Invalid issue number: $issue_num (must be a positive integer)" >&2
+        return 1
+    fi
+
     # Detect repo from git remote
     local repo
     repo=$(_gh_detect_repo)
@@ -59,16 +66,16 @@ ralph_import_issue() {
 
     echo "Importing issue #$issue_num: $title"
 
-    # Store issue metadata
-    cat > "$ralph_dir/.github_issue.json" << ISSUEEOF
-{
-    "number": $issue_num,
-    "title": $(echo "$title" | jq -Rs .),
-    "state": "$state",
-    "repo": "$repo",
-    "imported_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-}
-ISSUEEOF
+    # TAP-651: defense in depth — build the metadata JSON via jq so every
+    # field is properly escaped even if upstream validation regressed.
+    jq -n \
+        --argjson number "$issue_num" \
+        --arg title "$title" \
+        --arg state "$state" \
+        --arg repo "$repo" \
+        --arg imported_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        '{number: $number, title: $title, state: $state, repo: $repo, imported_at: $imported_at}' \
+        > "$ralph_dir/.github_issue.json"
 
     # Check if body has checkboxes (markdown task list)
     if echo "$body" | grep -qE '^\s*-\s*\[[ x]\]'; then
@@ -298,12 +305,24 @@ ralph_batch_process() {
         local progress="($((i + 1))/$total)"
         echo "=== $progress Processing issue #$issue_num ==="
 
+        # TAP-651: validate here too so the results[] JSON can't be
+        # corrupted by a malformed batch entry even if that entry is
+        # rejected downstream.
+        if [[ ! "$issue_num" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Skipping invalid issue number: $issue_num" >&2
+            results+=("$(jq -nc --arg raw "$issue_num" '{issue: $raw, status: "invalid"}')")
+            ((failed++))
+            [[ "$stop_on_failure" == "true" ]] && break
+            echo ""
+            continue
+        fi
+
         # Import and run
         if ralph_import_issue "$issue_num"; then
-            results+=("{\"issue\": $issue_num, \"status\": \"imported\"}")
+            results+=("$(jq -nc --argjson issue "$issue_num" '{issue: $issue, status: "imported"}')")
             ((success++))
         else
-            results+=("{\"issue\": $issue_num, \"status\": \"failed\"}")
+            results+=("$(jq -nc --argjson issue "$issue_num" '{issue: $issue, status: "failed"}')")
             ((failed++))
             if [[ "$stop_on_failure" == "true" ]]; then
                 echo "Stopping on failure (--stop-on-failure)"
