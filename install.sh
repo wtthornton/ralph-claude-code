@@ -679,6 +679,48 @@ store_source_dir() {
     echo "$SCRIPT_DIR" > "$RALPH_HOME/.source_dir"
 }
 
+# TAP-574: Sync global Claude skills from templates/skills/global/ into
+# ~/.claude/skills/ with sidecar-based idempotency.
+install_global_skills() {
+    local skills_src="$SCRIPT_DIR/templates/skills/global"
+    local skills_dst="$HOME/.claude/skills"
+    local version
+    version=$(get_source_version)
+    [[ -z "$version" ]] && version="unknown"
+
+    if [[ ! -d "$skills_src" ]]; then
+        log "INFO" "No templates/skills/global/ in source — skipping skill sync"
+        return 0
+    fi
+
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib/skills_install.sh"
+
+    log "INFO" "Syncing global Claude skills into $skills_dst ..."
+    if skills_install_global "$skills_src" "$skills_dst" "$version"; then
+        log "SUCCESS" "Global skills synced"
+    else
+        log "WARN" "Global skill sync reported an error — continuing"
+    fi
+}
+
+# TAP-574: Remove Ralph-managed files from ~/.claude/skills/ during uninstall.
+# Never touches user-authored skills or user-modified files.
+remove_global_skills() {
+    local skills_dir="$HOME/.claude/skills"
+    [[ -d "$skills_dir" ]] || return 0
+
+    if [[ ! -f "$SCRIPT_DIR/lib/skills_install.sh" ]]; then
+        return 0
+    fi
+
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib/skills_install.sh"
+
+    log "INFO" "Removing Ralph-managed global skills (user-authored files preserved) ..."
+    skills_uninstall_global "$skills_dir" || true
+}
+
 # Main installation
 main() {
     echo "🚀 Installing Ralph for Claude Code globally..."
@@ -692,6 +734,7 @@ main() {
     install_sdk
     install_upgrade_command
     store_source_dir
+    install_global_skills
     check_path
 
     echo ""
@@ -756,6 +799,7 @@ upgrade() {
     install_sdk
     install_upgrade_command
     store_source_dir
+    install_global_skills
     cleanup_stale_files
     check_path
 
@@ -778,6 +822,7 @@ case "${1:-install}" in
         ;;
     uninstall)
         log "INFO" "Uninstalling Ralph for Claude Code..."
+        remove_global_skills
         rm -f "$INSTALL_DIR/ralph" "$INSTALL_DIR/ralph-monitor" "$INSTALL_DIR/ralph-setup" \
               "$INSTALL_DIR/ralph-import" "$INSTALL_DIR/ralph-migrate" "$INSTALL_DIR/ralph-enable" \
               "$INSTALL_DIR/ralph-enable-ci" "$INSTALL_DIR/ralph-sdk" "$INSTALL_DIR/ralph-doctor" \

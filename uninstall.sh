@@ -6,6 +6,7 @@ set -e
 # Configuration
 INSTALL_DIR="$HOME/.local/bin"
 RALPH_HOME="$HOME/.ralph"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors
 RED='\033[0;31m'
@@ -132,6 +133,33 @@ remove_commands() {
     fi
 }
 
+# TAP-574: Remove Ralph-managed global skills from ~/.claude/skills/.
+# Only deletes files whose current hash matches the .ralph-managed sidecar.
+# User-authored skills and user-modified files are preserved.
+# Sources lib/skills_install.sh from either the source repo (SCRIPT_DIR)
+# or the installed location (RALPH_HOME/lib) — whichever is present.
+remove_global_skills() {
+    local skills_dir="$HOME/.claude/skills"
+    [[ -d "$skills_dir" ]] || return 0
+
+    local lib=""
+    if [[ -f "$SCRIPT_DIR/lib/skills_install.sh" ]]; then
+        lib="$SCRIPT_DIR/lib/skills_install.sh"
+    elif [[ -f "$RALPH_HOME/lib/skills_install.sh" ]]; then
+        lib="$RALPH_HOME/lib/skills_install.sh"
+    else
+        log "INFO" "Skills library not found — skipping global skill cleanup"
+        return 0
+    fi
+
+    # shellcheck disable=SC1090
+    source "$lib"
+
+    log "INFO" "Removing Ralph-managed global skills (user-authored files preserved)..."
+    skills_uninstall_global "$skills_dir" || true
+    log "SUCCESS" "Global skills cleanup complete"
+}
+
 # Remove Ralph home directory containing templates, scripts, and libraries
 # Uses: RALPH_HOME environment variable
 # Behavior: Removes directory recursively if it exists
@@ -161,6 +189,7 @@ main() {
 
     echo ""
     remove_commands
+    remove_global_skills
     remove_ralph_home
 
     echo ""
