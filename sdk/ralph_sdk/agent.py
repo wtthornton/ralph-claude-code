@@ -1340,9 +1340,10 @@ class RalphAgent:
                 if obj.get("type") == "result":
                     if "session_id" in obj:
                         self.session_id = obj["session_id"]
-                    # Extract token usage from result message
-                    self._last_tokens_in += obj.get("input_tokens", 0)
-                    self._last_tokens_out += obj.get("output_tokens", 0)
+                    # Claude Code emits token counts nested under "usage".
+                    usage = obj.get("usage") or {}
+                    self._last_tokens_in += usage.get("input_tokens", 0)
+                    self._last_tokens_out += usage.get("output_tokens", 0)
                     return
             except json.JSONDecodeError:
                 continue

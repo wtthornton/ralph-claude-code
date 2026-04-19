@@ -209,3 +209,44 @@ class TestRalphAgent:
         agent = RalphAgent(config=config, project_dir=project_dir)
         result = agent.run_sync()
         assert result.loop_count == 1
+
+
+class TestExtractSessionId:
+    """Regression coverage for TAP-621: tokens live under obj['usage']."""
+
+    def _agent(self, project_dir, config):
+        return RalphAgent(config=config, project_dir=project_dir)
+
+    def test_tokens_extracted_from_usage_nested(self, project_dir, config):
+        agent = self._agent(project_dir, config)
+        stdout = json.dumps({
+            "type": "result",
+            "session_id": "abc-123",
+            "usage": {"input_tokens": 1234, "output_tokens": 567},
+        })
+        agent._extract_session_id(stdout)
+        assert agent.session_id == "abc-123"
+        assert agent._last_tokens_in == 1234
+        assert agent._last_tokens_out == 567
+
+    def test_missing_usage_does_not_raise(self, project_dir, config):
+        agent = self._agent(project_dir, config)
+        stdout = json.dumps({"type": "result", "session_id": "abc-456"})
+        agent._extract_session_id(stdout)
+        assert agent.session_id == "abc-456"
+        assert agent._last_tokens_in == 0
+        assert agent._last_tokens_out == 0
+
+    def test_top_level_input_tokens_ignored(self, project_dir, config):
+        """Top-level input_tokens/output_tokens must NOT be summed (pre-TAP-621 bug)."""
+        agent = self._agent(project_dir, config)
+        stdout = json.dumps({
+            "type": "result",
+            "session_id": "abc-789",
+            "input_tokens": 9999,
+            "output_tokens": 9999,
+            "usage": {"input_tokens": 1, "output_tokens": 2},
+        })
+        agent._extract_session_id(stdout)
+        assert agent._last_tokens_in == 1
+        assert agent._last_tokens_out == 2
