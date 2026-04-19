@@ -565,7 +565,7 @@ cleanup_stale_files() {
 
     # Remove commands that no longer exist in the current version
     # (future-proofing: if a command is ever retired)
-    local valid_commands=(ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade)
+    local valid_commands=(ralph ralph-monitor ralph-setup ralph-import ralph-migrate ralph-enable ralph-enable-ci ralph-sdk ralph-doctor ralph-upgrade ralph-upgrade-project)
     for cmd_file in "$INSTALL_DIR"/ralph*; do
         [[ -f "$cmd_file" ]] || continue
         local cmd_name
