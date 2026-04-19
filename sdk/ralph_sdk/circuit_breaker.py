@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -319,7 +320,13 @@ class CircuitBreaker:
 
             if cb.opened_at:
                 try:
-                    opened_time = time.mktime(time.strptime(cb.opened_at, "%Y-%m-%dT%H:%M:%S%z"))
+                    # TAP-630: use a tz-aware datetime.timestamp() instead of
+                    # time.mktime — the latter treats the struct_time as local
+                    # time and ignores tm_gmtoff on macOS/BSD/musl, shifting
+                    # the cooldown by the local UTC offset.
+                    opened_time = datetime.strptime(
+                        cb.opened_at, "%Y-%m-%dT%H:%M:%S%z"
+                    ).timestamp()
                 except (ValueError, OverflowError):
                     # Can't parse timestamp, allow transition
                     opened_time = 0.0

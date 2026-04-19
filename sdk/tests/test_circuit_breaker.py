@@ -160,3 +160,47 @@ class TestBehaviorMatchesBash:
         state = await cb.get_state()
         assert state["state"] == "CLOSED"
         assert await cb.can_proceed() is True
+
+
+class TestTap630CooldownTimezone:
+    """TAP-630: cooldown elapsed-time must be correct across timezones.
+
+    Before the fix, time.mktime(strptime(..., "%z")) silently ignored the
+    offset on macOS/BSD/musl, shifting the cooldown by the local UTC offset.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cooldown_expired_in_utc_plus_offset(self, backend):
+        """opened_at 45m ago with a non-UTC offset must count as elapsed."""
+        from datetime import datetime, timedelta, timezone
+        cb = CircuitBreaker(
+            state_backend=backend,
+            cooldown_minutes=30,
+        )
+        # 45 minutes ago, expressed with a +0900 offset
+        jst = timezone(timedelta(hours=9))
+        opened = datetime.now(tz=jst) - timedelta(minutes=45)
+        await backend.write_circuit_breaker({
+            "state": "OPEN",
+            "opened_at": opened.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        })
+        # 45 min > 30 min cooldown → must transition to HALF_OPEN + allow
+        assert await cb.can_proceed() is True
+        state = await cb.get_state()
+        assert state["state"] == "HALF_OPEN"
+
+    @pytest.mark.asyncio
+    async def test_cooldown_not_expired_in_utc_plus_offset(self, backend):
+        """opened_at 5m ago with +0900 must still block (5 < 30 cooldown)."""
+        from datetime import datetime, timedelta, timezone
+        cb = CircuitBreaker(
+            state_backend=backend,
+            cooldown_minutes=30,
+        )
+        jst = timezone(timedelta(hours=9))
+        opened = datetime.now(tz=jst) - timedelta(minutes=5)
+        await backend.write_circuit_breaker({
+            "state": "OPEN",
+            "opened_at": opened.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        })
+        assert await cb.can_proceed() is False
