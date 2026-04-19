@@ -1821,10 +1821,30 @@ ralph_validate_hooks() {
                 if grep -q '"powershell -' "$project_settings" 2>/dev/null; then
                     log_status "WARN" "Project .claude/settings.json has hooks calling bare 'powershell' which is unavailable in WSL"
                     log_status "INFO" "Auto-patching: replacing 'powershell' with 'powershell.exe' in $project_settings"
-                    # Only patch bare 'powershell' — skip lines already using 'powershell.exe'
-                    sed -i '/powershell\.exe/!s/"powershell -/"powershell.exe -/g' "$project_settings"
-                    log_status "SUCCESS" "Patched powershell → powershell.exe in project settings"
-                fi
+                    # TAP-643: edit JSON semantically via jq (walk .command
+                    # fields only) instead of `sed -i`. The old sed pattern
+                    # blindly rewrote any line containing `"powershell -`,
+                    # corrupting description strings and leaving the file
+                    # half-written on failure.
+                    local _settings_tmp _settings_bak
+                    _settings_tmp=$(mktemp "${project_settings}.XXXXXX") || {
+                        log_status "ERROR" "Cannot create tmp file next to $project_settings"; :
+                    }
+                    if [[ -n "${_settings_tmp:-}" ]] && \
+                       jq 'walk(if type == "object" and has("command") and ((.command | type) == "string") and (.command | test("^powershell\\s"))
+                             then .command |= sub("^powershell"; "powershell.exe")
+                             else . end)' "$project_settings" > "$_settings_tmp" 2>/dev/null && \
+                       [[ -s "$_settings_tmp" ]] && \
+                       jq empty "$_settings_tmp" 2>/dev/null; then
+                        _settings_bak="${RALPH_DIR:-.ralph}/.upgrade-backups/settings.$(date +%s).json"
+                        mkdir -p "$(dirname "$_settings_bak")" 2>/dev/null || true
+                        cp -p "$project_settings" "$_settings_bak" 2>/dev/null || true
+                        mv -f "$_settings_tmp" "$project_settings"
+                        log_status "SUCCESS" "Patched powershell → powershell.exe in project settings (backup: $_settings_bak)"
+                    else
+                        rm -f "${_settings_tmp:-}"
+                        log_status "ERROR" "Failed to safely patch $project_settings — leaving unchanged"
+                    fi
             fi
         fi
     fi
