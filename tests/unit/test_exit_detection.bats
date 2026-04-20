@@ -1448,6 +1448,286 @@ EOF
     [[ "$output" != *"Do NOT ask questions"* ]] || fail "Should not inject guidance when asking_questions=false"
 }
 
+# =============================================================================
+# CONDITIONAL DOCS-MCP GUIDANCE (ralph_task_is_docs_related)
+# =============================================================================
+# docs-mcp prompt guidance used to be injected on every loop where the MCP was
+# reachable. That is ~200 tokens of system-prompt per iteration even on pure
+# code tasks that will never call a docs_* tool. We now gate the block on a
+# task-text classifier; these tests pin the gate's behavior so a future
+# refactor does not silently revert to unconditional injection.
+
+_source_docs_classifier_and_context() {
+    log_status() { :; }
+    ralph_inject_continue_state() { :; }
+    export RALPH_CONTINUE_STATE_FILE="/nonexistent"
+    export RALPH_MCP_DOCS_AVAILABLE="true"
+    eval "$(sed -n '/^ralph_task_is_docs_related()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+    eval "$(sed -n '/^build_loop_context()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+}
+
+@test "ralph_task_is_docs_related: matches README task" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Update README with install instructions
+EOF
+    _source_docs_classifier_and_context
+    run ralph_task_is_docs_related
+    assert_success
+}
+
+@test "ralph_task_is_docs_related: matches ADR task" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Write ADR for new auth backend
+EOF
+    _source_docs_classifier_and_context
+    run ralph_task_is_docs_related
+    assert_success
+}
+
+@test "ralph_task_is_docs_related: matches architecture task" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Document architecture of the plan optimizer
+EOF
+    _source_docs_classifier_and_context
+    run ralph_task_is_docs_related
+    assert_success
+}
+
+@test "ralph_task_is_docs_related: matches changelog task" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Generate changelog for v2.8 release
+EOF
+    _source_docs_classifier_and_context
+    run ralph_task_is_docs_related
+    assert_success
+}
+
+@test "ralph_task_is_docs_related: matches .md file target" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Update docs/specs/epic-foo.md with new section
+EOF
+    _source_docs_classifier_and_context
+    run ralph_task_is_docs_related
+    assert_success
+}
+
+@test "ralph_task_is_docs_related: rejects pure code task" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Refactor circuit breaker state transitions in lib/circuit_breaker.sh
+EOF
+    _source_docs_classifier_and_context
+    run ralph_task_is_docs_related
+    assert_failure
+}
+
+@test "ralph_task_is_docs_related: does not match 'docker' (word boundary)" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Add docker sandbox runtime detection
+EOF
+    _source_docs_classifier_and_context
+    run ralph_task_is_docs_related
+    assert_failure
+}
+
+@test "ralph_task_is_docs_related: fails closed on empty fix_plan.md" {
+    : > "$RALPH_DIR/fix_plan.md"
+    _source_docs_classifier_and_context
+    run ralph_task_is_docs_related
+    assert_failure
+}
+
+@test "ralph_task_is_docs_related: fails closed when fix_plan.md missing" {
+    rm -f "$RALPH_DIR/fix_plan.md"
+    _source_docs_classifier_and_context
+    run ralph_task_is_docs_related
+    assert_failure
+}
+
+@test "build_loop_context: injects docs-mcp block for docs task" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Update README with new install steps
+EOF
+    _source_docs_classifier_and_context
+    run build_loop_context 1
+    assert_success
+    [[ "$output" == *"docs-mcp available"* ]] || fail "Expected docs-mcp guidance, got: $output"
+}
+
+@test "build_loop_context: omits docs-mcp block for code task" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Refactor the loop context builder in ralph_loop.sh
+EOF
+    _source_docs_classifier_and_context
+    run build_loop_context 1
+    assert_success
+    [[ "$output" != *"docs-mcp available"* ]] || fail "Should not inject docs-mcp guidance on code task, got: $output"
+}
+
+@test "build_loop_context: omits docs-mcp block when MCP unavailable even on docs task" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Update README
+EOF
+    log_status() { :; }
+    ralph_inject_continue_state() { :; }
+    export RALPH_CONTINUE_STATE_FILE="/nonexistent"
+    export RALPH_MCP_DOCS_AVAILABLE="false"
+    eval "$(sed -n '/^ralph_task_is_docs_related()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+    eval "$(sed -n '/^build_loop_context()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+    run build_loop_context 1
+    assert_success
+    [[ "$output" != *"docs-mcp available"* ]] || fail "Should not inject when MCP is unavailable"
+}
+
+# =============================================================================
+# TAPPS-MCP GUIDANCE INJECTION (build_loop_context)
+# =============================================================================
+# Unlike docs-mcp, tapps-mcp guidance is unconditional when the server is
+# reachable — its recommended tools (quality_gate, lookup_docs, score_file,
+# impact_analysis) apply to any code-modifying loop, not just docs work. If a
+# future change gates these behind a classifier, update the tests below too.
+
+_source_tapps_context() {
+    log_status() { :; }
+    ralph_inject_continue_state() { :; }
+    export RALPH_CONTINUE_STATE_FILE="/nonexistent"
+    eval "$(sed -n '/^ralph_task_is_docs_related()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+    eval "$(sed -n '/^build_loop_context()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+}
+
+@test "build_loop_context: injects tapps-mcp block when server is reachable" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Refactor circuit breaker state transitions
+EOF
+    export RALPH_MCP_TAPPS_AVAILABLE="true"
+    export RALPH_MCP_DOCS_AVAILABLE="false"
+    _source_tapps_context
+    run build_loop_context 1
+    assert_success
+    [[ "$output" == *"tapps-mcp available"* ]] || fail "Expected tapps-mcp guidance, got: $output"
+    [[ "$output" == *"tapps_quality_gate"* ]] || fail "Expected tapps_quality_gate in guidance, got: $output"
+}
+
+@test "build_loop_context: omits tapps-mcp block when server unavailable" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Refactor circuit breaker state transitions
+EOF
+    export RALPH_MCP_TAPPS_AVAILABLE="false"
+    export RALPH_MCP_DOCS_AVAILABLE="false"
+    _source_tapps_context
+    run build_loop_context 1
+    assert_success
+    [[ "$output" != *"tapps-mcp available"* ]] || fail "Should not inject tapps-mcp when server unreachable"
+}
+
+@test "build_loop_context: tapps-mcp block is injected regardless of task type" {
+    # Pure docs task should still get tapps-mcp guidance (unconditional gating)
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Update README with install instructions
+EOF
+    export RALPH_MCP_TAPPS_AVAILABLE="true"
+    export RALPH_MCP_DOCS_AVAILABLE="false"
+    _source_tapps_context
+    run build_loop_context 1
+    assert_success
+    [[ "$output" == *"tapps-mcp available"* ]] || fail "tapps-mcp guidance should fire on docs tasks too"
+}
+
+@test "build_loop_context: docs-mcp and tapps-mcp blocks can coexist on docs task" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Generate changelog for v2.8 release
+EOF
+    export RALPH_MCP_TAPPS_AVAILABLE="true"
+    export RALPH_MCP_DOCS_AVAILABLE="true"
+    _source_tapps_context
+    run build_loop_context 1
+    assert_success
+    [[ "$output" == *"docs-mcp available"* ]] || fail "Expected docs-mcp guidance"
+    [[ "$output" == *"tapps-mcp available"* ]] || fail "Expected tapps-mcp guidance"
+    local len=${#output}
+    [[ $len -le 1500 ]] || fail "Context exceeded 1500-char cap: $len chars"
+}
+
+# =============================================================================
+# TAPPS-BRAIN GUIDANCE INJECTION (build_loop_context)
+# =============================================================================
+# Projects register tapps-brain via their own MCP config (`.mcp.json` or
+# `claude mcp add`) — Ralph only probes + steers. Like tapps-mcp, the
+# guidance is unconditional when the probe succeeds, because brain_recall at
+# task start applies broadly and pays for itself by avoiding re-derivation of
+# prior context.
+
+@test "build_loop_context: injects tapps-brain block when server is reachable" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Refactor circuit breaker state transitions
+EOF
+    export RALPH_MCP_TAPPS_AVAILABLE="false"
+    export RALPH_MCP_DOCS_AVAILABLE="false"
+    export RALPH_MCP_BRAIN_AVAILABLE="true"
+    _source_tapps_context
+    run build_loop_context 1
+    assert_success
+    [[ "$output" == *"tapps-brain available"* ]] || fail "Expected tapps-brain guidance, got: $output"
+    [[ "$output" == *"brain_recall"* ]] || fail "Expected brain_recall in guidance, got: $output"
+}
+
+@test "build_loop_context: omits tapps-brain block when server unavailable" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Refactor circuit breaker state transitions
+EOF
+    export RALPH_MCP_TAPPS_AVAILABLE="false"
+    export RALPH_MCP_DOCS_AVAILABLE="false"
+    export RALPH_MCP_BRAIN_AVAILABLE="false"
+    _source_tapps_context
+    run build_loop_context 1
+    assert_success
+    [[ "$output" != *"tapps-brain available"* ]] || fail "Should not inject tapps-brain when unreachable"
+}
+
+@test "build_loop_context: all three MCP blocks coexist and fit within cap" {
+    cat > "$RALPH_DIR/fix_plan.md" << 'EOF'
+- [ ] Generate changelog for v2.8 release
+EOF
+    export RALPH_MCP_TAPPS_AVAILABLE="true"
+    export RALPH_MCP_DOCS_AVAILABLE="true"
+    export RALPH_MCP_BRAIN_AVAILABLE="true"
+    _source_tapps_context
+    run build_loop_context 1
+    assert_success
+    [[ "$output" == *"docs-mcp available"* ]] || fail "Expected docs-mcp guidance"
+    [[ "$output" == *"tapps-mcp available"* ]] || fail "Expected tapps-mcp guidance"
+    [[ "$output" == *"tapps-brain available"* ]] || fail "Expected tapps-brain guidance"
+    local len=${#output}
+    [[ $len -le 1500 ]] || fail "Context exceeded 1500-char cap: $len chars"
+}
+
+@test "RALPH_DEFAULT_ALLOWED_TOOLS includes mcp__tapps-brain__*" {
+    # Protect against future refactors that forget the allow pattern — without
+    # it every brain_* call would hit a permission denial even when the server
+    # is reachable.
+    run grep 'RALPH_DEFAULT_ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
+    [[ "$output" == *"mcp__tapps-brain__*"* ]] || fail "Missing mcp__tapps-brain__* in defaults"
+}
+
+@test "templates/ralphrc.template includes mcp__tapps-brain__*" {
+    run grep 'ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../templates/ralphrc.template"
+    [[ "$output" == *"mcp__tapps-brain__*"* ]] || fail "Missing mcp__tapps-brain__* in template"
+}
+
+@test "ralph_print_mcp_status reports tapps-brain" {
+    # Stub portable_timeout + log_status + CLAUDE_CODE_CMD to isolate probe logic
+    log_status() { :; }
+    portable_timeout() { shift; "$@"; }
+    export CLAUDE_CODE_CMD="echo"
+
+    # Source just the probe + printer
+    eval "$(sed -n '/^ralph_probe_mcp_servers()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+    eval "$(sed -n '/^ralph_print_mcp_status()/,/^}/p' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh")"
+
+    run ralph_print_mcp_status
+    assert_success
+    [[ "$output" == *"tapps-brain"* ]] || fail "Expected tapps-brain line in status output, got: $output"
+}
+
 # --- Stale Exit Signals Tests (Issue #194) ---
 
 @test "startup resets stale exit signals before main loop" {

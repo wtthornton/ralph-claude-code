@@ -75,7 +75,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.7.2"
+RALPH_VERSION="2.8.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -136,7 +136,7 @@ CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-15}"
 CLAUDE_OUTPUT_FORMAT="${CLAUDE_OUTPUT_FORMAT:-json}"
 # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
 # Issue #154: Store default so we can detect user customization (needed for agent mode fallback)
-RALPH_DEFAULT_ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*"
+RALPH_DEFAULT_ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*,mcp__tapps-brain__*"
 CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-$RALPH_DEFAULT_ALLOWED_TOOLS}"
 CLAUDE_USE_CONTINUE="${CLAUDE_USE_CONTINUE:-true}"
 CLAUDE_SESSION_FILE="$RALPH_DIR/.claude_session_id" # Session ID persistence file
@@ -2033,6 +2033,41 @@ validate_allowed_tools() {
     return 0
 }
 
+# ralph_task_is_docs_related: return 0 when the next unchecked task/Linear
+# issue looks docs-flavored (README, ADR, architecture, changelog, API doc,
+# runbook, tutorial, onboarding, or a .md file target). Used to gate docs-mcp
+# prompt guidance — injecting it on pure-code loops wastes ~200 tokens each
+# iteration. Fail-closed: any error / empty task text returns non-zero so the
+# block is omitted (preferred over a false positive steering Claude toward an
+# irrelevant tool surface).
+ralph_task_is_docs_related() {
+    local task_text=""
+
+    if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        # linear_get_next_task may not be sourced in unit-test harnesses;
+        # guard with command -v so the classifier still returns cleanly.
+        if command -v linear_get_next_task &>/dev/null; then
+            task_text=$(linear_get_next_task 2>/dev/null) || task_text=""
+        fi
+    elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
+        task_text=$(grep -m1 -E "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || task_text=""
+    fi
+
+    [[ -z "$task_text" ]] && return 1
+
+    # Case-insensitive keyword match. Word boundaries (via (^|[^a-z])...) keep
+    # "doc" from matching inside "dock" or "docker". ".md" is anchored to avoid
+    # matching mid-word ("commander", "somediff.md5").
+    shopt -s nocasematch
+    local rc=1
+    if [[ "$task_text" =~ (^|[^a-z])(docs?|documentation|readme|adr|architecture|changelog|release[[:space:]-]?notes|api[[:space:]-]?docs?|runbook|tutorial|onboarding)([^a-z]|$) ]] \
+       || [[ "$task_text" =~ \.md([[:space:]\)\]\.\,\;\:]|$) ]]; then
+        rc=0
+    fi
+    shopt -u nocasematch
+    return $rc
+}
+
 # Build loop context for Claude Code session
 # Provides loop-specific context via --append-system-prompt
 build_loop_context() {
@@ -2114,15 +2149,36 @@ build_loop_context() {
 
     # TAP-585 (epic TAP-583): Inject MCP "when to use" guidance, gated on the
     # capability flags set by ralph_probe_mcp_servers() at startup. Without
-    # explicit guidance Claude defaults to Read/Grep/Bash for things docs-mcp
-    # could do better/cheaper. tapps-mcp block deferred until its tool surface
-    # is inventoried (see TAP-583 open question).
-    if [[ "${RALPH_MCP_DOCS_AVAILABLE:-false}" == "true" ]]; then
+    # explicit guidance Claude defaults to Read/Grep/Bash for things the MCP
+    # servers do better/cheaper.
+    #
+    # docs-mcp: gated on the current task looking docs-related (keywords in
+    # the next unchecked task / Linear issue). Code-only loops skip the block
+    # to save ~200 prompt tokens per iteration. Fail-closed classifier.
+    # tapps-mcp: injected unconditionally when reachable — the recommended
+    # tools (quality_gate, lookup_docs, score_file) apply to virtually any
+    # code-modifying loop, so gating would be a false economy.
+    if [[ "${RALPH_MCP_DOCS_AVAILABLE:-false}" == "true" ]] && ralph_task_is_docs_related; then
         context+="docs-mcp available: prefer mcp__docs-mcp__* (docs_generate_adr/changelog/architecture, docs_check_links/drift/freshness, docs_module_map) for docs/ADR/changelog/README/API tasks instead of hand-writing. "
     fi
+    if [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]]; then
+        context+="tapps-mcp available: use mcp__tapps-mcp__tapps_quality_gate before declaring work complete, tapps_lookup_docs before calling external library APIs, tapps_score_file on modified Python files, tapps_impact_analysis before non-trivial refactors. "
+    fi
+    # tapps-brain: cross-session memory / learning. Projects register this MCP
+    # via their own `.mcp.json` (dockerized HTTP server). When reachable,
+    # steer Claude toward brain_recall at task start and the learn_*/remember
+    # tools at epic boundaries so loops compound knowledge instead of starting
+    # cold. Unconditional when the probe succeeds — recall-at-start applies
+    # broadly and costs less than re-deriving context from scratch.
+    if [[ "${RALPH_MCP_BRAIN_AVAILABLE:-false}" == "true" ]]; then
+        context+="tapps-brain available: call mcp__tapps-brain__brain_recall at task start to surface prior learnings, brain_remember when a fix was non-obvious and worth preserving, and brain_learn_success / brain_learn_failure at epic boundaries to feed the quality loop. "
+    fi
 
-    # Limit total length to ~800 chars (raised from 500 to fit MCP guidance — TAP-585)
-    echo "${context:0:800}"
+    # Limit total length to ~1500 chars (raised from 800→1200→1500 as MCP
+    # blocks were added — docs-mcp + tapps-mcp + tapps-brain run ~770 chars
+    # combined, and that is before any loop-state / previous-summary prefix).
+    # Truncation was silently dropping MCP guidance at the old caps.
+    echo "${context:0:1500}"
 }
 
 # Get session file age in hours (cross-platform)
@@ -2969,18 +3025,23 @@ ralph_mcp_failure_summary() {
 
 # =============================================================================
 # TAP-584 (epic TAP-583): Probe global MCP server availability ONCE at startup.
-# Sets RALPH_MCP_TAPPS_AVAILABLE / RALPH_MCP_DOCS_AVAILABLE in the environment.
-# Downstream stories (TAP-585 prompt guidance, TAP-588 counters, TAP-587 sub-
-# agents) gate on these flags so a missing MCP doesn't trigger false-positive
-# guidance pointing Claude at tools that don't exist.
+# Sets RALPH_MCP_TAPPS_AVAILABLE / RALPH_MCP_DOCS_AVAILABLE /
+# RALPH_MCP_BRAIN_AVAILABLE in the environment. Downstream stories (TAP-585
+# prompt guidance, TAP-588 counters, TAP-587 sub-agents) gate on these flags
+# so a missing MCP doesn't trigger false-positive guidance pointing Claude at
+# tools that don't exist.
 #
 # Fail-loud, never fail-stop: probe errors (timeout, parse failure, CLI missing)
-# set both flags `false` + WARN, loop continues normally. Same posture as the
+# set all flags `false` + WARN, loop continues normally. Same posture as the
 # TAP-536 fail-loud Linear handling — never abstain into a destructive default.
+#
+# Server registration: each MCP server is registered by the *project* (via
+# `.mcp.json` or `claude mcp add`), not by Ralph. Ralph only probes and steers.
 # =============================================================================
 ralph_probe_mcp_servers() {
     export RALPH_MCP_TAPPS_AVAILABLE="false"
     export RALPH_MCP_DOCS_AVAILABLE="false"
+    export RALPH_MCP_BRAIN_AVAILABLE="false"
 
     if ! command -v "$CLAUDE_CODE_CMD" &>/dev/null; then
         log_status "WARN" "MCP probe skipped: '$CLAUDE_CODE_CMD' not in PATH"
@@ -3013,15 +3074,27 @@ ralph_probe_mcp_servers() {
     else
         log_status "WARN" "MCP probe: docs-mcp NOT reachable — Ralph will not steer Claude toward it"
     fi
+
+    # tapps-brain typically runs as a dockerized HTTP MCP server (not a uv
+    # subprocess like tapps-mcp/docs-mcp), so it has no orphan-cleanup story —
+    # its container lifecycle is managed outside Ralph.
+    if echo "$probe_output" | grep -E '(^|[[:space:]])tapps-brain([[:space:]:]|$)' \
+       | grep -qiE '(connected|✓|ok|ready|running)'; then
+        RALPH_MCP_BRAIN_AVAILABLE="true"
+        log_status "INFO" "MCP probe: tapps-brain reachable"
+    else
+        log_status "WARN" "MCP probe: tapps-brain NOT reachable — Ralph will not steer Claude toward it"
+    fi
 }
 
-# TAP-584: Print a 2-line capability summary for `ralph --mcp-status`. Runs the
-# probe (so the user can debug "why isn't Ralph using the MCP" without grepping
-# logs), then prints both flag values regardless of probe outcome.
+# TAP-584: Print a capability summary for `ralph --mcp-status`. Runs the probe
+# (so the user can debug "why isn't Ralph using the MCP" without grepping
+# logs), then prints all flag values regardless of probe outcome.
 ralph_print_mcp_status() {
     ralph_probe_mcp_servers >&2
-    echo "tapps-mcp: ${RALPH_MCP_TAPPS_AVAILABLE:-false}"
-    echo "docs-mcp:  ${RALPH_MCP_DOCS_AVAILABLE:-false}"
+    echo "tapps-mcp:   ${RALPH_MCP_TAPPS_AVAILABLE:-false}"
+    echo "docs-mcp:    ${RALPH_MCP_DOCS_AVAILABLE:-false}"
+    echo "tapps-brain: ${RALPH_MCP_BRAIN_AVAILABLE:-false}"
 }
 
 # =============================================================================
@@ -4755,7 +4828,7 @@ IMPORTANT: This command must be run from a Ralph project directory.
 
 Options:
     -V, --version           Show version and exit
-    --mcp-status            Probe configured MCP servers (tapps-mcp, docs-mcp) and exit
+    --mcp-status            Probe configured MCP servers (tapps-mcp, docs-mcp, tapps-brain) and exit
     -h, --help              Show this help message
     -c, --calls NUM         Set max calls per hour (default: $MAX_CALLS_PER_HOUR)
     -p, --prompt FILE       Set prompt file (default: $PROMPT_FILE)

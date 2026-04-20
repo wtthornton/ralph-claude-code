@@ -55,10 +55,13 @@ CLAUDE_OUTPUT_FORMAT="json"
 # agent mode, edit disallowedTools in .claude/agents/ralph.md instead.
 #
 # MCP TOOLS (TAP-583):
-# mcp__tapps-mcp__* and mcp__docs-mcp__* are permitted by default so prompt
-# guidance from build_loop_context() (TAP-585) doesn't hit permission denials.
-# Remove the patterns to disable a specific MCP per-project.
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*"
+# mcp__tapps-mcp__*, mcp__docs-mcp__*, and mcp__tapps-brain__* are permitted
+# by default so prompt guidance from build_loop_context() (TAP-585) doesn't
+# hit permission denials. Each MCP server is probed at startup — if it is not
+# registered in the project's own Claude MCP config (e.g. `.mcp.json` or
+# `claude mcp add`), Ralph skips the guidance block for it. Remove a pattern
+# here to disable that MCP per-project even if the server is running.
+ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*,mcp__tapps-brain__*"
 
 # =============================================================================
 # SESSION MANAGEMENT

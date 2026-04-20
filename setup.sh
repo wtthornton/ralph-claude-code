@@ -116,6 +116,20 @@ RALPHRCEOF
     chmod 600 .ralphrc
 fi
 
+# Install Ralph-local skills (.claude/skills/) — project-scoped, auto-loaded
+# by Claude Code when it runs here. Separate from tier-S global skills which
+# are installed into ~/.claude/skills/ machine-wide.
+if [[ -d "$TEMPLATES_DIR/skills-local" ]]; then
+    for src_dir in "$TEMPLATES_DIR/skills-local"/*/; do
+        [[ -d "$src_dir" ]] || continue
+        name="$(basename "$src_dir")"
+        src_skill="$src_dir/SKILL.md"
+        [[ -f "$src_skill" ]] || continue
+        mkdir -p ".claude/skills/$name"
+        tr -d $'\r' < "$src_skill" > ".claude/skills/$name/SKILL.md"
+    done
+fi
+
 # Initialize git (skip if already initialized)
 if [[ ! -d ".git" ]]; then
     git init

@@ -21,6 +21,12 @@ set -euo pipefail
 RALPH_HOME="${HOME}/.ralph"
 RALPH_TEMPLATES="${RALPH_HOME}/templates"
 RALPH_AGENTS_SOURCE="${RALPH_TEMPLATES}/agents"
+# Ralph-local skills (per-project, not tier-S global). Distinct from
+# templates/skills/global/ which is managed by lib/skills_install.sh and
+# synced into ~/.claude/skills/ machine-wide. skills-local/ is synced into
+# each project's .claude/skills/ so the skill only loads when Claude runs
+# in that project.
+RALPH_SKILLS_LOCAL_SOURCE="${RALPH_TEMPLATES}/skills-local"
 MAX_UPGRADE_BACKUPS=5
 VERSION="1.0.0"
 
@@ -265,6 +271,83 @@ upgrade_agents() {
             [[ -f "$dst_agent" ]] && chmod u+w "$dst_agent" 2>/dev/null || true
             tr -d $'\r' < "$src_agent" > "$dst_agent"
             log SUCCESS "Updated agent: $name"
+        fi
+        PROJ_UPDATED=$((PROJ_UPDATED + 1))
+    done
+}
+
+# =============================================================================
+# Tier 1: Ralph-local skills — sync project-scoped skills into .claude/skills/
+# =============================================================================
+# Mirrors upgrade_agents() but for skills that should only load when Claude
+# runs inside this project (vs. tier-S skills installed globally by
+# lib/skills_install.sh). Keeps user-authored skill dirs alone — only refreshes
+# directories whose name matches a Ralph-shipped template.
+upgrade_skills_local() {
+    local project="$1"
+    local skills_dst="$project/.claude/skills"
+
+    if [[ ! -d "$RALPH_SKILLS_LOCAL_SOURCE" ]]; then
+        # No local skills shipped in this Ralph build — nothing to do. Not
+        # a warning: early Ralph versions have no skills-local/ templates.
+        return 0
+    fi
+
+    # Only create the destination when we actually have a skill to place.
+    # Avoids littering .claude/skills/ on projects that never had one.
+    local have_any=false
+    for src_dir in "$RALPH_SKILLS_LOCAL_SOURCE"/*/; do
+        [[ -d "$src_dir" ]] || continue
+        have_any=true
+        break
+    done
+    [[ "$have_any" == "false" ]] && return 0
+
+    if [[ ! -d "$skills_dst" ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            log DRY "Would create $skills_dst/"
+        else
+            mkdir -p "$skills_dst"
+            log SUCCESS "Created skills directory"
+        fi
+    fi
+
+    for src_dir in "$RALPH_SKILLS_LOCAL_SOURCE"/*/; do
+        [[ -d "$src_dir" ]] || continue
+        local name
+        name="$(basename "$src_dir")"
+        local src_skill="$src_dir/SKILL.md"
+        local dst_dir="$skills_dst/$name"
+        local dst_skill="$dst_dir/SKILL.md"
+
+        if [[ ! -f "$src_skill" ]]; then
+            log WARN "Skipping skill with no SKILL.md: $name"
+            continue
+        fi
+
+        if [[ -f "$dst_skill" ]]; then
+            local src_hash dst_hash
+            src_hash=$(tr -d $'\r' < "$src_skill" | sha256sum | cut -d' ' -f1)
+            dst_hash=$(tr -d $'\r' < "$dst_skill" | sha256sum | cut -d' ' -f1)
+
+            if [[ "$src_hash" == "$dst_hash" ]]; then
+                PROJ_SKIPPED=$((PROJ_SKIPPED + 1))
+                continue
+            fi
+        fi
+
+        if [[ "$DRY_RUN" == "true" ]]; then
+            if [[ -f "$dst_skill" ]]; then
+                log DRY "Would update skill: $name"
+            else
+                log DRY "Would create skill: $name"
+            fi
+        else
+            create_backup "$project" ".claude/skills/$name/SKILL.md"
+            mkdir -p "$dst_dir"
+            [[ -f "$dst_skill" ]] && chmod u+w "$dst_skill" 2>/dev/null || true
+            tr -d $'\r' < "$src_skill" > "$dst_skill"
+            log SUCCESS "Updated skill: $name"
         fi
         PROJ_UPDATED=$((PROJ_UPDATED + 1))
     done
@@ -528,6 +611,9 @@ upgrade_single_project() {
 
     # Tier 1: agents
     upgrade_agents "$project"
+
+    # Tier 1: Ralph-local skills (.claude/skills/)
+    upgrade_skills_local "$project"
 
     # Tier 2: .ralphrc
     merge_ralphrc "$project"
