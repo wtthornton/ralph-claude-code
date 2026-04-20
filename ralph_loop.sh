@@ -2096,7 +2096,7 @@ build_loop_context() {
         if [[ -n "$next_task" ]]; then
             context+="Next issue: ${next_task}. "
         fi
-        context+="Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means commits are on \`main\`. Before Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists. If work is only on a branch, attempt to self-merge (\`gh pr merge --squash --auto\` or \`git merge\`); if the merge is blocked (no permission, required checks pending, conflicts you cannot resolve this loop), post a Linear comment listing unmerged SHAs and leave the ticket **In Progress** so Ralph retries next loop — do NOT move it to In Review for this. RALPH IS HEADLESS: there is no human on standby to review, merge, or answer questions. 'In Review' is reserved for HARD blockers only, limited to these four: (1) missing credentials/API keys you cannot obtain, (2) explicit budget/spend cap reached, (3) destructive or security-sensitive action requiring human authorization (prod DB migration, secret rotation, mass deletion), (4) genuinely ambiguous product decision where both interpretations have real cost and neither is safe. Everything else is NOT In Review: unmerged branch → In Progress + retry; flaky tests / red build / lint failures → fix them; 'code probably works but I'm unsure' → Done if AC substantively met; 'needs code review' → Done (no reviewer exists); 'couldn't figure out how to do X' → leave In Progress, Ralph retries with fresh context next loop. When you do use In Review, the last Linear comment MUST name one of the four valid reasons above — if you cannot, pick Done or In Progress instead. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain."
+        context+="Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means commits are on \`main\`. Before Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists. If work is only on a branch, attempt to self-merge (\`gh pr merge --squash --auto\` or \`git merge\`); if the merge is blocked (no permission, required checks pending, conflicts you cannot resolve this loop), post a Linear comment listing unmerged SHAs and leave the ticket **In Progress** so Ralph retries next loop — do NOT move it to In Review for this. RALPH IS HEADLESS: there is no human on standby to review, merge, or answer questions. There is no human reviewer. 'In Review' is reserved for HARD blockers only — the EXACT four: (1) missing credentials/API keys a human must generate (e.g. OAuth token requiring browser click-through), (2) explicit budget/spend cap reached, (3) irreversible destructive operation requiring human sign-off: production database migration dropping data, secret rotation, mass deletion, credential exfiltration risk — NOT security bug fixes or hardening (those are Done), (4) genuinely ambiguous product decision where both interpretations have real cost and neither is a safe default. When in doubt between Done and In Review: pick Done if AC is substantively met, In Progress if it is not. NEVER pick In Review out of uncertainty. Everything else is NOT In Review: unmerged branch → In Progress + retry; flaky tests / red build / lint failures → fix them; 'code probably works but I'm unsure' → Done if AC substantively met; 'needs code review' → Done (no reviewer exists); security bug fix or hardening → Done; 'couldn't figure out how to do X' → leave In Progress, Ralph retries with fresh context next loop. When you do use In Review, the last Linear comment MUST name one of the four exact reasons above verbatim — if you cannot, pick Done or In Progress instead. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain."
     # Bug #3 Fix: Support indented markdown checkboxes with [[:space:]]* pattern
     elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local incomplete_tasks
@@ -2161,7 +2161,10 @@ build_loop_context() {
     if [[ "${RALPH_MCP_DOCS_AVAILABLE:-false}" == "true" ]] && ralph_task_is_docs_related; then
         context+="docs-mcp available: prefer mcp__docs-mcp__* (docs_generate_adr/changelog/architecture, docs_check_links/drift/freshness, docs_module_map) for docs/ADR/changelog/README/API tasks instead of hand-writing. "
     fi
-    if [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]]; then
+    # tapps-mcp: code quality tools (quality_gate, score_file, impact_analysis).
+    # Skip on pure-docs loops — these tools add no value for README/ADR/changelog
+    # work and cost ~150 tokens of prompt space per iteration.
+    if [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]] && ! ralph_task_is_docs_related; then
         context+="tapps-mcp available: use mcp__tapps-mcp__tapps_quality_gate before declaring work complete, tapps_lookup_docs before calling external library APIs, tapps_score_file on modified Python files, tapps_impact_analysis before non-trivial refactors. "
     fi
     # tapps-brain: cross-session memory / learning. Projects register this MCP
@@ -2752,6 +2755,32 @@ build_claude_command() {
             prompt_content=$(cat "$prompt_file")
             # Issue #163: Scope prompt to monorepo service if --service was specified
             prompt_content=$(ralph_scope_prompt_for_service "$prompt_content")
+
+            # In agent mode there is no --append-system-prompt, so inject loop context
+            # (loop count, remaining tasks, MCP guidance, CB state) into the user turn.
+            # Without this, build_loop_context() output was computed but silently dropped —
+            # MCP guidance (tapps-mcp, tapps-brain, docs-mcp) never reached Claude.
+            if [[ -n "$loop_context" ]]; then
+                prompt_content="${prompt_content}
+
+---
+${loop_context}"
+            fi
+
+            # CTXMGMT-1: Inject a progressive (trimmed) view of fix_plan.md so the agent
+            # can use it directly without a full-file Read tool call on large plans.
+            if [[ "${RALPH_PROGRESSIVE_CONTEXT:-false}" == "true" && "${RALPH_TASK_SOURCE:-file}" == "file" ]]; then
+                local _plan_excerpt
+                _plan_excerpt=$(ralph_build_progressive_context 2>/dev/null) || _plan_excerpt=""
+                if [[ -n "$_plan_excerpt" ]]; then
+                    prompt_content="${prompt_content}
+
+---
+Current fix_plan.md (progressive view — use this directly, skip re-reading the full file unless you need completed items):
+${_plan_excerpt}"
+                fi
+            fi
+
             CLAUDE_CMD_ARGS+=("-p" "$prompt_content")
         fi
         log_status "INFO" "Using agent mode: --agent ${RALPH_AGENT_NAME:-ralph}"

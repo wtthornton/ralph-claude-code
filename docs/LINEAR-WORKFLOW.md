@@ -20,12 +20,14 @@ This is the source of truth for how Ralph (and the humans working alongside it) 
 Before marking a ticket Done, Claude runs `git log main --grep='<TICKET-ID>'` and confirms at least one matching commit exists on `main`. If the work is only on a branch, Claude **attempts to self-merge** (`gh pr merge --squash --auto`, direct `git merge`, etc.). If the merge is blocked (no permission, required checks pending, unresolvable conflicts), Claude posts a Linear comment listing the unmerged commit SHAs and leaves the ticket **In Progress** so Ralph retries next loop. "Unmerged branch" is explicitly **not** an In Review reason — before this rule change it was the single largest cause of In Review pileup in tapps-brain.
 
 **R2. In Review is for hard blockers only — the four valid reasons.**
-Ralph is headless. There is no human on standby to review code, answer questions, or make cosmetic decisions. Claude may move a ticket to In Review **only** when all four of these are true: work cannot proceed, Claude cannot self-resolve in another loop, no safe default exists, and the blocker matches one of:
+Ralph is headless. There is no human on standby to review code, answer questions, or make cosmetic decisions. There is no human reviewer — "needs code review" is not a valid reason. Claude may move a ticket to In Review **only** when all four of these are true: work cannot proceed, Claude cannot self-resolve in another loop, no safe default exists, and the blocker matches **exactly** one of:
 
 1. **Missing credentials or API keys** Claude cannot generate (e.g. a third-party OAuth token requiring a human to click through).
 2. **Explicit budget or spend cap reached** (Anthropic spend limit, cloud quota) where continuing would exceed sanctioned cost.
-3. **Destructive or security-sensitive action requiring human authorization** — production database migration, secret rotation, mass deletion, credential exfil risk.
+3. **Irreversible destructive operation requiring human sign-off** — production database migration dropping data, secret rotation, mass deletion, credential exfiltration risk. Security *bug fixes* and security *hardening* are **not** this reason — those go to Done.
 4. **Genuinely ambiguous product decision** where both interpretations have real cost and neither is a safe default.
+
+**When in doubt between Done and In Review: pick Done if AC is substantively met, In Progress if it is not. Never pick In Review out of uncertainty.**
 
 The last Linear comment on an In Review ticket **must** name one of these four reasons verbatim. If Claude cannot name one, it picks Done (if AC substantively met) or leaves the ticket In Progress for retry.
 
@@ -33,9 +35,11 @@ The last Linear comment on an In Review ticket **must** name one of these four r
 - Branch not yet on `main` → In Progress, retry (R1)
 - Flaky tests, red build, lint failures → fix them
 - "Code probably works but I'm unsure" → Done if AC substantively met
-- "Needs code review" → Done (no reviewer exists)
+- "Needs code review" → Done (no reviewer exists — there is no human reviewer)
 - "Couldn't figure out how to do X this loop" → In Progress, retry with fresh context
 - Cosmetic AC mismatch (numbers/wording off) → Done
+- Security bug fix or security hardening → Done (this is not a destructive action)
+- Uncertainty about correctness → Done if AC substantively met
 
 **R3. Ralph does not pick up In Review or In Progress.**
 `linear_get_next_task` queries only `state.type IN [backlog, unstarted]`. Tickets left in In Review or In Progress become invisible to Ralph and pile up silently. Because In Review is now rare, In Progress becomes Ralph's self-retry lane — a ticket sitting In Progress across loops means Ralph is working it, not that a human must act.
