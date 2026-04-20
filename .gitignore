@@ -14,6 +14,8 @@
 .ralph/.upgrade-backups/
 .ralph/.files_modified_this_loop
 .ralph/.ralph_run_id
+.ralph/.import_graph.json
+.ralph/.plan_section_hashes
 
 # tapps-mcp runtime probe output (timestamped, host-specific)
 .tapps-mcp/
