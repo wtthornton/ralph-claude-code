@@ -13,6 +13,7 @@
 .ralph/.last_output_length
 .ralph/.upgrade-backups/
 .ralph/.files_modified_this_loop
+.ralph/.ralph_run_id
 
 # tapps-mcp runtime probe output (timestamped, host-specific)
 .tapps-mcp/

@@ -4398,6 +4398,42 @@ main() {
         log_status "INFO" "Reset exit signals for fresh start"
     fi
 
+    # SESSION-SCOPE: Generate a unique run ID for this Ralph invocation.
+    # Written to .ralph_run_id so on-stop.sh can detect session boundaries and
+    # reset session-accumulator fields (cost, tokens, subagents) in status.json
+    # instead of inheriting stale totals from a previous (possibly killed) run.
+    local _run_id
+    _run_id="$(date +%s 2>/dev/null || echo "0")${RANDOM}"
+    printf '%s\n' "$_run_id" > "$RALPH_DIR/.ralph_run_id"
+
+    # Zero out session accumulator fields in status.json so on-stop.sh starts
+    # fresh. Merge onto the existing file so other fields (circuit breaker,
+    # linear_*, last_action) survive the restart.
+    if [[ -f "$STATUS_FILE" ]] && command -v jq &>/dev/null; then
+        local _sreset_tmp
+        _sreset_tmp=$(mktemp "${STATUS_FILE}.XXXXXX")
+        jq --arg rid "$_run_id" \
+           '.ralph_run_id = $rid |
+            .session_cost_usd = 0 |
+            .session_input_tokens = 0 |
+            .session_output_tokens = 0 |
+            .session_cache_read_tokens = 0 |
+            .session_cache_create_tokens = 0 |
+            .session_subagents = {} |
+            .session_mcp_calls = {"tapps_mcp":0,"docs_mcp":0,"by_tool":{}}' \
+           "$STATUS_FILE" > "$_sreset_tmp" 2>/dev/null \
+        && mv "$_sreset_tmp" "$STATUS_FILE" \
+        || rm -f "$_sreset_tmp" 2>/dev/null
+    elif command -v jq &>/dev/null; then
+        jq -n --arg rid "$_run_id" \
+           '{ralph_run_id: $rid,
+             session_cost_usd: 0, session_input_tokens: 0, session_output_tokens: 0,
+             session_cache_read_tokens: 0, session_cache_create_tokens: 0,
+             session_subagents: {}, session_mcp_calls: {"tapps_mcp":0,"docs_mcp":0,"by_tool":{}}}' \
+           > "$STATUS_FILE" 2>/dev/null || true
+    fi
+    log_status "INFO" "Session run ID: $_run_id"
+
     # Reset circuit breaker for new session
     if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
         if [[ "$_had_crash" == "true" ]]; then

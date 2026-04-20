@@ -584,6 +584,89 @@ _build_settings_json() {
 }
 
 # =============================================================================
+# Tier 2: Merge — .ralph/PROMPT.md (replace only the RALPH-managed section)
+# =============================================================================
+# Replaces the content between <!-- RALPH:START ... --> and <!-- RALPH:END -->
+# in the project's PROMPT.md with the matching section from the template.
+# Lines outside the markers are never touched, preserving user customizations.
+# Projects without the markers (old installs) are skipped — never overwritten.
+
+upgrade_prompt_md() {
+    local project="$1"
+    local project_prompt="$project/.ralph/PROMPT.md"
+    local template_prompt="$RALPH_TEMPLATES/PROMPT.md"
+
+    [[ ! -f "$template_prompt" ]] && { log WARN "No PROMPT.md template at $template_prompt — skipping"; return 0; }
+    [[ ! -f "$project_prompt" ]] && { log SKIP ".ralph/PROMPT.md does not exist — skipping marker upgrade"; return 0; }
+
+    # Only upgrade if the project file already has the markers (opt-in)
+    if ! grep -q '<!-- RALPH:START' "$project_prompt" 2>/dev/null; then
+        log SKIP ".ralph/PROMPT.md has no RALPH markers — skipping (add markers or re-run ralph-setup to opt in)"
+        return 0
+    fi
+    if ! grep -q '<!-- RALPH:END' "$project_prompt" 2>/dev/null; then
+        log WARN ".ralph/PROMPT.md has RALPH:START but no RALPH:END — skipping (malformed markers)"
+        return 0
+    fi
+
+    # Extract the managed section from the template
+    local template_section
+    template_section=$(awk '/<!-- RALPH:START/,/<!-- RALPH:END -->/' "$template_prompt" 2>/dev/null)
+    if [[ -z "$template_section" ]]; then
+        log WARN "PROMPT.md template has empty RALPH section — skipping"
+        return 0
+    fi
+
+    # Extract the managed section from the project file for comparison
+    local project_section
+    project_section=$(awk '/<!-- RALPH:START/,/<!-- RALPH:END -->/' "$project_prompt" 2>/dev/null)
+
+    # Hash comparison — skip if already current (strip CR for cross-platform)
+    local tmpl_hash proj_hash
+    tmpl_hash=$(printf '%s' "$template_section" | tr -d $'\r' | sha256sum | cut -d' ' -f1)
+    proj_hash=$(printf '%s' "$project_section" | tr -d $'\r' | sha256sum | cut -d' ' -f1)
+    if [[ "$tmpl_hash" == "$proj_hash" ]]; then
+        PROJ_SKIPPED=$((PROJ_SKIPPED + 1))
+        return 0
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log DRY "Would refresh RALPH-managed section in .ralph/PROMPT.md"
+        PROJ_UPDATED=$((PROJ_UPDATED + 1))
+        return 0
+    fi
+
+    create_backup "$project" ".ralph/PROMPT.md"
+
+    # Replace the managed section: keep lines before START marker, inject
+    # template section, then keep lines after END marker.
+    local updated
+    updated=$(awk \
+        -v tmpl="$template_section" \
+        'BEGIN { inside=0; printed=0 }
+         /<!-- RALPH:START/ { inside=1; next }
+         /<!-- RALPH:END -->/ {
+           if (!printed) { printf "%s\n", tmpl; printed=1 }
+           inside=0; next
+         }
+         inside { next }
+         { print }' "$project_prompt" 2>/dev/null)
+
+    if [[ -z "$updated" ]]; then
+        log WARN "awk replacement produced empty output — skipping to avoid data loss"
+        return 0
+    fi
+
+    local _tmp
+    _tmp=$(mktemp "$project/.ralph/PROMPT.md.XXXXXX")
+    printf '%s\n' "$updated" > "$_tmp" && mv "$_tmp" "$project/.ralph/PROMPT.md"
+    rm -f "$_tmp" 2>/dev/null
+
+    log SUCCESS "Refreshed RALPH-managed section in .ralph/PROMPT.md"
+    PROJ_UPDATED=$((PROJ_UPDATED + 1))
+}
+
+# =============================================================================
 # Single-project orchestrator
 # =============================================================================
 
@@ -620,6 +703,9 @@ upgrade_single_project() {
 
     # Tier 2: settings.json
     merge_settings_json "$project"
+
+    # Tier 2: .ralph/PROMPT.md (marker-bounded section only)
+    upgrade_prompt_md "$project"
 
     # Prune old backups
     if [[ "$DRY_RUN" != "true" ]]; then

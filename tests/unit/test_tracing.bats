@@ -207,3 +207,26 @@ teardown() {
     # No trace file exists — should return 0
     ralph_otlp_export
 }
+
+@test "ralph_trace_record produces valid JSONL when span_name contains a literal newline" {
+    ralph_trace_start
+    local month_file="$RALPH_TRACE_DIR/$(date '+%Y-%m').jsonl"
+    # Span name with embedded newline — must not split the JSONL record
+    ralph_trace_record $'span\nwith\nnewlines' "1000" "2000" "sonnet" "10" "5" "stop"
+    [[ -f "$month_file" ]]
+    local line_count
+    line_count=$(wc -l < "$month_file")
+    [[ "$line_count" -eq 1 ]]
+    jq -e . < "$month_file" >/dev/null
+}
+
+@test "ralph_trace_record produces valid JSONL when span_name contains backslashes" {
+    ralph_trace_start
+    local month_file="$RALPH_TRACE_DIR/$(date '+%Y-%m').jsonl"
+    ralph_trace_record 'error in \path\file.log' "1000" "2000" "sonnet" "10" "5" "stop"
+    [[ -f "$month_file" ]]
+    local line_count
+    line_count=$(wc -l < "$month_file")
+    [[ "$line_count" -eq 1 ]]
+    jq -e . < "$month_file" >/dev/null
+}

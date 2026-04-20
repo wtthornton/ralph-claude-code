@@ -168,16 +168,36 @@ if [[ -f "$RALPH_DIR/.files_modified_this_loop" && -f "$RALPH_DIR/.import_graph.
   done < "$RALPH_DIR/.files_modified_this_loop"
 fi
 
+# SESSION-SCOPE: Read the run ID written by ralph_loop.sh at startup. If
+# status.json.ralph_run_id differs (stale file from a prior run that crashed
+# before the startup reset completed), zero out session accumulators so this
+# loop starts a clean session rather than inheriting stale totals.
+_current_run_id=""
+if [[ -f "$RALPH_DIR/.ralph_run_id" ]]; then
+  read -r _current_run_id < "$RALPH_DIR/.ralph_run_id" 2>/dev/null || _current_run_id=""
+fi
+_status_run_id=""
+if [[ -f "$RALPH_DIR/status.json" ]]; then
+  _status_run_id=$(jq -r '.ralph_run_id // ""' "$RALPH_DIR/status.json" 2>/dev/null || echo "")
+fi
+_new_session="false"
+if [[ -n "$_current_run_id" && "$_current_run_id" != "$_status_run_id" ]]; then
+  _new_session="true"
+fi
+
 # PERF: Read loop count and write status.json in single operation (was: jq read + date + jq write = 3 subprocesses)
 loop_count=0
 prev_session_cost=0
 prev_session_input=0
 prev_session_output=0
-if [[ -f "$RALPH_DIR/status.json" ]]; then
+if [[ -f "$RALPH_DIR/status.json" && "$_new_session" == "false" ]]; then
   loop_count=$(jq -r '.loop_count // 0' "$RALPH_DIR/status.json" 2>/dev/null || echo "0")
   prev_session_cost=$(jq -r '.session_cost_usd // 0' "$RALPH_DIR/status.json" 2>/dev/null || echo "0")
   prev_session_input=$(jq -r '.session_input_tokens // 0' "$RALPH_DIR/status.json" 2>/dev/null || echo "0")
   prev_session_output=$(jq -r '.session_output_tokens // 0' "$RALPH_DIR/status.json" 2>/dev/null || echo "0")
+elif [[ -f "$RALPH_DIR/status.json" ]]; then
+  # New session — inherit loop_count only; session accumulators start at 0
+  loop_count=$(jq -r '.loop_count // 0' "$RALPH_DIR/status.json" 2>/dev/null || echo "0")
 fi
 # Validate loop_count is numeric before arithmetic
 [[ "$loop_count" =~ ^[0-9]+$ ]] || loop_count=0
@@ -266,8 +286,11 @@ if [[ -n "$_transcript" && -f "$_transcript" ]]; then
   [[ -z "$loop_subagents_json" || "$loop_subagents_json" == "null" ]] && loop_subagents_json="{}"
 fi
 
-# Merge session sub-agent counts (previous + this loop)
-prev_subagents_json=$(jq -r '.session_subagents // {}' "$RALPH_DIR/status.json" 2>/dev/null || echo "{}")
+# Merge session sub-agent counts (previous + this loop; zero base on new session)
+prev_subagents_json="{}"
+if [[ "$_new_session" == "false" && -f "$RALPH_DIR/status.json" ]]; then
+  prev_subagents_json=$(jq -r '.session_subagents // {}' "$RALPH_DIR/status.json" 2>/dev/null || echo "{}")
+fi
 [[ -z "$prev_subagents_json" || "$prev_subagents_json" == "null" ]] && prev_subagents_json="{}"
 session_subagents_json=$(jq -cn --argjson a "$prev_subagents_json" --argjson b "$loop_subagents_json" \
   '$a as $a | $b as $b | ($a | to_entries) + ($b | to_entries) | group_by(.key) | map({(.[0].key): (map(.value) | add)}) | add // {}' 2>/dev/null || echo "{}")
@@ -294,9 +317,11 @@ if [[ -n "$_transcript" && -f "$_transcript" ]]; then
   [[ -z "$loop_mcp_calls_json" || "$loop_mcp_calls_json" == "null" ]] && loop_mcp_calls_json="$_empty_mcp_calls"
 fi
 
-# Merge session MCP-call totals (previous + this loop). Mirrors the sub-agent
-# merge above so `ralph --stats` can later trend MCP usage over a session.
-prev_mcp_calls_json=$(jq -r '.session_mcp_calls // {"tapps_mcp":0,"docs_mcp":0,"by_tool":{}}' "$RALPH_DIR/status.json" 2>/dev/null || echo "$_empty_mcp_calls")
+# Merge session MCP-call totals (previous + this loop; zero base on new session).
+prev_mcp_calls_json="$_empty_mcp_calls"
+if [[ "$_new_session" == "false" && -f "$RALPH_DIR/status.json" ]]; then
+  prev_mcp_calls_json=$(jq -r '.session_mcp_calls // {"tapps_mcp":0,"docs_mcp":0,"by_tool":{}}' "$RALPH_DIR/status.json" 2>/dev/null || echo "$_empty_mcp_calls")
+fi
 [[ -z "$prev_mcp_calls_json" || "$prev_mcp_calls_json" == "null" ]] && prev_mcp_calls_json="$_empty_mcp_calls"
 session_mcp_calls_json=$(jq -cn --argjson a "$prev_mcp_calls_json" --argjson b "$loop_mcp_calls_json" '
   {
@@ -323,9 +348,13 @@ if [[ -f "$RALPH_DIR/.call_count" ]]; then
   [[ "$fresh_calls_made" =~ ^[0-9]+$ ]] || fresh_calls_made=""
 fi
 
-# Accumulate session cache stats
-prev_session_cache_read=$(jq -r '.session_cache_read_tokens // 0' "$RALPH_DIR/status.json" 2>/dev/null || echo "0")
-prev_session_cache_create=$(jq -r '.session_cache_create_tokens // 0' "$RALPH_DIR/status.json" 2>/dev/null || echo "0")
+# Accumulate session cache stats (zero out on new session boundary)
+prev_session_cache_read=0
+prev_session_cache_create=0
+if [[ "$_new_session" == "false" && -f "$RALPH_DIR/status.json" ]]; then
+  prev_session_cache_read=$(jq -r '.session_cache_read_tokens // 0' "$RALPH_DIR/status.json" 2>/dev/null || echo "0")
+  prev_session_cache_create=$(jq -r '.session_cache_create_tokens // 0' "$RALPH_DIR/status.json" 2>/dev/null || echo "0")
+fi
 [[ "$prev_session_cache_read" =~ ^[0-9]+$ ]] || prev_session_cache_read=0
 [[ "$prev_session_cache_create" =~ ^[0-9]+$ ]] || prev_session_cache_create=0
 session_cache_read=$((prev_session_cache_read + loop_cache_read))
@@ -381,6 +410,7 @@ jq -n \
   --argjson lmc "$loop_mcp_calls_json" \
   --argjson smc "$session_mcp_calls_json" \
   --arg fcm "$fresh_calls_made" \
+  --arg rid "$_current_run_id" \
   '{
     timestamp: $ts, loop_count: $lc, status: $st, exit_signal: $es,
     tasks_completed: $td, files_modified: $fm, work_type: $wt, recommendation: $rec,
@@ -397,7 +427,8 @@ jq -n \
     loop_cache_read_tokens: $lcr, loop_cache_create_tokens: $lcc,
     session_cache_read_tokens: $scr, session_cache_create_tokens: $scc,
     loop_subagents: $lsa, session_subagents: $ssa,
-    loop_mcp_calls: $lmc, session_mcp_calls: $smc
+    loop_mcp_calls: $lmc, session_mcp_calls: $smc,
+    ralph_run_id: (if $rid == "" then null else $rid end)
   }
   | if $fcm != "" then .calls_made_this_hour = ($fcm|tonumber) else . end
   ' > "$local_tmp.hook" 2>/dev/null

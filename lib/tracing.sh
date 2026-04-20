@@ -111,20 +111,34 @@ ralph_trace_record() {
 
     local trace_file="$TRACE_DIR/$(date '+%Y-%m').jsonl"
 
-    # Build the trace record
+    # Build the trace record using jq for correct JSON escaping
     local record
-    record=$(cat <<TRACE_EOF
-{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"ralph"}},{"key":"service.version","value":{"stringValue":"${RALPH_VERSION:-unknown}"}}]},"scopeSpans":[{"scope":{"name":"ralph.loop"},"spans":[{"traceId":"${RALPH_TRACE_ID}","spanId":"${span_id}","parentSpanId":"${RALPH_PARENT_SPAN_ID}","name":"${span_name}","startTimeUnixNano":"${start_ns}","endTimeUnixNano":"${end_ns}","attributes":[{"key":"gen_ai.system","value":{"stringValue":"anthropic"}},{"key":"gen_ai.request.model","value":{"stringValue":"${model}"}},{"key":"gen_ai.usage.input_tokens","value":{"intValue":"${input_tokens}"}},{"key":"gen_ai.usage.output_tokens","value":{"intValue":"${output_tokens}"}},{"key":"gen_ai.response.finish_reason","value":{"stringValue":"${finish_reason}"}},{"key":"ralph.loop_count","value":{"intValue":"${LOOP_COUNT:-0}"}},{"key":"ralph.correlation_id","value":{"stringValue":"${RALPH_TRACE_ID}"}}]}]}]}]}
-TRACE_EOF
-    )
+    record=$(jq -cn \
+        --arg svc_ver "${RALPH_VERSION:-unknown}" \
+        --arg trace_id "${RALPH_TRACE_ID}" \
+        --arg span_id "$span_id" \
+        --arg parent_id "${RALPH_PARENT_SPAN_ID}" \
+        --arg name "$span_name" \
+        --arg start "$start_ns" \
+        --arg end "$end_ns" \
+        --arg model "$model" \
+        --arg input_tok "$input_tokens" \
+        --arg output_tok "$output_tokens" \
+        --arg finish "$finish_reason" \
+        --arg loop "${LOOP_COUNT:-0}" \
+        '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"ralph"}},{"key":"service.version","value":{"stringValue":$svc_ver}}]},"scopeSpans":[{"scope":{"name":"ralph.loop"},"spans":[{"traceId":$trace_id,"spanId":$span_id,"parentSpanId":$parent_id,"name":$name,"startTimeUnixNano":$start,"endTimeUnixNano":$end,"attributes":[{"key":"gen_ai.system","value":{"stringValue":"anthropic"}},{"key":"gen_ai.request.model","value":{"stringValue":$model}},{"key":"gen_ai.usage.input_tokens","value":{"intValue":$input_tok}},{"key":"gen_ai.usage.output_tokens","value":{"intValue":$output_tok}},{"key":"gen_ai.response.finish_reason","value":{"stringValue":$finish}},{"key":"ralph.loop_count","value":{"intValue":$loop}},{"key":"ralph.correlation_id","value":{"stringValue":$trace_id}}]}]}]}]}')
 
     # Sanitize: remove any API key patterns
-    record=$(echo "$record" | sed -E \
+    record=$(printf '%s' "$record" | sed -E \
         -e 's/sk-ant-[a-zA-Z0-9_-]+/[REDACTED]/g' \
         -e 's/sk-[a-zA-Z0-9]{20,}/[REDACTED]/g' \
         -e 's/ANTHROPIC_API_KEY=[^ "]+/ANTHROPIC_API_KEY=[REDACTED]/g')
 
-    echo "$record" >> "$trace_file"
+    if ! jq -e . <<< "$record" >/dev/null 2>&1; then
+        echo "WARN: invalid trace record, dropped" >&2
+        return 1
+    fi
+    printf '%s\n' "$record" >> "$trace_file"
 }
 
 # ralph_trace_child_span — Create a child span (for hooks/sub-agents)
@@ -145,12 +159,20 @@ ralph_trace_child_span() {
     local trace_file="$TRACE_DIR/$(date '+%Y-%m').jsonl"
 
     local record
-    record=$(cat <<CHILD_EOF
-{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"ralph"}}]},"scopeSpans":[{"scope":{"name":"ralph.hooks"},"spans":[{"traceId":"${RALPH_TRACE_ID}","spanId":"${child_span_id}","parentSpanId":"${RALPH_PARENT_SPAN_ID}","name":"${span_name}","startTimeUnixNano":"${start_ns}","endTimeUnixNano":"${end_ns}","attributes":[]}]}]}]}
-CHILD_EOF
-    )
+    record=$(jq -cn \
+        --arg trace_id "${RALPH_TRACE_ID}" \
+        --arg span_id "$child_span_id" \
+        --arg parent_id "${RALPH_PARENT_SPAN_ID}" \
+        --arg name "$span_name" \
+        --arg start "$start_ns" \
+        --arg end "$end_ns" \
+        '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"ralph"}}]},"scopeSpans":[{"scope":{"name":"ralph.hooks"},"spans":[{"traceId":$trace_id,"spanId":$span_id,"parentSpanId":$parent_id,"name":$name,"startTimeUnixNano":$start,"endTimeUnixNano":$end,"attributes":[]}]}]}]}')
 
-    echo "$record" >> "$trace_file"
+    if ! jq -e . <<< "$record" >/dev/null 2>&1; then
+        echo "WARN: invalid trace record, dropped" >&2
+        return 1
+    fi
+    printf '%s\n' "$record" >> "$trace_file"
 }
 
 # ralph_trace_rotate — Prune trace files older than retention period

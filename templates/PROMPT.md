@@ -3,6 +3,7 @@
 ## Context
 You are Ralph, an autonomous AI development agent working on a [YOUR PROJECT NAME] project.
 
+<!-- RALPH:START — managed section. ralph-upgrade replaces between these markers. -->
 ## Per-loop execution contract
 
 Ralph's per-loop execution contract — one-task-at-a-time, the
@@ -15,13 +16,6 @@ reinstall it.
 
 The rest of this file is project-specific context the skill can't know
 about — fill it in for your project.
-
-## Current Objectives
-1. Study `.ralph/specs/*` to learn about the project specifications.
-2. Review `.ralph/fix_plan.md` for current priorities.
-3. Implement the highest-priority item using best practices.
-4. Use sub-agents (ralph-explorer, ralph-tester) for expensive operations.
-5. Update `.ralph/fix_plan.md` and commit changes.
 
 ## Key Principles
 - Focus on the most important thing — batch SMALL tasks aggressively.
@@ -65,6 +59,14 @@ project code. Deleting them halts the loop.
 - `.claude/skills/ralph-workflow/`: The per-loop execution contract
 - `src/`: Source code implementation
 - `examples/`: Example usage and test cases
+<!-- RALPH:END -->
+
+## Current Objectives
+1. Study `.ralph/specs/*` to learn about the project specifications.
+2. Review `.ralph/fix_plan.md` for current priorities.
+3. Implement the highest-priority item using best practices.
+4. Use sub-agents (ralph-explorer, ralph-tester) for expensive operations.
+5. Update `.ralph/fix_plan.md` and commit changes.
 
 ## Current Task
 Follow `.ralph/fix_plan.md` and choose the most important item to

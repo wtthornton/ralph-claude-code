@@ -46,6 +46,12 @@ whether work happened — that is what this contract exists to prevent.
    - **Not an epic boundary** → skip QA. Set `TESTS_STATUS: DEFERRED`.
    - **Epic boundary** → run full QA (lint + type + test) for everything in
      the section. If anything fails, fix it before the status block.
+6.5. **Deslop pass (epic boundary only).** After QA is green, invoke the
+   `simplify` skill on the files changed in this epic. The simplify skill
+   removes dead code, unused imports, redundant comments, and speculative
+   error handling introduced during the implementation phase — never adds.
+   Re-run QA after simplify to confirm nothing regressed. Skip this step if
+   `RALPH_NO_DESLOP=true` is set in the environment or `.ralphrc`.
 7. Emit the `---RALPH_STATUS---` block (schema below).
 8. **STOP.** End your response within 2 lines of `---END_RALPH_STATUS---`.
    Do not start the next task. Do not say "moving on." The harness will
@@ -122,7 +128,8 @@ Do **not** spawn `ralph-tester`. The harness reinvokes you for the next item.
 ### Epic boundary reached
 
 Last `- [ ]` in the section; everything in the section is now `[x]`. Run
-QA via `ralph-tester`, then:
+QA via `ralph-tester`, then run the `simplify` skill on changed files, then
+re-run QA to confirm no regression:
 
 ```
 ---RALPH_STATUS---
@@ -132,11 +139,12 @@ FILES_MODIFIED: 7
 TESTS_STATUS: PASSING
 WORK_TYPE: IMPLEMENTATION
 EXIT_SIGNAL: false
-RECOMMENDATION: Epic complete, QA green. Next section.
+RECOMMENDATION: Epic complete, QA green, deslop pass done. Next section.
 ---END_RALPH_STATUS---
 ```
 
 If QA fails: fix the failures, re-run, then report. Don't ship a red epic.
+Skip simplify only if `RALPH_NO_DESLOP=true` is in environment or `.ralphrc`.
 
 ### Successful project completion
 
@@ -224,6 +232,7 @@ the harness itself.
 ## What not to do
 
 - Don't run tests after every task (see epic-boundary rules).
+- Don't skip the deslop pass at epic boundaries unless `RALPH_NO_DESLOP=true`.
 - Don't continue with busywork after `EXIT_SIGNAL: true` would be correct.
 - Don't refactor code that works. Don't add features outside the plan.
 - Don't omit the status block. Without it the harness cannot tell what
