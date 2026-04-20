@@ -282,3 +282,109 @@ NEW
     run jq -r '.loop_cost_usd' "$TEST_TEMP_DIR/.ralph/status.json"
     assert_output "0.42"
 }
+
+# =============================================================================
+# TAP-741: push-mode Linear counts — hook extracts LINEAR_OPEN_COUNT /
+# LINEAR_DONE_COUNT from RALPH_STATUS and writes them to status.json with a
+# linear_counts_at timestamp so lib/linear_backend.sh can read them without an
+# API key.
+# =============================================================================
+
+# Helper: build a Claude response with the given Linear push-mode counts.
+_status_block_with_linear_counts() {
+    local open="$1" done_c="$2"
+    local body="Worked on TAP-741.
+
+---RALPH_STATUS---
+STATUS: IN_PROGRESS
+TASKS_COMPLETED_THIS_LOOP: 0
+FILES_MODIFIED: 0
+TESTS_STATUS: NOT_RUN
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: false
+RECOMMENDATION: Test push-mode counts.
+LINEAR_OPEN_COUNT: ${open}
+LINEAR_DONE_COUNT: ${done_c}
+---END_RALPH_STATUS---"
+    jq -Rs '{result: .}' <<<"$body"
+}
+
+@test "TAP-741 hook: extracts LINEAR_OPEN_COUNT / LINEAR_DONE_COUNT into status.json" {
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_status_block_with_linear_counts 12 5)"
+    assert_success
+
+    run jq -r '.linear_open_count' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "12"
+    run jq -r '.linear_done_count' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "5"
+}
+
+@test "TAP-741 hook: stamps linear_counts_at with an ISO-8601 UTC timestamp" {
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_status_block_with_linear_counts 3 7)"
+    assert_success
+
+    run jq -r '.linear_counts_at' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_success
+    # Shape: YYYY-MM-DDTHH:MM:SSZ
+    [[ "$output" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || \
+        fail "linear_counts_at not ISO-8601 UTC: $output"
+}
+
+@test "TAP-741 hook: accepts zero counts (empty-project done signal)" {
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_status_block_with_linear_counts 0 0)"
+    assert_success
+
+    run jq -r '.linear_open_count' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "0"
+    run jq -r '.linear_done_count' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "0"
+}
+
+@test "TAP-741 hook: absent LINEAR_OPEN_COUNT / _DONE_COUNT → null fields, null timestamp" {
+    # file-mode projects never emit these fields; status.json must leave them null
+    # instead of poisoning the backend's staleness check with stale data.
+    local body="---RALPH_STATUS---
+STATUS: IN_PROGRESS
+TASKS_COMPLETED_THIS_LOOP: 0
+FILES_MODIFIED: 0
+TESTS_STATUS: NOT_RUN
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: false
+RECOMMENDATION: No Linear fields.
+---END_RALPH_STATUS---"
+    local input; input=$(jq -Rs '{result: .}' <<<"$body")
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$input"
+    assert_success
+
+    run jq -r '.linear_open_count' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "null"
+    run jq -r '.linear_done_count' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "null"
+    run jq -r '.linear_counts_at' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "null"
+}
+
+@test "TAP-741 hook: non-numeric LINEAR_OPEN_COUNT is coerced to null" {
+    local body="---RALPH_STATUS---
+STATUS: IN_PROGRESS
+TASKS_COMPLETED_THIS_LOOP: 0
+FILES_MODIFIED: 0
+TESTS_STATUS: NOT_RUN
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: false
+RECOMMENDATION: Bad input.
+LINEAR_OPEN_COUNT: many
+LINEAR_DONE_COUNT: 4
+---END_RALPH_STATUS---"
+    local input; input=$(jq -Rs '{result: .}' <<<"$body")
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$input"
+    assert_success
+
+    # Malformed open_count → null; valid done_count passes through.
+    run jq -r '.linear_open_count' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "null"
+    run jq -r '.linear_done_count' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "4"
+}

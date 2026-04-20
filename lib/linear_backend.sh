@@ -16,8 +16,18 @@
 #     exits when network/auth/schema errors made a populated backlog look empty.
 #   * `_linear_log_error` emits one structured line on stderr with no secrets:
 #         linear_api_error: op=<name> reason=<timeout|network|http_NNN|parse|...>
+#
+# Push-mode (TAP-741):
+#   * When LINEAR_API_KEY is unset (OAuth-via-MCP deployments), the count
+#     functions fall back to reading `linear_open_count` / `linear_done_count`
+#     from `$RALPH_DIR/status.json`, written by the on-stop hook from Claude's
+#     RALPH_STATUS block. Entries older than RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS
+#     (default 900) are treated as stale and trigger the same abstain path.
+#   * Iteration 1 has no prior hook write, so it abstains — same safe default as
+#     an API outage. Iteration 2+ sees fresh counts and proceeds normally.
 
 LINEAR_GRAPHQL_URL="https://api.linear.app/graphql"
+RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS_DEFAULT=900
 
 # =============================================================================
 # Internal helpers
@@ -105,56 +115,134 @@ _linear_api() {
     return 0
 }
 
+# _linear_read_hook_count — Read a Claude-reported count from status.json.
+#
+# TAP-741: Source of truth for push-mode (OAuth-via-MCP) deployments. The
+# on-stop hook extracts LINEAR_OPEN_COUNT / LINEAR_DONE_COUNT from Claude's
+# RALPH_STATUS block and writes them to $RALPH_DIR/status.json with a
+# linear_counts_at timestamp. This function returns the stored value only if
+# it's a valid non-negative integer AND within the staleness window.
+#
+# Args:
+#   $1 field name ("linear_open_count" or "linear_done_count")
+#   $2 op label for error logging ("open_count" | "done_count")
+#
+# Stdout: integer on success.
+# Exit:   0 on success, 1 if the field is missing, malformed, or stale.
+_linear_read_hook_count() {
+    local field="$1"
+    local op="$2"
+    local ralph_dir="${RALPH_DIR:-.ralph}"
+    local status_file="$ralph_dir/status.json"
+    local max_age="${RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS:-$RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS_DEFAULT}"
+
+    if [[ ! -f "$status_file" ]]; then
+        _linear_log_error "$op" "no_status_file"
+        return 1
+    fi
+    if ! jq -e 'type == "object"' "$status_file" >/dev/null 2>&1; then
+        _linear_log_error "$op" "status_json_malformed"
+        return 1
+    fi
+
+    local value counts_at
+    value=$(jq -r ".${field} // empty" "$status_file" 2>/dev/null || echo "")
+    counts_at=$(jq -r '.linear_counts_at // empty' "$status_file" 2>/dev/null || echo "")
+
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+        _linear_log_error "$op" "no_hook_count"
+        return 1
+    fi
+
+    # Staleness check. If counts_at is missing we err on the safe side and
+    # abstain — a value without a timestamp could be a hand-edited relic.
+    if [[ -z "$counts_at" ]]; then
+        _linear_log_error "$op" "no_counts_timestamp"
+        return 1
+    fi
+    local counts_epoch now_epoch age
+    counts_epoch=$(date -d "$counts_at" +%s 2>/dev/null || echo "")
+    if [[ -z "$counts_epoch" ]] && command -v gdate >/dev/null 2>&1; then
+        counts_epoch=$(gdate -d "$counts_at" +%s 2>/dev/null || echo "")
+    fi
+    if ! [[ "$counts_epoch" =~ ^[0-9]+$ ]]; then
+        _linear_log_error "$op" "counts_timestamp_unparseable"
+        return 1
+    fi
+    now_epoch=$(date -u +%s)
+    age=$((now_epoch - counts_epoch))
+    if (( age > max_age )); then
+        _linear_log_error "$op" "counts_stale"
+        return 1
+    fi
+
+    printf '%s\n' "$value"
+    return 0
+}
+
 # =============================================================================
 # Public functions
 # =============================================================================
 
 # linear_get_open_count — Count open (backlog/unstarted/started) issues.
+#
+# Precedence:
+#   1. LINEAR_API_KEY set → GraphQL (unchanged behavior, TAP-536 semantics).
+#   2. Else → push-mode read from status.json (TAP-741).
+#   3. Neither → exit 1 (abstain).
+#
 # Stdout: integer count on success.
-# Exit:   0 on success, 1 on API/parse error (no stdout output).
+# Exit:   0 on success, 1 on any failure (no stdout output).
 linear_get_open_count() {
-    local query='query($project:String!){
-      issues(filter:{
-        project:{name:{eq:$project}},
-        state:{type:{in:["backlog","unstarted","started"]}}
-      },first:250){nodes{id}}
-    }'
-    local result
-    result=$(_linear_api "$query" "{\"project\":\"${RALPH_LINEAR_PROJECT:-}\"}") || return 1
+    if [[ -n "${LINEAR_API_KEY:-}" ]]; then
+        local query='query($project:String!){
+          issues(filter:{
+            project:{name:{eq:$project}},
+            state:{type:{in:["backlog","unstarted","started"]}}
+          },first:250){nodes{id}}
+        }'
+        local result
+        result=$(_linear_api "$query" "{\"project\":\"${RALPH_LINEAR_PROJECT:-}\"}") || return 1
 
-    local count
-    count=$(printf '%s' "$result" | jq -r '.data.issues.nodes // [] | length' 2>/dev/null)
-    if ! [[ "$count" =~ ^[0-9]+$ ]]; then
-        _linear_log_error "open_count" "parse"
-        return 1
+        local count
+        count=$(printf '%s' "$result" | jq -r '.data.issues.nodes // [] | length' 2>/dev/null)
+        if ! [[ "$count" =~ ^[0-9]+$ ]]; then
+            _linear_log_error "open_count" "parse"
+            return 1
+        fi
+
+        printf '%s\n' "$count"
+        return 0
     fi
 
-    printf '%s\n' "$count"
-    return 0
+    _linear_read_hook_count "linear_open_count" "open_count"
 }
 
 # linear_get_done_count — Count completed issues in project.
-# Stdout: integer count on success.
-# Exit:   0 on success, 1 on API/parse error (no stdout output).
+# Precedence identical to linear_get_open_count.
 linear_get_done_count() {
-    local query='query($project:String!){
-      issues(filter:{
-        project:{name:{eq:$project}},
-        state:{type:{eq:"completed"}}
-      },first:250){nodes{id}}
-    }'
-    local result
-    result=$(_linear_api "$query" "{\"project\":\"${RALPH_LINEAR_PROJECT:-}\"}") || return 1
+    if [[ -n "${LINEAR_API_KEY:-}" ]]; then
+        local query='query($project:String!){
+          issues(filter:{
+            project:{name:{eq:$project}},
+            state:{type:{eq:"completed"}}
+          },first:250){nodes{id}}
+        }'
+        local result
+        result=$(_linear_api "$query" "{\"project\":\"${RALPH_LINEAR_PROJECT:-}\"}") || return 1
 
-    local count
-    count=$(printf '%s' "$result" | jq -r '.data.issues.nodes // [] | length' 2>/dev/null)
-    if ! [[ "$count" =~ ^[0-9]+$ ]]; then
-        _linear_log_error "done_count" "parse"
-        return 1
+        local count
+        count=$(printf '%s' "$result" | jq -r '.data.issues.nodes // [] | length' 2>/dev/null)
+        if ! [[ "$count" =~ ^[0-9]+$ ]]; then
+            _linear_log_error "done_count" "parse"
+            return 1
+        fi
+
+        printf '%s\n' "$count"
+        return 0
     fi
 
-    printf '%s\n' "$count"
-    return 0
+    _linear_read_hook_count "linear_done_count" "done_count"
 }
 
 # linear_get_next_task — Get highest-priority open issue.
@@ -190,8 +278,12 @@ linear_get_next_task() {
 
 # linear_check_configured — Returns 0 iff Linear backend is usable (env only).
 # Does not make an API call — see linear_get_open_count for liveness.
+#
+# TAP-741: RALPH_LINEAR_PROJECT is required in both modes (it's what Claude is
+# told to query in push-mode and what GraphQL filters on in API-key mode).
+# LINEAR_API_KEY is optional — its absence selects push-mode rather than
+# disabling the backend.
 linear_check_configured() {
-    [[ -z "${LINEAR_API_KEY:-}" ]] && return 1
     [[ -z "${RALPH_LINEAR_PROJECT:-}" ]] && return 1
     return 0
 }

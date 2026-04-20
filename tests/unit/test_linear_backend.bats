@@ -85,10 +85,10 @@ restore_curl() {
 # linear_check_configured (3 tests)
 # =============================================================================
 
-@test "linear_check_configured: fails when LINEAR_API_KEY is not set" {
+@test "linear_check_configured: TAP-741 succeeds in push-mode (no API key, project set)" {
     export RALPH_LINEAR_PROJECT="My Project"
     run linear_check_configured
-    assert_failure
+    assert_success
 }
 
 @test "linear_check_configured: fails when RALPH_LINEAR_PROJECT is not set" {
@@ -108,11 +108,12 @@ restore_curl() {
 # linear_get_open_count (4 tests)
 # =============================================================================
 
-@test "linear_get_open_count: TAP-536 fails when LINEAR_API_KEY is not set" {
+@test "linear_get_open_count: TAP-536/TAP-741 fails in push-mode when no status.json exists" {
     export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-absent"
     run linear_get_open_count
     assert_failure
-    [[ "$output" != *"0"* ]] || fail "must not silently emit a zero count on missing API key"
+    [[ "$output" != *"0"* ]] || fail "must not silently emit a zero count in push-mode bootstrap"
 }
 
 @test "linear_get_open_count: returns correct count from API response" {
@@ -147,11 +148,12 @@ restore_curl() {
 # linear_get_done_count (4 tests)
 # =============================================================================
 
-@test "linear_get_done_count: TAP-536 fails when LINEAR_API_KEY is not set" {
+@test "linear_get_done_count: TAP-536/TAP-741 fails in push-mode when no status.json exists" {
     export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-absent"
     run linear_get_done_count
     assert_failure
-    [[ "$output" != *"0"* ]] || fail "must not silently emit a zero count on missing API key"
+    [[ "$output" != *"0"* ]] || fail "must not silently emit a zero count in push-mode bootstrap"
 }
 
 @test "linear_get_done_count: returns correct count from API response" {
@@ -422,4 +424,152 @@ should_exit_gracefully 2>/dev/null
     run _run_should_exit_with_linear_stub 0 0 1 ""
     assert_success
     assert_output ""
+}
+
+# =============================================================================
+# TAP-741: push-mode (status.json fallback, no LINEAR_API_KEY)
+# =============================================================================
+
+# Helper: write a status.json with the given linear_open_count / _done_count /
+# linear_counts_at, using jq so the file is always valid JSON even when a field
+# is omitted.
+_write_push_status() {
+    local dir="$1" open="$2" done_c="$3" ts="$4"
+    mkdir -p "$dir"
+    jq -n \
+        --arg open "$open" \
+        --arg done "$done_c" \
+        --arg ts "$ts" \
+        '{
+            timestamp: (if $ts == "" then null else $ts end),
+            linear_open_count: (if $open == "" then null else ($open|tonumber) end),
+            linear_done_count: (if $done == "" then null else ($done|tonumber) end),
+            linear_counts_at: (if $ts == "" then null else $ts end)
+        }' > "$dir/status.json"
+}
+
+@test "TAP-741 push-mode: open_count returns value from fresh status.json" {
+    unset LINEAR_API_KEY
+    export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-push"
+    _write_push_status "$RALPH_DIR" "7" "3" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    run linear_get_open_count
+    assert_success
+    assert_output "7"
+}
+
+@test "TAP-741 push-mode: done_count returns value from fresh status.json" {
+    unset LINEAR_API_KEY
+    export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-push"
+    _write_push_status "$RALPH_DIR" "7" "3" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    run linear_get_done_count
+    assert_success
+    assert_output "3"
+}
+
+@test "TAP-741 push-mode: abstains when status.json is missing (iter-1 bootstrap)" {
+    unset LINEAR_API_KEY
+    export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-fresh"
+    # Do NOT create status.json
+
+    run --separate-stderr linear_get_open_count
+    assert_failure
+    assert_output ""  # stdout empty — TAP-536 fail-loud contract
+    [[ "$stderr" == *"reason=no_status_file"* ]] || \
+        fail "expected structured stderr with reason=no_status_file, got: $stderr"
+}
+
+@test "TAP-741 push-mode: abstains when status.json has no count field" {
+    unset LINEAR_API_KEY
+    export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-nocount"
+    mkdir -p "$RALPH_DIR"
+    echo '{"timestamp":"2026-04-20T18:00:00Z"}' > "$RALPH_DIR/status.json"
+
+    run --separate-stderr linear_get_open_count
+    assert_failure
+    assert_output ""
+    [[ "$stderr" == *"reason=no_hook_count"* ]] || fail "expected no_hook_count, got: $stderr"
+}
+
+@test "TAP-741 push-mode: abstains when status.json is malformed" {
+    unset LINEAR_API_KEY
+    export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-broken"
+    mkdir -p "$RALPH_DIR"
+    echo 'not valid json {{{' > "$RALPH_DIR/status.json"
+
+    run --separate-stderr linear_get_open_count
+    assert_failure
+    assert_output ""
+    [[ "$stderr" == *"reason=status_json_malformed"* ]] || fail "expected status_json_malformed, got: $stderr"
+}
+
+@test "TAP-741 push-mode: abstains when counts are stale (older than max age)" {
+    unset LINEAR_API_KEY
+    export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-stale"
+    export RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS=60
+    # Timestamp 1 hour in the past — far outside the 60s window
+    local stale_ts
+    stale_ts=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+             || date -u -r $(( $(date +%s) - 3600 )) +%Y-%m-%dT%H:%M:%SZ)
+    _write_push_status "$RALPH_DIR" "12" "4" "$stale_ts"
+
+    run --separate-stderr linear_get_open_count
+    assert_failure
+    assert_output ""
+    [[ "$stderr" == *"reason=counts_stale"* ]] || fail "expected counts_stale, got: $stderr"
+}
+
+@test "TAP-741 push-mode: abstains when linear_counts_at is missing" {
+    unset LINEAR_API_KEY
+    export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-nots"
+    _write_push_status "$RALPH_DIR" "5" "2" ""
+
+    run linear_get_open_count
+    assert_failure
+}
+
+@test "TAP-741 push-mode: abstains when count value is not a non-negative integer" {
+    unset LINEAR_API_KEY
+    export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-badnum"
+    mkdir -p "$RALPH_DIR"
+    echo '{"linear_open_count":"seven","linear_counts_at":"2026-04-20T18:00:00Z"}' \
+        > "$RALPH_DIR/status.json"
+
+    run linear_get_open_count
+    assert_failure
+}
+
+@test "TAP-741 push-mode: accepts count of zero (valid done-plan signal)" {
+    unset LINEAR_API_KEY
+    export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-zero"
+    _write_push_status "$RALPH_DIR" "0" "42" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    run linear_get_open_count
+    assert_success
+    assert_output "0"
+}
+
+@test "TAP-741 push-mode: API-key path takes precedence over status.json" {
+    # With the API key set, the hook-count read must NOT be consulted —
+    # preserves the existing TAP-536 contract for API-key deployments.
+    export LINEAR_API_KEY="lin_api_test123"
+    export RALPH_LINEAR_PROJECT="My Project"
+    export RALPH_DIR="$TEST_TEMP_DIR/.ralph-hybrid"
+    _write_push_status "$RALPH_DIR" "999" "999" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    mock_curl_success '{"data":{"issues":{"nodes":[{"id":"1"},{"id":"2"}]}}}'
+    run linear_get_open_count
+    restore_curl
+    assert_success
+    assert_output "2"  # from the API mock, NOT from the 999 in status.json
 }

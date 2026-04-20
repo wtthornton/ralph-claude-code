@@ -1498,14 +1498,19 @@ should_exit_gracefully() {
         # The backend now distinguishes "exit 0 + value" (real count) from
         # "exit non-zero" (API/network/parse error). On any error we abstain
         # from this iteration's exit decision and let the next loop retry.
-        local open_items done_items
-        if ! open_items=$(linear_get_open_count); then
-            log_status "WARN" "Linear API failure (open_count) — skipping exit gate this iteration" >&2
+        local open_items done_items _lvl="WARN" _stderr=""
+        # TAP-741: in push-mode (no API key) iter-1 has no hook counts yet;
+        # log INFO instead of WARN so the expected bootstrap isn't noisy, and
+        # hide the structured `linear_api_error:` stderr line for the same
+        # reason. API-key mode keeps the old behavior (WARN + structured line).
+        if [[ -z "${LINEAR_API_KEY:-}" ]]; then _lvl="INFO"; _stderr="/dev/null"; fi
+        if ! open_items=$(linear_get_open_count 2>"${_stderr:-/dev/stderr}"); then
+            log_status "$_lvl" "Linear count (open_count) unavailable — skipping exit gate this iteration" >&2
             echo ""
             return 0
         fi
-        if ! done_items=$(linear_get_done_count); then
-            log_status "WARN" "Linear API failure (done_count) — skipping exit gate this iteration" >&2
+        if ! done_items=$(linear_get_done_count 2>"${_stderr:-/dev/stderr}"); then
+            log_status "$_lvl" "Linear count (done_count) unavailable — skipping exit gate this iteration" >&2
             echo ""
             return 0
         fi
@@ -2083,12 +2088,13 @@ build_loop_context() {
         # TAP-536: On API failure, mark counts as "unknown" instead of "0".
         # Treating a failed lookup as 0 remaining can falsely encourage Claude
         # to emit EXIT_SIGNAL: true.
-        local incomplete_tasks
-        if incomplete_tasks=$(linear_get_open_count); then
+        local incomplete_tasks _ctx_lvl="WARN" _ctx_stderr=""
+        if [[ -z "${LINEAR_API_KEY:-}" ]]; then _ctx_lvl="INFO"; _ctx_stderr="/dev/null"; fi
+        if incomplete_tasks=$(linear_get_open_count 2>"${_ctx_stderr:-/dev/stderr}"); then
             context+="Remaining tasks (Linear): ${incomplete_tasks}. "
         else
-            log_status "WARN" "Linear API failure (open_count) — context will mark counts as unknown" >&2
-            context+="Remaining tasks (Linear): unknown (API error — do NOT emit EXIT_SIGNAL). "
+            log_status "$_ctx_lvl" "Linear count (open_count) unavailable — context will mark counts as unknown" >&2
+            context+="Remaining tasks (Linear): unknown (counts not yet reported — do NOT emit EXIT_SIGNAL). "
         fi
         # Inject Linear task source instructions for Claude
         local next_task
@@ -2097,7 +2103,7 @@ build_loop_context() {
         if [[ -n "$next_task" ]]; then
             context+="Next issue: ${next_task}. "
         fi
-        context+="Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means commits are on \`main\`. Before Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists. If work is only on a branch, attempt to self-merge (\`gh pr merge --squash --auto\` or \`git merge\`); if the merge is blocked (no permission, required checks pending, conflicts you cannot resolve this loop), post a Linear comment listing unmerged SHAs and leave the ticket **In Progress** so Ralph retries next loop — do NOT move it to In Review for this. RALPH IS HEADLESS: there is no human on standby to review, merge, or answer questions. There is no human reviewer. 'In Review' is reserved for HARD blockers only — the EXACT four: (1) missing credentials/API keys a human must generate (e.g. OAuth token requiring browser click-through), (2) explicit budget/spend cap reached, (3) irreversible destructive operation requiring human sign-off: production database migration dropping data, secret rotation, mass deletion, credential exfiltration risk — NOT security bug fixes or hardening (those are Done), (4) genuinely ambiguous product decision where both interpretations have real cost and neither is a safe default. When in doubt between Done and In Review: pick Done if AC is substantively met, In Progress if it is not. NEVER pick In Review out of uncertainty. Everything else is NOT In Review: unmerged branch → In Progress + retry; flaky tests / red build / lint failures → fix them; 'code probably works but I'm unsure' → Done if AC substantively met; 'needs code review' → Done (no reviewer exists); security bug fix or hardening → Done; 'couldn't figure out how to do X' → leave In Progress, Ralph retries with fresh context next loop. When you do use In Review, the last Linear comment MUST name one of the four exact reasons above verbatim — if you cannot, pick Done or In Progress instead. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain."
+        context+="Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means commits are on \`main\`. Before Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists. If work is only on a branch, attempt to self-merge (\`gh pr merge --squash --auto\` or \`git merge\`); if the merge is blocked (no permission, required checks pending, conflicts you cannot resolve this loop), post a Linear comment listing unmerged SHAs and leave the ticket **In Progress** so Ralph retries next loop — do NOT move it to In Review for this. RALPH IS HEADLESS: there is no human on standby to review, merge, or answer questions. There is no human reviewer. 'In Review' is reserved for HARD blockers only — the EXACT four: (1) missing credentials/API keys a human must generate (e.g. OAuth token requiring browser click-through), (2) explicit budget/spend cap reached, (3) irreversible destructive operation requiring human sign-off: production database migration dropping data, secret rotation, mass deletion, credential exfiltration risk — NOT security bug fixes or hardening (those are Done), (4) genuinely ambiguous product decision where both interpretations have real cost and neither is a safe default. When in doubt between Done and In Review: pick Done if AC is substantively met, In Progress if it is not. NEVER pick In Review out of uncertainty. Everything else is NOT In Review: unmerged branch → In Progress + retry; flaky tests / red build / lint failures → fix them; 'code probably works but I'm unsure' → Done if AC substantively met; 'needs code review' → Done (no reviewer exists); security bug fix or hardening → Done; 'couldn't figure out how to do X' → leave In Progress, Ralph retries with fresh context next loop. When you do use In Review, the last Linear comment MUST name one of the four exact reasons above verbatim — if you cannot, pick Done or In Progress instead. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain. REQUIRED: include LINEAR_OPEN_COUNT: <N> and LINEAR_DONE_COUNT: <N> in your RALPH_STATUS block (counts of open and completed issues in project '${RALPH_LINEAR_PROJECT}', fetched via Linear MCP) — the harness reads these to replace its missing API-key lookup."
     # Bug #3 Fix: Support indented markdown checkboxes with [[:space:]]* pattern
     elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local incomplete_tasks
@@ -4407,13 +4413,14 @@ main() {
         # TAP-536: API failure here defaults to "1 incomplete" (the safe answer
         # — never pre-seeds completion_indicators on failure, so we don't get a
         # zombie 1-loop verification cycle when Linear is down at startup).
-        local _pre_completed
-        if ! _pre_uncompleted=$(linear_get_open_count); then
-            log_status "WARN" "Linear API failure (open_count) at startup pre-seed — assuming incomplete" >&2
+        local _pre_completed _pre_lvl="WARN" _pre_stderr=""
+        if [[ -z "${LINEAR_API_KEY:-}" ]]; then _pre_lvl="INFO"; _pre_stderr="/dev/null"; fi
+        if ! _pre_uncompleted=$(linear_get_open_count 2>"${_pre_stderr:-/dev/stderr}"); then
+            log_status "$_pre_lvl" "Linear count (open_count) unavailable at startup pre-seed — assuming incomplete" >&2
             _pre_uncompleted=1
         fi
-        if ! _pre_completed=$(linear_get_done_count); then
-            log_status "WARN" "Linear API failure (done_count) at startup pre-seed — assuming none done" >&2
+        if ! _pre_completed=$(linear_get_done_count 2>"${_pre_stderr:-/dev/stderr}"); then
+            log_status "$_pre_lvl" "Linear count (done_count) unavailable at startup pre-seed — assuming none done" >&2
             _pre_completed=0
         fi
         if [[ $_pre_completed -eq 0 ]]; then
