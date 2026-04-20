@@ -2061,7 +2061,7 @@ build_loop_context() {
         if [[ -n "$next_task" ]]; then
             context+="Next issue: ${next_task}. "
         fi
-        context+="Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned with the implementation (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means the commits are on the \`main\` branch, not just on a feature branch. Before marking Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists on main; if the work is only on a branch, either merge it (if you have permission) or post a Linear comment listing the unmerged commit SHAs and leave the ticket in its current state. Do NOT mark Done based on a 'work complete on branch X' comment without verifying main. Use 'In Review' ONLY when blocked on external input you cannot resolve (missing credentials, human budget approval, upstream decision). Do NOT use 'In Review' as a default conservative state — Ralph's next-task query excludes 'In Review', so tickets left there become invisible and pile up. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain."
+        context+="Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means commits are on \`main\`. Before Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists. If work is only on a branch, attempt to self-merge (\`gh pr merge --squash --auto\` or \`git merge\`); if the merge is blocked (no permission, required checks pending, conflicts you cannot resolve this loop), post a Linear comment listing unmerged SHAs and leave the ticket **In Progress** so Ralph retries next loop — do NOT move it to In Review for this. RALPH IS HEADLESS: there is no human on standby to review, merge, or answer questions. 'In Review' is reserved for HARD blockers only, limited to these four: (1) missing credentials/API keys you cannot obtain, (2) explicit budget/spend cap reached, (3) destructive or security-sensitive action requiring human authorization (prod DB migration, secret rotation, mass deletion), (4) genuinely ambiguous product decision where both interpretations have real cost and neither is safe. Everything else is NOT In Review: unmerged branch → In Progress + retry; flaky tests / red build / lint failures → fix them; 'code probably works but I'm unsure' → Done if AC substantively met; 'needs code review' → Done (no reviewer exists); 'couldn't figure out how to do X' → leave In Progress, Ralph retries with fresh context next loop. When you do use In Review, the last Linear comment MUST name one of the four valid reasons above — if you cannot, pick Done or In Progress instead. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain."
     # Bug #3 Fix: Support indented markdown checkboxes with [[:space:]]* pattern
     elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local incomplete_tasks
@@ -4038,9 +4038,13 @@ CBEOF
     fi
 }
 
-# Cleanup function — fires on SIGINT, SIGTERM, and EXIT
+# Cleanup function — fires on SIGINT, SIGTERM, and EXIT.
+# When invoked via the signal traps below it gets an explicit exit-code
+# argument (130/143). Inside a trap bash's $? reflects the *previous*
+# command, not the signal, so we can't rely on $? alone to distinguish
+# a user-initiated stop from a normal EXIT.
 cleanup() {
-    local trap_exit_code=$?
+    local trap_exit_code=${1:-$?}
 
     # Reentrancy guard — prevent double execution from EXIT + signal combination
     if [[ "$_CLEANUP_DONE" == "true" ]]; then return; fi
@@ -4063,9 +4067,12 @@ cleanup() {
 
     if [[ $loop_count -gt 0 ]]; then
         if [[ $trap_exit_code -eq 130 || $trap_exit_code -eq 143 ]]; then
-            # SIGINT (130) / SIGTERM (143) — user-initiated stop, not a crash
+            # SIGINT (130) / SIGTERM (143) — user-initiated stop, not a crash.
+            # Without the explicit `exit` the trap returns and bash resumes the
+            # main loop, so `kill <pid>` silently spawns one more iteration.
             log_status "INFO" "Ralph stopped by signal (exit code: $trap_exit_code)"
             update_status "$loop_count" "$(_read_call_count)" "stopped" "signal" "exit_code_$trap_exit_code"
+            exit "$trap_exit_code"
         elif [[ $trap_exit_code -ne 0 ]]; then
             # LOGFIX-1: Check if status was already set to graceful_exit/completed
             # before reporting a crash. The break from the exit gate can leave a
@@ -4092,8 +4099,12 @@ cleanup() {
     fi
 }
 
-# Set up signal handlers (EXIT fires on ANY exit — normal, crash, or signal)
-trap cleanup SIGINT SIGTERM EXIT
+# Set up signal handlers. Pass an explicit exit code into cleanup() for
+# signals so the signal branch in cleanup() actually fires — bash's $?
+# inside a trap holds the previous command's status, not the signal.
+trap 'cleanup 130' SIGINT
+trap 'cleanup 143' SIGTERM
+trap cleanup EXIT
 
 # =============================================================================
 # LOCK-1: Flock-Based Instance Locking (Phase 13)

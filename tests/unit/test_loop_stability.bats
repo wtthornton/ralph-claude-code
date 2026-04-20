@@ -225,7 +225,12 @@ EOF
 # =============================================================================
 
 @test "LOOP-5: EXIT trap is set in ralph_loop.sh" {
-    grep -q 'trap cleanup SIGINT SIGTERM EXIT' "$RALPH_LOOP"
+    # SIGINT and SIGTERM pass an explicit exit code (130/143) so the
+    # signal branch in cleanup() actually fires — bash's $? inside a
+    # trap reflects the previous command, not the signal.
+    grep -q "trap 'cleanup 130' SIGINT" "$RALPH_LOOP"
+    grep -q "trap 'cleanup 143' SIGTERM" "$RALPH_LOOP"
+    grep -q '^trap cleanup EXIT' "$RALPH_LOOP"
 }
 
 @test "LOOP-5: cleanup records crash code on non-zero exit" {

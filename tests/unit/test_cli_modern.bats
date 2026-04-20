@@ -1385,8 +1385,10 @@ EOF
     # Verify cleanup captures trap_exit_code and only records interrupt on non-zero
     local script="${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
 
-    # cleanup() must capture exit code as first statement
-    run bash -c "sed -n '/^cleanup()/,/^}/p' '$script' | head -3 | grep 'trap_exit_code=\$?'"
+    # cleanup() must capture exit code as its first statement. The signal
+    # traps pass an explicit override (130/143) as $1, so the capture is
+    # ${1:-$?} rather than a bare $?.
+    run bash -c "sed -n '/^cleanup()/,/^}/p' '$script' | grep -E 'trap_exit_code=(\\\$\\?|\\\$\\{1:-\\\$\\?\\})'"
     assert_success
 
     # The condition must check for non-zero exit code
