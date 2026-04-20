@@ -67,6 +67,7 @@ display_status() {
         local linear_epic=$(echo "$status_data" | jq -r '.linear_epic // ""' 2>/dev/null || echo "")
         local linear_epic_done=$(echo "$status_data" | jq -r '.linear_epic_done // ""' 2>/dev/null || echo "")
         local linear_epic_total=$(echo "$status_data" | jq -r '.linear_epic_total // ""' 2>/dev/null || echo "")
+        local last_linear_issue=$(echo "$status_data" | jq -r '.last_linear_issue // ""' 2>/dev/null || echo "")
         local session_cost=$(echo "$status_data" | jq -r '.session_cost_usd // 0' 2>/dev/null || echo "0")
         local session_in=$(echo "$status_data" | jq -r '.session_input_tokens // 0' 2>/dev/null || echo "0")
         local session_out=$(echo "$status_data" | jq -r '.session_output_tokens // 0' 2>/dev/null || echo "0")
@@ -74,10 +75,16 @@ display_status() {
         local loop_in=$(echo "$status_data" | jq -r '.loop_input_tokens // 0' 2>/dev/null || echo "0")
         local loop_out=$(echo "$status_data" | jq -r '.loop_output_tokens // 0' 2>/dev/null || echo "0")
 
-        # Current Issue block — only rendered when Linear-driven mode has populated it
-        if [[ -n "$linear_issue" && "$linear_issue" != "null" ]]; then
+        # Current Issue block — show current issue, or last known with (executing...) while loop runs
+        local _display_issue="$linear_issue"
+        local _issue_suffix=""
+        if [[ ( -z "$linear_issue" || "$linear_issue" == "null" ) && -n "$last_linear_issue" && "$last_linear_issue" != "null" && "$status" == "running" ]]; then
+            _display_issue="$last_linear_issue"
+            _issue_suffix="   ${YELLOW}(executing...)${NC}"
+        fi
+        if [[ -n "$_display_issue" && "$_display_issue" != "null" ]]; then
             echo -e "${PURPLE}┌─ Current Issue ─────────────────────────────────────────────────────────┐${NC}"
-            echo -e "${PURPLE}│${NC} Issue:          ${WHITE}${linear_issue}${NC}${work_type:+   ${BLUE}[${work_type}]${NC}}"
+            echo -e "${PURPLE}│${NC} Issue:          ${WHITE}${_display_issue}${NC}${_issue_suffix}${work_type:+   ${BLUE}[${work_type}]${NC}}"
             if [[ -n "$linear_url" && "$linear_url" != "null" ]]; then
                 echo -e "${PURPLE}│${NC} Link:           ${BLUE}${linear_url}${NC}"
             fi
@@ -136,6 +143,11 @@ display_status() {
         fi
         if [[ -n "$session_subagents" ]]; then
             echo -e "${CYAN}│${NC} Sub-agents (session): ${session_subagents}"
+        fi
+        # MCP activity — top 3 tools this loop by call count
+        local loop_mcp_top=$(echo "$status_data" | jq -r '.loop_mcp_calls.by_tool // {} | to_entries | sort_by(-.value) | .[0:3] | map("\(.key | split("__") | last)×\(.value)") | join("  ")' 2>/dev/null || echo "")
+        if [[ -n "$loop_mcp_top" ]]; then
+            echo -e "${CYAN}│${NC} MCP (loop):     ${loop_mcp_top}"
         fi
         # Teams configuration (read once from .ralphrc — teams state isn't persisted to a consumable file)
         local teams_enabled=$(grep -E "^RALPH_ENABLE_TEAMS=" .ralphrc 2>/dev/null | tail -1 | sed 's/.*=//; s/["'"'"']//g' | tr -d '[:space:]')

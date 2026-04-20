@@ -404,10 +404,16 @@ jq -n \
 
 if [[ -f "$RALPH_DIR/status.json" ]] && jq -e 'type == "object"' "$RALPH_DIR/status.json" >/dev/null 2>&1; then
   # Merge: existing status.json + hook fields (hook wins on overlap).
-  jq -s '.[0] * .[1]' "$RALPH_DIR/status.json" "$local_tmp.hook" > "$local_tmp" 2>/dev/null \
+  # LAST-ISSUE: after merge, if linear_issue is now non-null, persist it as
+  # last_linear_issue so the monitor can show it during the next executing loop
+  # (when linear_issue resets to null before Claude picks the next issue).
+  jq -s '(.[0] * .[1]) | if .linear_issue != null then .last_linear_issue = .linear_issue else . end' \
+    "$RALPH_DIR/status.json" "$local_tmp.hook" > "$local_tmp" 2>/dev/null \
     || cp "$local_tmp.hook" "$local_tmp"
 else
-  cp "$local_tmp.hook" "$local_tmp"
+  jq 'if .linear_issue != null then .last_linear_issue = .linear_issue else . end' \
+    "$local_tmp.hook" > "$local_tmp" 2>/dev/null \
+    || cp "$local_tmp.hook" "$local_tmp"
 fi
 rm -f "$local_tmp.hook" 2>/dev/null
 
