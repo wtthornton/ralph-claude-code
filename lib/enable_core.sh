@@ -926,6 +926,207 @@ enable_ralph_in_directory() {
     return $ENABLE_SUCCESS
 }
 
+# =============================================================================
+# SKILLS-INJECT-3: Tier A project skill detection and installation
+# =============================================================================
+
+# detect_tier_a_skills — Emit newline-separated list of Tier A skill names
+# based on project characteristics in the current directory.
+#
+# Detection signals:
+#   pyproject.toml / setup.py           → python-patterns
+#   anthropic import in source files    → claude-api
+#   package.json with express           → backend-patterns
+#   .ralphrc RALPH_TASK_SOURCE=linear   → linear
+#   tests/evals/ directory              → eval-harness
+#
+detect_tier_a_skills() {
+    local -a skills=()
+
+    # Python project → python-patterns
+    if [[ -f "pyproject.toml" || -f "setup.py" || -f "setup.cfg" ]]; then
+        skills+=("python-patterns")
+    fi
+
+    # Anthropic SDK usage → claude-api
+    if grep -rql \
+        -e "import anthropic" \
+        -e "from anthropic" \
+        -e "@anthropic-ai" \
+        -e "require.*anthropic" \
+        --include="*.py" --include="*.ts" --include="*.js" \
+        . 2>/dev/null || \
+       grep -q "anthropic" pyproject.toml requirements*.txt package.json 2>/dev/null; then
+        skills+=("claude-api")
+    fi
+
+    # Express backend → backend-patterns
+    if [[ -f "package.json" ]] && grep -q '"express"' package.json 2>/dev/null; then
+        skills+=("backend-patterns")
+    fi
+
+    # Linear task source → linear
+    if grep -q 'RALPH_TASK_SOURCE.*=.*linear' .ralphrc 2>/dev/null || \
+       [[ "${RALPH_TASK_SOURCE:-}" == "linear" ]]; then
+        skills+=("linear")
+    fi
+
+    # Eval harness present → eval-harness
+    if [[ -d "tests/evals" ]]; then
+        skills+=("eval-harness")
+    fi
+
+    printf '%s\n' "${skills[@]}"
+}
+
+# install_project_tier_a_skills — Install detected Tier A skills into .claude/skills/
+#
+# Sources each skill from ~/.claude/skills/<name>/ (global install) and copies
+# it into .claude/skills/<name>/ using the sidecar-guarded skills_install_one.
+# Skips skills not present in the global install. Never touches user-authored
+# skill dirs (no .ralph-managed sidecar).
+#
+# Sets INSTALLED_TIER_A_SKILLS (space-separated) for downstream use (e.g. PROMPT.md
+# injection in SKILLS-INJECT-4).
+#
+export INSTALLED_TIER_A_SKILLS=""
+
+install_project_tier_a_skills() {
+    local _lib_dir
+    _lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local skills_install_lib="$_lib_dir/skills_install.sh"
+
+    if [[ ! -f "$skills_install_lib" ]]; then
+        enable_log "WARN" "skills_install.sh not found — skipping Tier A skill install"
+        return 0
+    fi
+    # shellcheck disable=SC1090
+    source "$skills_install_lib"
+
+    local global_skills_dir="$HOME/.claude/skills"
+    local target_skills_dir=".claude/skills"
+    local version="${RALPH_VERSION:-unknown}"
+
+    local -a skills=()
+    local line
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && skills+=("$line")
+    done < <(detect_tier_a_skills)
+
+    if [[ ${#skills[@]} -eq 0 ]]; then
+        enable_log "INFO" "No Tier A skills detected for this project type"
+        return 0
+    fi
+
+    mkdir -p "$target_skills_dir"
+
+    local -a installed=()
+    local -a skipped=()
+    local skill
+    for skill in "${skills[@]}"; do
+        local src="$global_skills_dir/$skill"
+        local dest="$target_skills_dir/$skill"
+        if [[ -d "$src" ]]; then
+            if skills_install_one "$src" "$dest" "$version"; then
+                installed+=("$skill")
+            fi
+        else
+            skipped+=("$skill")
+        fi
+    done
+
+    INSTALLED_TIER_A_SKILLS="${installed[*]:-}"
+
+    if [[ ${#installed[@]} -gt 0 ]]; then
+        enable_log "INFO" "Installed Tier A skills: ${installed[*]}"
+    fi
+    if [[ ${#skipped[@]} -gt 0 ]]; then
+        enable_log "INFO" "Tier A skills not installed (not in ~/.claude/skills/): ${skipped[*]}"
+    fi
+
+    return 0
+}
+
+# _extract_skill_description — Extract the description from a SKILL.md frontmatter.
+# Handles both inline ("description: text") and YAML block scalar ("description: >").
+# Emits up to 200 chars of the first line of the description.
+#
+_extract_skill_description() {
+    local skill_md="$1"
+    awk '
+        BEGIN { in_fm=0; started=0; found_desc=0 }
+        /^---[[:space:]]*$/ {
+            if (!started) { started=1; in_fm=1; next }
+            else if (in_fm) { exit }
+        }
+        in_fm && /^description:/ {
+            val = $0
+            sub(/^description:[[:space:]]*/, "", val)
+            if (val != "" && val != ">") { print val; exit }
+            found_desc = 1; next
+        }
+        in_fm && found_desc {
+            if (/^[[:space:]]/) {
+                gsub(/^[[:space:]]+/, "")
+                print; exit
+            } else { exit }
+        }
+    ' "$skill_md" | tr -d '"' | head -c 200
+}
+
+# inject_skill_hints_into_prompt — Append an "## Available Skills" section to PROMPT.md.
+#
+# Collects all Ralph-managed skills from:
+#   - ~/.claude/skills/ (global Tier S baseline)
+#   - .claude/skills/   (project Tier A installs)
+# For each, extracts a one-line description from the SKILL.md frontmatter and
+# appends a `/skill-name: description` hint line.
+#
+# Idempotent: skips if the section header is already present.
+#
+# Parameters:
+#   $1 (prompt_file) - path to PROMPT.md (default: .ralph/PROMPT.md)
+#
+inject_skill_hints_into_prompt() {
+    local prompt_file="${1:-.ralph/PROMPT.md}"
+    [[ -f "$prompt_file" ]] || return 0
+
+    # Idempotent: skip if section already present.
+    grep -q "^## Available Skills" "$prompt_file" && return 0
+
+    local global_skills_dir="$HOME/.claude/skills"
+    local project_skills_dir=".claude/skills"
+    local -a hint_lines=()
+
+    local skill_dir skill_name desc
+    for skill_dir in "$global_skills_dir"/*/; do
+        [[ -d "$skill_dir" && -f "$skill_dir/.ralph-managed" ]] || continue
+        skill_name=$(basename "$skill_dir")
+        [[ -f "$skill_dir/SKILL.md" ]] || continue
+        desc=$(_extract_skill_description "$skill_dir/SKILL.md")
+        [[ -n "$desc" ]] && hint_lines+=("- \`/$skill_name\`: $desc")
+    done
+
+    for skill_dir in "$project_skills_dir"/*/; do
+        [[ -d "$skill_dir" && -f "$skill_dir/.ralph-managed" ]] || continue
+        skill_name=$(basename "$skill_dir")
+        [[ -f "$skill_dir/SKILL.md" ]] || continue
+        desc=$(_extract_skill_description "$skill_dir/SKILL.md")
+        [[ -n "$desc" ]] && hint_lines+=("- \`/$skill_name\`: $desc")
+    done
+
+    [[ ${#hint_lines[@]} -eq 0 ]] && return 0
+
+    {
+        printf '\n## Available Skills\n\n'
+        printf '%s\n' "${hint_lines[@]}"
+        printf '\n'
+    } >> "$prompt_file"
+
+    enable_log "INFO" "Injected ${#hint_lines[@]} skill hints into $prompt_file"
+    return 0
+}
+
 # Export functions for use in other scripts
 export -f enable_log
 export -f check_existing_ralph
@@ -943,3 +1144,6 @@ export -f generate_agent_md
 export -f generate_fix_plan_md
 export -f generate_ralphrc
 export -f enable_ralph_in_directory
+export -f detect_tier_a_skills
+export -f install_project_tier_a_skills
+export -f inject_skill_hints_into_prompt

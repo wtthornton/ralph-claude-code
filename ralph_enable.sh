@@ -605,6 +605,12 @@ phase_file_generation() {
         exit $ENABLE_ERROR
     fi
 
+    # SKILLS-INJECT-3: Install Tier A project skills into .claude/skills/
+    install_project_tier_a_skills
+
+    # SKILLS-INJECT-4: Inject skill hints into .ralph/PROMPT.md
+    inject_skill_hints_into_prompt
+
     # Update .ralphrc with specific settings
     # Using awk instead of sed to avoid command injection from user input
     if [[ -f ".ralphrc" ]]; then
