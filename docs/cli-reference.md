@@ -1,6 +1,6 @@
 # Ralph CLI Reference
 
-**Version**: v2.8.1 | **Platform**: Linux, macOS, WSL, Git Bash (Windows)
+**Version**: v2.8.2 | **Platform**: Linux, macOS, WSL, Git Bash (Windows)
 
 ## Commands
 

@@ -8,10 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [2.8.2] — 2026-04-20
+
 ### Added
 - **SKILLS-INJECT-5**: `lib/skill_retro.sh` — friction signal detection: reads `status.json` and stream logs after each loop, identifies signals (permission denials, repeated stalls, test failures, tool errors), emits a structured JSON friction report
 - **SKILLS-INJECT-6**: Retro apply in `lib/skill_retro.sh` — advisory mode by default (`RALPH_SKILL_AUTO_TUNE=false`); when enabled, installs ≤1 recommended skill per loop based on friction report; checksum-guard prevents overwriting user-modified skills
 - **SKILLS-INJECT-7**: Periodic re-detection (`skill_retro_periodic_reconcile`) — re-runs Tier A project detection every N loops (default 10, `RALPH_SKILL_REDETECT_INTERVAL`) and reconciles installed skills against current project state
+- **SKILLS-INJECT-8**: `record_skill_metric` / `ralph_show_skill_stats` in `lib/metrics.sh` — append skill events to `.ralph/metrics/skills.jsonl`; `ralph --stats` now includes a skill breakdown section
 
 ---
 
