@@ -12,6 +12,10 @@
 .ralph/.json_parse_result
 .ralph/.last_output_length
 .ralph/.upgrade-backups/
+.ralph/.files_modified_this_loop
+
+# tapps-mcp runtime probe output (timestamped, host-specific)
+.tapps-mcp/
 
 # Ralph logs and generated docs
 .ralph/logs/*
