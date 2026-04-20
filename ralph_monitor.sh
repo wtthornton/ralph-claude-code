@@ -6,7 +6,13 @@
 
 STATUS_FILE=".ralph/status.json"
 LOG_FILE=".ralph/logs/ralph.log"
+LIVE_LOG=".ralph/live.log"
 REFRESH_INTERVAL=2
+# Staleness thresholds (seconds since status.json .timestamp)
+STALE_WARN_SECS=${MONITOR_STALE_WARN_SECS:-30}
+STALE_DEAD_SECS=${MONITOR_STALE_DEAD_SECS:-120}
+# UNKNOWN-status streak threshold before the monitor flags "silent Claude"
+UNKNOWN_STREAK_WARN=${MONITOR_UNKNOWN_STREAK_WARN:-3}
 
 # Colors
 RED='\033[0;31m'
@@ -17,6 +23,29 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m'
+
+# Parse an ISO-8601 UTC timestamp (YYYY-MM-DDTHH:MM:SSZ) to epoch seconds.
+# Returns 0 on parse failure — caller treats that as "unknown age".
+_iso_to_epoch() {
+    local ts="$1"
+    [[ -z "$ts" || "$ts" == "null" ]] && { echo 0; return; }
+    local epoch
+    epoch=$(date -u -d "$ts" +%s 2>/dev/null) \
+      || epoch=$(date -u -jf "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null) \
+      || epoch=0
+    echo "${epoch:-0}"
+}
+
+# Count the trailing streak of UNKNOWN statuses in .ralph/live.log.
+# on-stop.sh appends "Loop N: status=X exit=Y..." on every iteration.
+_unknown_streak() {
+    [[ -f "$LIVE_LOG" ]] || { echo 0; return; }
+    tail -n 30 "$LIVE_LOG" 2>/dev/null | grep -oE 'status=[A-Za-z_]+' | sed 's/status=//' | tac | awk '
+        /^UNKNOWN$/ { s++; next }
+        { exit }
+        END { print s+0 }
+    '
+}
 
 # Clear screen and hide cursor
 clear_screen() {
@@ -75,6 +104,17 @@ display_status() {
         local loop_in=$(echo "$status_data" | jq -r '.loop_input_tokens // 0' 2>/dev/null || echo "0")
         local loop_out=$(echo "$status_data" | jq -r '.loop_output_tokens // 0' 2>/dev/null || echo "0")
 
+        # Staleness: how long since on-stop.sh last wrote status.json?
+        local status_ts=$(echo "$status_data" | jq -r '.timestamp // ""' 2>/dev/null || echo "")
+        local status_epoch=$(_iso_to_epoch "$status_ts")
+        local now_epoch=$(date -u +%s)
+        local status_age=$(( now_epoch - ${status_epoch:-0} ))
+        (( status_epoch > 0 )) || status_age=-1
+
+        # UNKNOWN streak from live.log (Fix 4 — silent Claude detection)
+        local unknown_streak=$(_unknown_streak)
+        [[ "$unknown_streak" =~ ^[0-9]+$ ]] || unknown_streak=0
+
         # Current Issue block — show current issue, or last known with (executing...) while loop runs
         local _display_issue="$linear_issue"
         local _issue_suffix=""
@@ -115,15 +155,43 @@ display_status() {
         local loop_subagents=$(echo "$status_data" | jq -r '.loop_subagents // {} | to_entries | map("\(.key)×\(.value)") | join(", ")' 2>/dev/null || echo "")
         local session_subagents=$(echo "$status_data" | jq -r '.session_subagents // {} | to_entries | map("\(.key) \(.value)") | join(", ")' 2>/dev/null || echo "")
 
+        # Staleness + status colouring.
+        # - <STALE_WARN_SECS: green ("fresh")
+        # - STALE_WARN_SECS .. STALE_DEAD_SECS: yellow ("stale — hook slow")
+        # - >STALE_DEAD_SECS: red ("ralph appears dead")
+        local status_color="$GREEN"
+        local age_str=""
+        if (( status_age < 0 )); then
+            age_str="${YELLOW}n/a${NC}"
+        elif (( status_age >= STALE_DEAD_SECS )); then
+            status_color="$RED"
+            age_str="${RED}${status_age}s ago — LIKELY DEAD${NC}"
+        elif (( status_age >= STALE_WARN_SECS )); then
+            status_color="$YELLOW"
+            age_str="${YELLOW}${status_age}s ago${NC}"
+        else
+            age_str="${GREEN}${status_age}s ago${NC}"
+        fi
+
         echo -e "${CYAN}┌─ Current Status ────────────────────────────────────────────────────────┐${NC}"
         echo -e "${CYAN}│${NC} Loop Count:     ${WHITE}#$loop_count${NC}"
-        echo -e "${CYAN}│${NC} Status:         ${GREEN}$status${NC}"
+        echo -e "${CYAN}│${NC} Status:         ${status_color}$status${NC}"
+        echo -e "${CYAN}│${NC} Last update:    ${age_str}"
         if [[ -n "$loop_model" && "$loop_model" != "null" ]]; then
             echo -e "${CYAN}│${NC} Model:          ${GREEN}${loop_model}${NC}"
         fi
         echo -e "${CYAN}│${NC} API Calls:      $calls_made/$max_calls (this hour)"
-        # Token + cost — only if data is present (emitted by Linear-driven mode or agent-mode JSON)
-        if [[ "$session_cost" != "0" && "$session_cost" != "0.000000" ]] || [[ "$session_in" != "0" ]] || [[ "$cache_read" != "0" || "$cache_create" != "0" ]]; then
+        # Silent-Claude detection: N consecutive UNKNOWN loops means on-stop.sh
+        # couldn't parse a RALPH_STATUS block — prompt drift or Claude ignoring
+        # the template. Flag the user so they investigate instead of waiting.
+        if (( unknown_streak >= UNKNOWN_STREAK_WARN )); then
+            echo -e "${CYAN}│${NC} ${RED}⚠ Claude has returned UNKNOWN for ${unknown_streak} consecutive loops${NC}"
+            echo -e "${CYAN}│${NC}   ${YELLOW}No RALPH_STATUS block parsed — check PROMPT.md / hook / prompt drift${NC}"
+        fi
+        # Tokens + cost — render only when session actually has tokens. Cache
+        # stats are rendered on their own guard so we don't mask them when the
+        # hook is still missing input/output data.
+        if [[ "$session_in" != "0" ]]; then
             local sess_in_fmt=$(printf "%'d" "$session_in" 2>/dev/null || echo "$session_in")
             local sess_out_fmt=$(printf "%'d" "$session_out" 2>/dev/null || echo "$session_out")
             local sess_cost_fmt=$(awk -v c="$session_cost" 'BEGIN{printf "%.4f", c}')
@@ -131,12 +199,18 @@ display_status() {
             echo -e "${CYAN}│${NC} Tokens (loop):  in ${loop_in}, out ${loop_out}"
             echo -e "${CYAN}│${NC} Tokens (sess):  in ${sess_in_fmt}, out ${sess_out_fmt}"
             echo -e "${CYAN}│${NC} Cost:           loop \$${loop_cost_fmt}  ·  session \$${sess_cost_fmt}"
-            # Cache hit ratio across the session — read / (read + create + out-of-cache in)
-            if [[ "$cache_read" != "0" || "$cache_create" != "0" ]]; then
-                local cache_hit_pct=$(awk -v r="$cache_read" -v c="$cache_create" -v i="$session_in" 'BEGIN{d=r+c+i; if(d>0) printf "%.0f", r/d*100; else print 0}')
-                local cache_read_fmt=$(printf "%'d" "$cache_read" 2>/dev/null || echo "$cache_read")
-                echo -e "${CYAN}│${NC} Cache:          ${GREEN}${cache_hit_pct}%${NC} hit · ${cache_read_fmt} tokens read"
-            fi
+        elif [[ "$session_cost" != "0" && "$session_cost" != "0.000000" ]]; then
+            # Edge case: cost present but token counts zeroed (older hook). Surface the cost.
+            local sess_cost_fmt=$(awk -v c="$session_cost" 'BEGIN{printf "%.4f", c}')
+            echo -e "${CYAN}│${NC} Cost (session): \$${sess_cost_fmt}"
+        fi
+        # Cache hit — independent gate. If the hook populates cache tokens
+        # but not input/output (old hook), we still show the cache stats so
+        # the user isn't staring at a blank monitor.
+        if [[ "$cache_read" != "0" || "$cache_create" != "0" ]]; then
+            local cache_hit_pct=$(awk -v r="$cache_read" -v c="$cache_create" -v i="$session_in" 'BEGIN{d=r+c+i; if(d>0) printf "%.0f", r/d*100; else print 0}')
+            local cache_read_fmt=$(printf "%'d" "$cache_read" 2>/dev/null || echo "$cache_read")
+            echo -e "${CYAN}│${NC} Cache:          ${GREEN}${cache_hit_pct}%${NC} hit · ${cache_read_fmt} tokens read"
         fi
         if [[ -n "$loop_subagents" ]]; then
             echo -e "${CYAN}│${NC} Sub-agents (loop):    ${loop_subagents}"
