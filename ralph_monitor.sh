@@ -123,7 +123,7 @@ display_status() {
         fi
         echo -e "${CYAN}│${NC} API Calls:      $calls_made/$max_calls (this hour)"
         # Token + cost — only if data is present (emitted by Linear-driven mode or agent-mode JSON)
-        if [[ "$session_cost" != "0" && "$session_cost" != "0.000000" ]] || [[ "$session_in" != "0" ]]; then
+        if [[ "$session_cost" != "0" && "$session_cost" != "0.000000" ]] || [[ "$session_in" != "0" ]] || [[ "$cache_read" != "0" || "$cache_create" != "0" ]]; then
             local sess_in_fmt=$(printf "%'d" "$session_in" 2>/dev/null || echo "$session_in")
             local sess_out_fmt=$(printf "%'d" "$session_out" 2>/dev/null || echo "$session_out")
             local sess_cost_fmt=$(awk -v c="$session_cost" 'BEGIN{printf "%.4f", c}')
