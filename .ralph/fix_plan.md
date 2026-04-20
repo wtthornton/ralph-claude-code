@@ -41,7 +41,7 @@ active circuit breaker, correlation ID, TaskPacket conversion, EvidenceBundle ou
 
 ### High — Shell Fixes
 
-- [ ] TAP-657: Bump `actions/checkout@v3` → `@v4` and `actions/setup-node@v3` → `@v4` in all four locations in `.github/workflows/test.yml` (lines 25, 28, 66, 69). Add `cache: npm` to the `setup-node` step in the coverage job.
+- [x] TAP-657: Bump `actions/checkout@v3` → `@v4` and `actions/setup-node@v3` → `@v4` in all four locations in `.github/workflows/test.yml` (lines 25, 28, 66, 69). Add `cache: npm` to the `setup-node` step in the coverage job.
 
 - [ ] TAP-659: Replace sed-based JSON escape in `lib/notifications.sh:_notify_webhook()` with `jq -n --arg` construction for all five fields (`event`, `title`, `message`, `timestamp`, `project`). Remove `|| true` from the `curl` call — failed webhook should log a WARN to stderr instead of silently dropping.
 
