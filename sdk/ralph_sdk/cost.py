@@ -33,6 +33,12 @@ class ModelPricing:
 
 # Default pricing for Claude models (USD per 1M tokens)
 DEFAULT_PRICING: dict[str, ModelPricing] = {
+    "claude-opus-4-7": ModelPricing(
+        input_per_1m=5.0,
+        output_per_1m=25.0,
+        cache_write_per_1m=6.25,
+        cache_read_per_1m=0.50,
+    ),
     "claude-opus-4-6": ModelPricing(
         input_per_1m=5.0,
         output_per_1m=25.0,
@@ -262,15 +268,15 @@ DEFAULT_MODEL_MAP: dict[CostComplexityBand, str] = {
     CostComplexityBand.TRIVIAL: "claude-haiku-4-5",
     CostComplexityBand.SMALL: "claude-haiku-4-5",
     CostComplexityBand.MEDIUM: "claude-sonnet-4-6",
-    CostComplexityBand.LARGE: "claude-opus-4-6",
-    CostComplexityBand.ARCHITECTURAL: "claude-opus-4-6",
+    CostComplexityBand.LARGE: "claude-opus-4-7",
+    CostComplexityBand.ARCHITECTURAL: "claude-opus-4-7",
 }
 
 # Retry escalation order
 _ESCALATION_ORDER = [
     "claude-haiku-4-5",
     "claude-sonnet-4-6",
-    "claude-opus-4-6",
+    "claude-opus-4-7",
 ]
 
 

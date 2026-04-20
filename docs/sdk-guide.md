@@ -188,7 +188,7 @@ from ralph_sdk.complexity import ComplexityBand
 
 # Dynamic model routing
 model = select_model(ComplexityBand.LARGE, retry_count=0)
-# "claude-opus-4-6" for LARGE/ARCH; "claude-sonnet-4-6" for others
+# "claude-opus-4-7" for LARGE/ARCH; "claude-sonnet-4-6" for others
 
 # Cost tracking
 tracker = CostTracker(budget_usd=5.0)

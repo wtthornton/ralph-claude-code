@@ -4919,7 +4919,7 @@ Modern CLI Options (Phase 1.1):
 
 SDK Mode (Phase 6 — v1.3.0):
     --sdk                   Run in SDK mode (Python Agent SDK instead of bash loop)
-    --sdk-model MODEL       Set Claude model for SDK mode (default: claude-sonnet-4-20250514)
+    --sdk-model MODEL       Set Claude model for SDK mode (default: claude-sonnet-4-6)
     --sdk-max-turns NUM     Set max turns per iteration in SDK mode (default: 50)
 
 Observability (Phase 8 — v1.5.0):

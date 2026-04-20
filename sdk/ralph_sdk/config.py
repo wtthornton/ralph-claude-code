@@ -98,7 +98,7 @@ class RalphConfig(BaseModel):
     ralph_dir: str = ".ralph"
 
     # SDK-specific
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     max_turns: int = Field(default=50, ge=1, le=200)
 
     # SDK-LIFECYCLE-1: Cancel semantics
@@ -129,8 +129,8 @@ class RalphConfig(BaseModel):
     model_map_trivial: str = "claude-haiku-4-5"
     model_map_small: str = "claude-haiku-4-5"
     model_map_medium: str = "claude-sonnet-4-6"
-    model_map_large: str = "claude-opus-4-6"
-    model_map_architectural: str = "claude-opus-4-6"
+    model_map_large: str = "claude-opus-4-7"
+    model_map_architectural: str = "claude-opus-4-7"
 
     # SDK-COST-3: Token-based rate limiting
     max_tokens_per_hour: int = Field(default=0, ge=0, description="Max tokens per hour. 0 = disabled.")

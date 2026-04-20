@@ -193,7 +193,7 @@ ralph --calls 20 --timeout 30
 ralph --dry-run
 
 # SDK mode with a specific model
-ralph --sdk --sdk-model claude-opus-4-6
+ralph --sdk --sdk-model claude-opus-4-7
 
 # GitHub issue workflow
 ralph --issue 42 --live

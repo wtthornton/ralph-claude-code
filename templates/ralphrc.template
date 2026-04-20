@@ -157,12 +157,13 @@ DRY_RUN=false
 # =============================================================================
 
 # Model to use for Ralph loops (default: uses Claude Code's default)
-# Examples: claude-sonnet-4-6, claude-opus-4-6
+# Examples: claude-sonnet-4-6, claude-opus-4-7
 # CLAUDE_MODEL=""
 
-# Effort level for Ralph loops (default: uses agent definition or Claude default)
+# Effort level for Ralph loops. "low" reduces output tokens ~20-40% for routine tasks.
+# Agent definition defaults to "medium" — override here to reduce cost.
 # Options: low, medium, high
-# CLAUDE_EFFORT=""
+CLAUDE_EFFORT="low"
 
 # Auto-update Claude CLI at startup (checks npm registry, attempts npm update -g)
 # Recommended: true for local workstations and home servers (keeps CLI current automatically)
@@ -239,11 +240,12 @@ RALPH_MAX_EXPLORER_RESOLVE=5
 # =============================================================================
 
 # Enable progressive context loading to reduce token usage per iteration
-# When enabled, only the current epic and next N unchecked items are injected
-# RALPH_PROGRESSIVE_CONTEXT=false
+# When enabled, only the current epic and next N unchecked items are injected into the prompt.
+# Saves 200-500 tokens/loop on plans with more than RALPH_MAX_PLAN_ITEMS unchecked tasks.
+RALPH_PROGRESSIVE_CONTEXT=true
 
 # Maximum unchecked plan items to include in progressive context
-# RALPH_MAX_PLAN_ITEMS=10
+RALPH_MAX_PLAN_ITEMS=10
 
 # =============================================================================
 # COST OPTIMIZATION (Phase 14)
