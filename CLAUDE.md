@@ -63,6 +63,7 @@ bats tests/unit/test_cli_parsing.bats
 | `plan_optimizer.sh` | Fix plan task reordering — parses fix_plan.md, resolves vague tasks via ralph-explorer (Haiku), detects dependencies via import graph + explicit metadata + phase convention, orders via Unix `tsort`, validates semantic equivalence before atomic write. Runs at session start for changed sections only. (PLANOPT epic) |
 | `linear_backend.sh` | Linear API task backend — `linear_get_open_count`, `linear_get_done_count`, `linear_get_next_task`, `linear_check_configured`. Used when `RALPH_TASK_SOURCE=linear`. **Fail-loud (TAP-536)**: on API/network/parse errors the count/task functions print **nothing to stdout** and return non-zero, with a single structured `linear_api_error: op=<name> reason=<timeout\|network\|http_NNN\|graphql_errors\|parse\|...>` line on stderr (no secrets). Callers MUST distinguish "exit non-zero" (unknown) from "exit 0 + value" (real result) so a transient API outage cannot trip a false `plan_complete` exit. |
 | `skills_install.sh` | Global Claude skill install/uninstall with `.ralph-managed` sidecar manifest (TAP-574). `skills_install_global` syncs `templates/skills/global/<name>/` into `~/.claude/skills/<name>/` idempotently: fresh dirs get a copy + sha256 manifest; dirs with a matching sidecar refresh only Ralph-owned files and WARN on user-modified ones; dirs without a sidecar are left alone (user-authored). `skills_uninstall_global` is symmetric — removes only files whose current hash matches the manifest, preserving user edits. Sourced by `install.sh` in `main`/`upgrade`/`uninstall` and by `uninstall.sh`. Story 2 (TAP-575) will populate `templates/skills/global/`. |
+| `skill_retro.sh` | Skill friction detection and retro apply (SKILLS-INJECT-5/6/7). `skill_retro_detect_friction` reads `status.json` and stream logs after each loop, identifies friction signals (permission denials, repeated stalls, test failures, tool errors), and emits a structured JSON friction report. `skill_retro_apply` acts on the report — advisory mode (`RALPH_SKILL_AUTO_TUNE=false`) logs recommendations; auto-tune mode installs ≤1 skill per call from `~/.claude/skills/`. `skill_retro_periodic_reconcile` re-runs Tier A project detection every N loops (default 10, `RALPH_SKILL_REDETECT_INTERVAL`) and installs newly-applicable skills. |
 | ~~`response_analyzer.sh`~~ | Removed — response analysis handled by `on-stop.sh` hook → `status.json` |
 | ~~`file_protection.sh`~~ | Removed — file protection handled by PreToolUse hooks |
 
@@ -189,6 +190,9 @@ Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 - `RALPH_NO_OPTIMIZE` — Disable automatic fix_plan.md reordering on session start
 - `RALPH_NO_EXPLORER_RESOLVE` — Disable ralph-explorer file resolution for vague tasks
 - `RALPH_MAX_EXPLORER_RESOLVE` — Max vague tasks to resolve per optimization run (default: 5)
+- `RALPH_SKILL_AUTO_TUNE` — When `true`, `skill_retro_apply` installs up to 1 recommended skill per loop automatically (default: `false`)
+- `RALPH_SKILL_RETRO_WINDOW` — Number of recent loops to examine for friction patterns (default: 5)
+- `RALPH_SKILL_REDETECT_INTERVAL` — Run periodic Tier A skill re-detection every N loops (default: 10)
 
 Environment variables override `.ralphrc` settings.
 

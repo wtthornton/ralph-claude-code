@@ -1,6 +1,6 @@
 # Ralph CLI Reference
 
-**Version**: v2.6.0 | **Platform**: Linux, macOS, WSL, Git Bash (Windows)
+**Version**: v2.8.1 | **Platform**: Linux, macOS, WSL, Git Bash (Windows)
 
 ## Commands
 
@@ -146,6 +146,9 @@ Bash file sourced at startup. See `templates/ralphrc.template` for all options.
 | `RALPH_MAX_SESSION_ITERATIONS` | Continue-As-New trigger (iterations) | 20 |
 | `RALPH_MAX_SESSION_AGE_MINUTES` | Continue-As-New trigger (age) | 120 |
 | `RALPH_CONTINUE_AS_NEW_ENABLED` | Enable Continue-As-New pattern | true |
+| `RALPH_SKILL_AUTO_TUNE` | Auto-install 1 recommended skill per loop based on friction | false |
+| `RALPH_SKILL_RETRO_WINDOW` | Loops to examine for friction pattern detection | 5 |
+| `RALPH_SKILL_REDETECT_INTERVAL` | Re-run Tier A skill detection every N loops | 10 |
 
 ### ralph.config.json
 
