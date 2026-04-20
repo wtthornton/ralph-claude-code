@@ -76,7 +76,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.8.2"
+RALPH_VERSION="2.8.3"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -2168,10 +2168,11 @@ build_loop_context() {
     if [[ "${RALPH_MCP_DOCS_AVAILABLE:-false}" == "true" ]] && ralph_task_is_docs_related; then
         context+="docs-mcp available: prefer mcp__docs-mcp__* (docs_generate_adr/changelog/architecture, docs_check_links/drift/freshness, docs_module_map) for docs/ADR/changelog/README/API tasks instead of hand-writing. "
     fi
-    # tapps-mcp: code quality tools (quality_gate, score_file, impact_analysis).
-    # Skip on pure-docs loops — these tools add no value for README/ADR/changelog
-    # work and cost ~150 tokens of prompt space per iteration.
-    if [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]] && ! ralph_task_is_docs_related; then
+    # tapps-mcp: code quality tools (quality_gate, score_file, impact_analysis,
+    # lookup_docs). Injected unconditionally when reachable — lookup_docs applies
+    # to docs work too, and gating by task-type was a false economy that masked
+    # the guidance on mixed docs/code loops.
+    if [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]]; then
         context+="tapps-mcp available: use mcp__tapps-mcp__tapps_quality_gate before declaring work complete, tapps_lookup_docs before calling external library APIs, tapps_score_file on modified Python files, tapps_impact_analysis before non-trivial refactors. "
     fi
     # tapps-brain: cross-session memory / learning. Projects register this MCP

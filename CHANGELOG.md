@@ -10,6 +10,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.8.3] — 2026-04-20
+
+### Added
+- **TAP-741**: Push-mode Linear counts via `RALPH_STATUS` — when `LINEAR_API_KEY` is unset (OAuth-via-MCP deployments), `linear_get_open_count` / `linear_get_done_count` fall back to reading `linear_open_count` / `linear_done_count` from `.ralph/status.json`, written by the on-stop hook from Claude's RALPH_STATUS block; entries older than `RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS` (default 900) abstain via the TAP-536 fail-loud path; `linear_check_configured` now requires only `RALPH_LINEAR_PROJECT`
+
+### Fixed
+- Monitor: repair zero-token / zero-cost display, staleness detection, and silent-UNKNOWN fallback
+- MCP probe: use temp file + `--kill-after` to prevent probe hang on unresponsive servers
+- `build_loop_context`: `tapps-mcp` guidance block is now injected unconditionally when the server is reachable (drops the stale `! ralph_task_is_docs_related` gate that silently suppressed the block on mixed docs/code loops); matches the documented design in CLAUDE.md
+
+---
+
 ## [2.8.2] — 2026-04-20
 
 ### Added
