@@ -8,6 +8,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **SKILLS-INJECT-5**: `lib/skill_retro.sh` — friction signal detection: reads `status.json` and stream logs after each loop, identifies signals (permission denials, repeated stalls, test failures, tool errors), emits a structured JSON friction report
+- **SKILLS-INJECT-6**: Retro apply in `lib/skill_retro.sh` — advisory mode by default (`RALPH_SKILL_AUTO_TUNE=false`); when enabled, installs ≤1 recommended skill per loop based on friction report; checksum-guard prevents overwriting user-modified skills
+- **SKILLS-INJECT-7**: Periodic re-detection (`skill_retro_periodic_reconcile`) — re-runs Tier A project detection every N loops (default 10, `RALPH_SKILL_REDETECT_INTERVAL`) and reconciles installed skills against current project state
+
+---
+
+## [2.8.1] — 2026-04-20
+
+### Added
+- **SKILLS-INJECT-1–4**: Project skill detection, install, and PROMPT.md hints — `detect_tier_a_skills()` and `install_project_tier_a_skills()` in `lib/enable_core.sh`; `inject_skill_hints_into_prompt()` appends an "Available Skills" section to `.ralph/PROMPT.md` idempotently; 20 new BATS tests
+- Session run-ID boundary tracking — `on-stop.sh` resets cost/token/MCP accumulators when run ID changes, preventing stale totals bleeding into a new session
+- Monitor: Linear issue display with `(executing...)` fallback and MCP activity row (top-3 tools per loop by call count)
+
+### Fixed
+- **TAP-658**: Cap circuit breaker history at 200 entries (prevents jq OOM on long runs); atomic `mv` instead of `>` redirect
+- **TAP-661**: Validate template hooks before and after copy in `ralph_upgrade_project.sh` — skip empty/syntax-invalid sources with WARN; write to tmp, `bash -n` verify, then atomic mv
+- **TAP-662**: Track `_tokens_extracted` flag in `_extract_session_id()`; missing usage block emits `logger.warning` instead of silently recording $0 cost
+- **TAP-659**: Replace sed-based JSON escape in `lib/notifications.sh` webhook with `jq --arg` — eliminates JSON injection vector
+- **TAP-657**: Bump `actions/checkout` and `actions/setup-node` from v3 → v4 in `.github/workflows/test.yml`
+- **TAP-656**: Remove corrupt duplicate hook entries from `.claude/settings.json`; add `tests/unit/test_settings_json.bats` (6 assertions) to guard against recurrence
+- **TAP-730**: `ralph_upgrade_project.sh` now chmod u+w before overwriting read-only (555) hook/agent files
+- Monitor: show cache% block when cache data present but tokens are zero
+- Linear: tighten In Review rules — security bug fixes and hardening now default to Done; uncertainty defaults to Done (AC met) or In Progress, never In Review
+- Signal trap cleanup now passes explicit 130/143 into `cleanup()` — stray loop iterations after `kill <pid>` eliminated
+- `lib/tracing.sh`: build JSONL spans via `jq --arg` instead of shell interpolation; add jq validity check before appending
+
+### Changed
+- Upgrade Claude model IDs to April 2026 lineup — `claude-sonnet-4-6` (was `claude-sonnet-4-20250514`), `claude-opus-4-7` for LARGE/ARCHITECTURAL routing
+- `templates/PROMPT.md`: RALPH:START/END marker support so `ralph-upgrade` can refresh only the managed section
+- `templates/skills-local/ralph-workflow/SKILL.md`: step 6.5 deslop pass at epic boundaries via simplify skill; controlled by `RALPH_NO_DESLOP=true`
+- `.mcp.json`: tapps-brain MCP server registered for this project
+
+---
+
+## [2.7.2] — 2026-04-20
+
+### Fixed
+- Linear workflow: codify In Review as rare/hard-blocker-only with four valid reasons; unmerged branches stay In Progress for self-retry
+- Signal trap: SIGINT/SIGTERM pass explicit 130/143 exit codes; stray loop iteration after kill eliminated
+- CI: remove dormant PR review workflows (`claude.yml`, `claude-code-review.yml`, `opencode-review.yml`) with unconfigured secrets
+
 ---
 
 ## [2.7.1] — 2026-04-20
