@@ -25,6 +25,9 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/tracing.sh" ]] && source "$SCRIPT_DIR/lib/tracing.sh"
 [[ -f "$SCRIPT_DIR/lib/linear_backend.sh" ]] && source "$SCRIPT_DIR/lib/linear_backend.sh"
 [[ -f "$SCRIPT_DIR/lib/skill_retro.sh" ]] && source "$SCRIPT_DIR/lib/skill_retro.sh"
+# BRAIN-PHASE-B1: memory writes from on-stop hook. Sourced here so the main
+# loop also has access if we later want to write outside hook context.
+[[ -f "$SCRIPT_DIR/lib/brain_client.sh" ]] && source "$SCRIPT_DIR/lib/brain_client.sh"
 
 # TAP-535: Bash 4+ required for `${BASH_VERSINFO[@]}`, mapfile/readarray, named
 # refs, and the rest of the modern bash features used throughout this script.
@@ -164,7 +167,16 @@ CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-15}"
 CLAUDE_OUTPUT_FORMAT="${CLAUDE_OUTPUT_FORMAT:-json}"
 # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
 # Issue #154: Store default so we can detect user customization (needed for agent mode fallback)
-RALPH_DEFAULT_ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*,mcp__tapps-brain__*"
+# BRAIN-PHASE-B0: tapps-brain exposes ~55 MCP tools (agent_*, diagnostics_*,
+# feedback_*, flywheel_*, hive_*, memory_* (26 of them), profile_*, plus the
+# five agent-facing brain_* tools). Whitelisting the whole namespace with
+# `mcp__tapps-brain__*` dumped all ~55 into Claude's tool catalog, drowning
+# out the five that actually matter for an autonomous dev loop. This is a
+# Ralph-side proxy for tapps-brain's STORY-070.9 (operator/agent split)
+# until that ships — narrow the surface to the only tools Ralph wants Claude
+# reaching for: recall on task start, remember for non-obvious fixes, forget
+# to prune, and learn_success/learn_failure at outcome boundaries.
+RALPH_DEFAULT_ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*,mcp__tapps-brain__brain_recall,mcp__tapps-brain__brain_remember,mcp__tapps-brain__brain_forget,mcp__tapps-brain__brain_learn_success,mcp__tapps-brain__brain_learn_failure"
 CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-$RALPH_DEFAULT_ALLOWED_TOOLS}"
 CLAUDE_USE_CONTINUE="${CLAUDE_USE_CONTINUE:-true}"
 CLAUDE_SESSION_FILE="$RALPH_DIR/.claude_session_id" # Session ID persistence file
@@ -4407,6 +4419,12 @@ main() {
     # TAP-584 (epic TAP-583): Probe global MCP availability so downstream stories
     # (TAP-585 prompt guidance, TAP-588 counters) can gate on the result.
     ralph_probe_mcp_servers
+
+    # BRAIN-PHASE-B1: clear the session-scoped kill-switch so a new run isn't
+    # stuck disabled from a prior session's HTTP failure. The switch re-arms
+    # on the first failing write in this session.
+    declare -F brain_client_clear_session_disable >/dev/null 2>&1 && \
+        brain_client_clear_session_disable "$RALPH_DIR"
 
     # XPLAT-2: Validate hooks at startup
     ralph_validate_hooks

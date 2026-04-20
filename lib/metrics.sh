@@ -199,7 +199,66 @@ ralph_show_stats() {
         echo "Work type breakdown:"
         echo "$work_breakdown" | jq -r '.[] | "  \(.type): \(.count)"' 2>/dev/null
         ralph_show_skill_stats "human"
+        ralph_show_brain_stats "human"
     fi
+}
+
+# =============================================================================
+# BRAIN-PHASE-B2: tapps-brain write telemetry.
+#
+# The on-stop hook writes one JSONL row to .ralph/metrics/brain.jsonl per
+# attempted POST to /v1/remember. Without this section of --stats we can't
+# tell whether the hook is actually firing, whether brain is reachable, or
+# how fast the round-trip is — which is the whole point of adding writes in
+# Phase B1. Silent on no data (fresh projects / brain-less repos).
+# =============================================================================
+ralph_show_brain_stats() {
+    local format="${1:-human}"
+    local brain_file="${RALPH_DIR:-.ralph}/metrics/brain.jsonl"
+
+    [[ -f "$brain_file" ]] || return 0
+    command -v jq &>/dev/null || return 0
+
+    local stats
+    stats=$(jq -s '{
+        total: length,
+        ok: (map(select(.ok == true)) | length),
+        err: (map(select(.ok == false)) | length),
+        success_writes: (map(select(.op == "success")) | length),
+        failure_writes: (map(select(.op == "failure")) | length),
+        avg_ms: (
+            (map(select(.ok == true) | .latency_ms) | if length == 0 then 0 else (add / length) end) | floor
+        ),
+        last_code: (.[-1].http_code // "")
+    }' "$brain_file" 2>/dev/null)
+
+    [[ -z "$stats" || "$stats" == "null" ]] && return 0
+
+    if [[ "$format" == "json" ]]; then
+        echo "$stats"
+        return 0
+    fi
+
+    local total ok err sw fw avg_ms last_code
+    total=$(echo "$stats" | jq -r '.total // 0')
+    ok=$(echo "$stats" | jq -r '.ok // 0')
+    err=$(echo "$stats" | jq -r '.err // 0')
+    sw=$(echo "$stats" | jq -r '.success_writes // 0')
+    fw=$(echo "$stats" | jq -r '.failure_writes // 0')
+    avg_ms=$(echo "$stats" | jq -r '.avg_ms // 0')
+    last_code=$(echo "$stats" | jq -r '.last_code // ""')
+
+    [[ "$total" == "0" ]] && return 0
+
+    echo ""
+    echo "Brain writes (tapps-brain):"
+    echo "  Total:               $total"
+    echo "  Successful (2xx):    $ok"
+    echo "  Errors:              $err"
+    echo "  Success memories:    $sw"
+    echo "  Failure memories:    $fw"
+    [[ "$ok" != "0" ]] && echo "  Avg latency:         ${avg_ms}ms"
+    [[ -n "$last_code" ]] && echo "  Last HTTP code:      $last_code"
 }
 
 # =============================================================================

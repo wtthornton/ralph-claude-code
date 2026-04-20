@@ -631,4 +631,62 @@ if [[ -f "$_ralph_log" ]]; then
   fi
 fi
 
+# =============================================================================
+# BRAIN-PHASE-B1: Deterministic tapps-brain writes.
+#
+# Runs after status.json and CB state are finalized, so we can read the
+# authoritative outcome for this loop. The client internally gates on
+# TAPPS_BRAIN_AUTH_TOKEN + session kill-switch — this block only decides
+# *whether the loop was memory-worthy*.
+#
+# Rationale for writing directly from the hook instead of steering Claude:
+# across every stream log on disk Claude never organically called
+# brain_remember from a non-brain repo. Brain stays empty → recall returns
+# nothing → the feedback loop dies. Hook writes bypass Claude's cooperation
+# entirely — every productive loop leaves a trace, every CB trip leaves a
+# warning.
+# =============================================================================
+_brain_lib=""
+for _p in "$HOME/.ralph/lib/brain_client.sh" \
+          "${RALPH_INSTALL_DIR:-/nonexistent}/lib/brain_client.sh"; do
+  [[ -f "$_p" ]] && { _brain_lib="$_p"; break; }
+done
+
+if [[ -n "$_brain_lib" ]]; then
+  # shellcheck source=/dev/null
+  source "$_brain_lib"
+
+  # Success signal: this loop made real progress. Record what got done so
+  # future loops can recall. Task id from Linear field when available.
+  if [[ "$files_modified" -gt 0 && "$tasks_done" -gt 0 ]]; then
+    _brain_desc="Loop $loop_count completed $tasks_done task(s) touching $files_modified file(s)"
+    [[ -n "$recommendation" ]] && _brain_desc="${_brain_desc}. ${recommendation:0:200}"
+    _brain_task_id="${linear_issue:-}"
+    brain_client_write_success "$RALPH_DIR" "$_brain_desc" "$_brain_task_id" >/dev/null 2>&1 || true
+  fi
+
+  # Failure signal: permission denials OR circuit breaker just opened.
+  # Both are deterministic "this task is blocked" markers worth memorizing
+  # so future loops on the same task can recognize the pattern fast.
+  _cb_now="CLOSED"
+  if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
+    _cb_now=$(jq -r '.state // "CLOSED"' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "CLOSED")
+  fi
+  if [[ "$has_permission_denials" == "true" || "$_cb_now" == "OPEN" ]]; then
+    _brain_desc="Loop $loop_count stalled"
+    _brain_err=""
+    if [[ "$has_permission_denials" == "true" ]]; then
+      _brain_desc="${_brain_desc}: $permission_denial_count permission denial(s)"
+      _brain_err="permission_denial"
+    fi
+    if [[ "$_cb_now" == "OPEN" ]]; then
+      _cb_reason=$(jq -r '.reason // "no progress threshold reached"' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "no progress")
+      _brain_desc="${_brain_desc} — circuit breaker OPEN: ${_cb_reason}"
+      _brain_err="circuit_breaker_open"
+    fi
+    _brain_task_id="${linear_issue:-}"
+    brain_client_write_failure "$RALPH_DIR" "$_brain_desc" "$_brain_err" "$_brain_task_id" >/dev/null 2>&1 || true
+  fi
+fi
+
 exit 0

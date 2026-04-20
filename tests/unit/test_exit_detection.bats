@@ -1700,17 +1700,29 @@ EOF
     [[ $len -le 1500 ]] || fail "Context exceeded 1500-char cap: $len chars"
 }
 
-@test "RALPH_DEFAULT_ALLOWED_TOOLS includes mcp__tapps-brain__*" {
-    # Protect against future refactors that forget the allow pattern — without
-    # it every brain_* call would hit a permission denial even when the server
-    # is reachable.
+@test "RALPH_DEFAULT_ALLOWED_TOOLS permits the 5 brain_* agent tools" {
+    # BRAIN-PHASE-B0: narrowed from the `mcp__tapps-brain__*` wildcard (which
+    # exposed ~55 operator tools) to the 5 tools Ralph actually wants Claude
+    # reaching for. If this list shrinks, a reachable brain server + prompt
+    # guidance from TAP-585 would still hit permission denials on the agent
+    # tools. Protect against accidental regression.
     run grep 'RALPH_DEFAULT_ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
-    [[ "$output" == *"mcp__tapps-brain__*"* ]] || fail "Missing mcp__tapps-brain__* in defaults"
+    for tool in brain_recall brain_remember brain_forget brain_learn_success brain_learn_failure; do
+        [[ "$output" == *"mcp__tapps-brain__${tool}"* ]] || fail "Missing mcp__tapps-brain__${tool} in defaults"
+    done
+    # And assert the broad wildcard is NOT present — that's the drowning-in-noise
+    # failure mode we just removed.
+    [[ "$output" == *"mcp__tapps-brain__*"* ]] && fail "Broad wildcard mcp__tapps-brain__* re-introduced (defeats B0)"
+    return 0
 }
 
-@test "templates/ralphrc.template includes mcp__tapps-brain__*" {
+@test "templates/ralphrc.template permits the 5 brain_* agent tools" {
     run grep 'ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../templates/ralphrc.template"
-    [[ "$output" == *"mcp__tapps-brain__*"* ]] || fail "Missing mcp__tapps-brain__* in template"
+    for tool in brain_recall brain_remember brain_forget brain_learn_success brain_learn_failure; do
+        [[ "$output" == *"mcp__tapps-brain__${tool}"* ]] || fail "Missing mcp__tapps-brain__${tool} in template"
+    done
+    [[ "$output" == *"mcp__tapps-brain__*"* ]] && fail "Broad wildcard mcp__tapps-brain__* re-introduced in template"
+    return 0
 }
 
 @test "ralph_print_mcp_status reports tapps-brain" {

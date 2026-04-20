@@ -55,13 +55,21 @@ CLAUDE_OUTPUT_FORMAT="json"
 # agent mode, edit disallowedTools in .claude/agents/ralph.md instead.
 #
 # MCP TOOLS (TAP-583):
-# mcp__tapps-mcp__*, mcp__docs-mcp__*, and mcp__tapps-brain__* are permitted
-# by default so prompt guidance from build_loop_context() (TAP-585) doesn't
-# hit permission denials. Each MCP server is probed at startup — if it is not
-# registered in the project's own Claude MCP config (e.g. `.mcp.json` or
-# `claude mcp add`), Ralph skips the guidance block for it. Remove a pattern
-# here to disable that MCP per-project even if the server is running.
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*,mcp__tapps-brain__*"
+# mcp__tapps-mcp__*, mcp__docs-mcp__*, and a narrow five-tool slice of
+# mcp__tapps-brain__* are permitted by default so prompt guidance from
+# build_loop_context() (TAP-585) doesn't hit permission denials. Each MCP
+# server is probed at startup — if it is not registered in the project's own
+# Claude MCP config (e.g. `.mcp.json` or `claude mcp add`), Ralph skips the
+# guidance block for it.
+#
+# BRAIN-PHASE-B0: tapps-brain exposes ~55 tools (agent_*, diagnostics_*,
+# feedback_*, flywheel_*, hive_*, memory_* (26), profile_*, etc.). Whitelisting
+# the whole namespace drowns out the five that matter for Ralph's loop. We
+# narrow to: brain_recall (task-start lookup), brain_remember (non-obvious
+# fixes), brain_forget (pruning), brain_learn_success/failure (outcome
+# signals). This is a Ralph-side proxy for tapps-brain's STORY-070.9
+# operator/agent split until that ships.
+ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*,mcp__tapps-brain__brain_recall,mcp__tapps-brain__brain_remember,mcp__tapps-brain__brain_forget,mcp__tapps-brain__brain_learn_success,mcp__tapps-brain__brain_learn_failure"
 
 # =============================================================================
 # SESSION MANAGEMENT
