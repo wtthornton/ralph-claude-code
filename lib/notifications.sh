@@ -97,19 +97,21 @@ _notify_webhook() {
     fi
 
     local payload
-    payload=$(printf '{"event":"%s","title":"%s","message":"%s","timestamp":"%s","project":"%s"}' \
-        "$event_type" \
-        "$(echo "$title" | sed 's/"/\\"/g')" \
-        "$(echo "$message" | sed 's/"/\\"/g')" \
-        "$timestamp" \
-        "${PROJECT_NAME:-unknown}")
+    payload=$(jq -n \
+        --arg event "$event_type" \
+        --arg title "$title" \
+        --arg message "$message" \
+        --arg ts "$timestamp" \
+        --arg project "${PROJECT_NAME:-unknown}" \
+        '{event: $event, title: $title, message: $message, timestamp: $ts, project: $project}')
 
-    # Fire-and-forget: timeout 5s, no error handling
-    curl -s -X POST \
+    if ! curl -s -X POST \
         -H "Content-Type: application/json" \
         -d "$payload" \
         --max-time 5 \
-        "$RALPH_WEBHOOK_URL" >/dev/null 2>&1 || true
+        "$RALPH_WEBHOOK_URL" >/dev/null 2>&1; then
+        echo "WARN: webhook POST failed for event=$event_type url=$RALPH_WEBHOOK_URL" >&2
+    fi
 }
 
 # Sound notification (terminal bell)
