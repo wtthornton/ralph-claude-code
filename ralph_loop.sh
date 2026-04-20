@@ -3079,9 +3079,17 @@ ralph_probe_mcp_servers() {
     fi
 
     # 5s upper bound — a hung MCP transport must not stall startup.
-    local probe_output
-    if ! probe_output=$(portable_timeout 5s $CLAUDE_CODE_CMD mcp list 2>&1); then
-        log_status "WARN" "MCP probe failed: '$CLAUDE_CODE_CMD mcp list' returned non-zero or timed out"
+    # Use a temp file instead of $() to avoid the pipe-stays-open problem:
+    # claude spawns MCP server child processes that keep the pipe's write-fd
+    # open after claude exits from SIGTERM, so $() never sees EOF and hangs.
+    # Redirecting to a file lets timeout exit cleanly regardless of children.
+    local probe_output probe_tmp
+    probe_tmp=$(mktemp)
+    timeout --kill-after=3s 5s $CLAUDE_CODE_CMD mcp list >"$probe_tmp" 2>&1 || true
+    probe_output=$(cat "$probe_tmp" 2>/dev/null)
+    rm -f "$probe_tmp"
+    if [[ -z "$probe_output" ]]; then
+        log_status "WARN" "MCP probe failed: '$CLAUDE_CODE_CMD mcp list' returned no output or timed out"
         return 0
     fi
 
