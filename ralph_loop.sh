@@ -39,6 +39,33 @@ fi
 # so library code (which has its own conventions) is unaffected.
 set -o pipefail
 
+# BRAIN-PHASE-A: Load user-level secrets (TAPPS_BRAIN_AUTH_TOKEN, etc.) from
+# ~/.ralph/secrets.env. Non-interactive shells — systemd units, cron, tmux
+# panes started before the user exported a var — never source ~/.bashrc, so
+# variables the user "set once" in their shell rc never reach Ralph. A
+# dedicated secrets file keeps them available regardless of invocation
+# context. `set -a` exports everything sourced so the Claude CLI subprocess
+# (and its MCP handshakes) inherit the values without a second export.
+#
+# Runs here — before arg parsing — so `ralph --mcp-status` picks secrets up
+# too, not just the main loop.
+load_ralph_secrets() {
+    local secrets="$HOME/.ralph/secrets.env"
+    [[ -f "$secrets" ]] || return 0
+    local perms=""
+    if command -v stat &>/dev/null; then
+        perms=$(stat -c '%a' "$secrets" 2>/dev/null || stat -f '%A' "$secrets" 2>/dev/null || echo "")
+    fi
+    if [[ -n "$perms" && "${perms: -2}" != "00" ]]; then
+        echo "WARN: $secrets is group/world-readable (mode $perms). Run: chmod 600 $secrets" >&2
+    fi
+    set -a
+    # shellcheck source=/dev/null
+    source "$secrets"
+    set +a
+}
+load_ralph_secrets
+
 # TAP-535: atomic_write — write VALUE to FILE via a unique temp + rename.
 # Protects counters and other small state files from partial-write corruption
 # when the script is killed mid-write, and avoids zero-byte counter files that
@@ -3128,8 +3155,56 @@ ralph_probe_mcp_servers() {
         RALPH_MCP_BRAIN_AVAILABLE="true"
         log_status "INFO" "MCP probe: tapps-brain reachable"
     else
-        log_status "WARN" "MCP probe: tapps-brain NOT reachable — Ralph will not steer Claude toward it"
+        ralph_diagnose_brain_probe_failure
     fi
+}
+
+# BRAIN-PHASE-A: When `claude mcp list` reports tapps-brain as "failed to
+# connect", that single bit conflates "container down" and "container up but
+# bearer token missing/wrong". Curl the /health endpoint (unauthenticated by
+# design) to distinguish, so operators aren't left grep'ing docker logs.
+#
+# Runs only on probe failure — success path stays fast.
+ralph_diagnose_brain_probe_failure() {
+    log_status "WARN" "MCP probe: tapps-brain NOT reachable — Ralph will not steer Claude toward it"
+
+    # Parse the endpoint from the project's .mcp.json so we probe the exact
+    # URL the MCP client is using. Fall back to the conventional local-dev
+    # endpoint if jq is missing or the entry isn't present.
+    local brain_url=""
+    if [[ -f "./.mcp.json" ]] && command -v jq &>/dev/null; then
+        brain_url=$(jq -r '.mcpServers["tapps-brain"].url // ""' \
+            "./.mcp.json" 2>/dev/null || echo "")
+    fi
+    [[ -z "$brain_url" || "$brain_url" == "null" ]] && brain_url="http://127.0.0.1:8080/mcp/"
+
+    # Derive scheme://host[:port]/health from the MCP URL.
+    local health_url
+    health_url=$(echo "$brain_url" | sed -E 's#(https?://[^/]+).*#\1/health#')
+
+    if ! command -v curl &>/dev/null; then
+        log_status "INFO" "  curl not installed — cannot diagnose further"
+        return 0
+    fi
+
+    local code
+    code=$(curl -sS -o /dev/null --max-time 3 -w "%{http_code}" "$health_url" 2>/dev/null || echo "000")
+    case "$code" in
+        200)
+            log_status "INFO" "  $health_url -> 200 (container up) — bearer token is likely missing or wrong"
+            if [[ -z "${TAPPS_BRAIN_AUTH_TOKEN:-}" ]]; then
+                log_status "INFO" "  TAPPS_BRAIN_AUTH_TOKEN is not set. Add it to ~/.ralph/secrets.env (chmod 600)."
+            else
+                log_status "INFO" "  TAPPS_BRAIN_AUTH_TOKEN is set — verify it matches the brain container's configured token"
+            fi
+            ;;
+        000|"")
+            log_status "INFO" "  $health_url unreachable — brain container appears to be down (check: docker ps | grep tapps-brain)"
+            ;;
+        *)
+            log_status "INFO" "  $health_url -> HTTP $code — unexpected response; check the brain container logs"
+            ;;
+    esac
 }
 
 # TAP-584: Print a capability summary for `ralph --mcp-status`. Runs the probe

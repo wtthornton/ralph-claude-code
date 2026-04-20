@@ -359,6 +359,39 @@ install_ralph_loop() {
     log "SUCCESS" "Global ralph_loop.sh installed"
 }
 
+# BRAIN-PHASE-A: Ship ~/.ralph/secrets.env.example so users have a template
+# for user-level secrets (TAPPS_BRAIN_AUTH_TOKEN, etc.). ralph_loop.sh sources
+# ~/.ralph/secrets.env at startup — before arg parsing and the MCP probe — so
+# non-interactive shells don't need to source ~/.bashrc.
+#
+# Never overwrites an existing live secrets.env; never auto-creates one.
+install_secrets_example() {
+    local example="$RALPH_HOME/secrets.env.example"
+    cat > "$example" << 'EOF'
+# Ralph user-level secrets. Loaded at startup by ralph_loop.sh before the MCP
+# probe, so non-interactive shells (cron, systemd, tmux panes started before
+# the user exported a var) don't need to source ~/.bashrc to pick these up.
+#
+# Setup:
+#   cp ~/.ralph/secrets.env.example ~/.ralph/secrets.env
+#   chmod 600 ~/.ralph/secrets.env
+#   $EDITOR ~/.ralph/secrets.env
+#
+# Variables go through `set -a; source; set +a`, so exports propagate to the
+# Claude CLI subprocess and its MCP handshakes.
+
+# tapps-brain HTTP MCP bearer token. Must match the token the brain container
+# was started with (see ~/code/tapps-brain/.env → TAPPS_BRAIN_AUTH_TOKEN).
+# Referenced from per-project .mcp.json as ${TAPPS_BRAIN_AUTH_TOKEN}.
+# TAPPS_BRAIN_AUTH_TOKEN=
+EOF
+    chmod 644 "$example"
+    log "SUCCESS" "Secrets template installed: $example"
+    if [[ ! -f "$RALPH_HOME/secrets.env" ]]; then
+        log "INFO" "No ~/.ralph/secrets.env yet — copy the example above, chmod 600, fill in values"
+    fi
+}
+
 # Install global setup.sh
 install_setup() {
     log "INFO" "Installing global setup script..."
@@ -740,6 +773,7 @@ main() {
     create_install_dirs
     install_scripts
     install_ralph_loop
+    install_secrets_example
     install_setup
     install_sdk
     install_upgrade_command
@@ -805,6 +839,7 @@ upgrade() {
     create_install_dirs
     install_scripts
     install_ralph_loop
+    install_secrets_example
     install_setup
     install_sdk
     install_upgrade_command
