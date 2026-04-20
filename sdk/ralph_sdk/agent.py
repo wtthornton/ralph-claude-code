@@ -1061,7 +1061,12 @@ class RalphAgent:
             status.correlation_id = self.correlation_id
 
             # SDK-COST-1: Record cost for this iteration
-            if self._last_tokens_in or self._last_tokens_out:
+            if not self._tokens_extracted:
+                # TAP-662: distinguish "no usage block" from "0 tokens used"
+                logger.warning(
+                    "No token counts in CLI output; cost for this iteration not recorded"
+                )
+            elif self._last_tokens_in or self._last_tokens_out:
                 self._cost_tracker.record_iteration(
                     model=self.config.model,
                     input_tokens=self._last_tokens_in,
@@ -1331,6 +1336,7 @@ class RalphAgent:
         """Extract session_id and token counts from JSONL result objects."""
         self._last_tokens_in = 0
         self._last_tokens_out = 0
+        self._tokens_extracted = False
         for line in reversed(stdout.strip().splitlines()):
             line = line.strip()
             if not line:
@@ -1344,6 +1350,7 @@ class RalphAgent:
                     usage = obj.get("usage") or {}
                     self._last_tokens_in += usage.get("input_tokens", 0)
                     self._last_tokens_out += usage.get("output_tokens", 0)
+                    self._tokens_extracted = True
                     return
             except json.JSONDecodeError:
                 continue

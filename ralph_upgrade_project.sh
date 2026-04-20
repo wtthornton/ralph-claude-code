@@ -62,15 +62,17 @@ declare -g TOTAL_UPDATED=0
 declare -g TOTAL_SKIPPED=0
 declare -g TOTAL_BACKED_UP=0
 declare -g TOTAL_CREATED=0
+declare -g TOTAL_ERRORS=0
 
 # Per-project counters (reset in upgrade_single_project)
 declare -g PROJ_UPDATED=0
 declare -g PROJ_SKIPPED=0
 declare -g PROJ_BACKED_UP=0
 declare -g PROJ_CREATED=0
+declare -g PROJ_ERRORS=0
 
 reset_project_counters() {
-    PROJ_UPDATED=0; PROJ_SKIPPED=0; PROJ_BACKED_UP=0; PROJ_CREATED=0
+    PROJ_UPDATED=0; PROJ_SKIPPED=0; PROJ_BACKED_UP=0; PROJ_CREATED=0; PROJ_ERRORS=0
 }
 
 flush_project_counters() {
@@ -78,6 +80,7 @@ flush_project_counters() {
     TOTAL_SKIPPED=$((TOTAL_SKIPPED + PROJ_SKIPPED))
     TOTAL_BACKED_UP=$((TOTAL_BACKED_UP + PROJ_BACKED_UP))
     TOTAL_CREATED=$((TOTAL_CREATED + PROJ_CREATED))
+    TOTAL_ERRORS=$((TOTAL_ERRORS + PROJ_ERRORS))
 }
 
 # =============================================================================
@@ -211,9 +214,34 @@ upgrade_hooks() {
                 log DRY "Would create hook: $name"
             fi
         else
+            # TAP-661: validate source before touching the project copy.
+            if [[ ! -s "$src_hook" ]]; then
+                log WARN "Skipping $name — template is empty"
+                continue
+            fi
+            if ! bash -n "$src_hook" 2>/dev/null; then
+                log WARN "Skipping $name — template failed syntax check"
+                continue
+            fi
+
             create_backup "$project" ".ralph/hooks/$name"
             [[ -f "$dst_hook" ]] && chmod u+w "$dst_hook" 2>/dev/null || true
-            tr -d $'\r' < "$src_hook" > "$dst_hook"
+
+            # Write to a temp file, syntax-check the copy, then atomic rename.
+            local tmp_hook="${dst_hook}.tmp.$$.${RANDOM}"
+            tr -d $'\r' < "$src_hook" > "$tmp_hook"
+            if ! bash -n "$tmp_hook" 2>/dev/null; then
+                rm -f -- "$tmp_hook"
+                log ERROR "Hook $name copy failed syntax check — rolling back"
+                local bak
+                bak=$(ls -1t "$project/.ralph/.upgrade-backups"/*/".ralph/hooks/$name" 2>/dev/null | head -1)
+                if [[ -n "$bak" ]]; then
+                    cp -f "$bak" "$dst_hook" && log WARN "Restored $name from backup"
+                fi
+                PROJ_ERRORS=$((PROJ_ERRORS + 1))
+                continue
+            fi
+            mv -f "$tmp_hook" "$dst_hook"
             chmod +x "$dst_hook"
             log SUCCESS "Updated hook: $name"
         fi

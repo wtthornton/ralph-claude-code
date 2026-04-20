@@ -256,12 +256,25 @@ _cb_check_cooldown() {
 _cb_log_transition() {
     local from_state=$1 to_state=$2 reason=$3
 
-    # Append to history file
+    # Append to history file (capped at 200 entries to prevent unbounded jq OOM).
+    # TAP-658: build transition via --arg to avoid shell-quoting issues; atomic mv.
     if [[ -f "$CB_HISTORY_FILE" ]]; then
-        local transition="{\"timestamp\": \"$(get_iso_timestamp)\", \"from_state\": \"$from_state\", \"to_state\": \"$to_state\", \"reason\": \"$reason\"}"
-        local history
-        history=$(cat "$CB_HISTORY_FILE")
-        echo "$history" | jq ". += [$transition]" > "$CB_HISTORY_FILE" 2>/dev/null || true
+        local transition
+        transition=$(jq -nc \
+            --arg ts "$(get_iso_timestamp)" \
+            --arg from "$from_state" \
+            --arg to "$to_state" \
+            --arg reason "$reason" \
+            '{timestamp: $ts, from_state: $from, to_state: $to, reason: $reason}')
+        local tmp="${CB_HISTORY_FILE}.tmp.$$.${RANDOM}"
+        if jq --argjson t "$transition" '. + [$t] | .[-200:]' \
+               "$CB_HISTORY_FILE" > "$tmp" 2>/dev/null \
+           && mv -f "$tmp" "$CB_HISTORY_FILE" 2>/dev/null; then
+            :
+        else
+            rm -f -- "$tmp" 2>/dev/null
+            echo "WARN: circuit breaker history write failed for $CB_HISTORY_FILE" >&2
+        fi
     fi
 
     # Console log with colors
