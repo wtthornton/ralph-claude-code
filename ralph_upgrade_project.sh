@@ -206,6 +206,7 @@ upgrade_hooks() {
             fi
         else
             create_backup "$project" ".ralph/hooks/$name"
+            [[ -f "$dst_hook" ]] && chmod u+w "$dst_hook" 2>/dev/null || true
             tr -d $'\r' < "$src_hook" > "$dst_hook"
             chmod +x "$dst_hook"
             log SUCCESS "Updated hook: $name"
@@ -261,6 +262,7 @@ upgrade_agents() {
             fi
         else
             create_backup "$project" ".claude/agents/$name"
+            [[ -f "$dst_agent" ]] && chmod u+w "$dst_agent" 2>/dev/null || true
             tr -d $'\r' < "$src_agent" > "$dst_agent"
             log SUCCESS "Updated agent: $name"
         fi
