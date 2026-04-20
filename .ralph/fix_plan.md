@@ -65,10 +65,10 @@ active circuit breaker, correlation ID, TaskPacket conversion, EvidenceBundle ou
 
 - [x] TAP-573 SKILLS-INJECT-4: Inject skill hints into `PROMPT.md` at enable time — one-line per installed skill describing when to trigger it.
 
-- [ ] TAP-573 SKILLS-INJECT-5: Implement `lib/skill_retro.sh` friction detection — read `status.json` + stream log after each loop, identify friction signals (repeated tool failures, long stalls, missing patterns), emit JSON friction report.
+- [x] TAP-573 SKILLS-INJECT-5: Implement `lib/skill_retro.sh` friction detection — read `status.json` + stream log after each loop, identify friction signals (repeated tool failures, long stalls, missing patterns), emit JSON friction report.
 
-- [ ] TAP-573 SKILLS-INJECT-6: Implement retro apply in `lib/skill_retro.sh` — advisory mode by default (`RALPH_SKILL_AUTO_TUNE=false`); when enabled, add 1 skill / remove 1 skill per loop based on friction report. Checksum-guard prevents overwriting user-modified skills.
+- [x] TAP-573 SKILLS-INJECT-6: Implement retro apply in `lib/skill_retro.sh` — advisory mode by default (`RALPH_SKILL_AUTO_TUNE=false`); when enabled, add 1 skill / remove 1 skill per loop based on friction report. Checksum-guard prevents overwriting user-modified skills.
 
-- [ ] TAP-573 SKILLS-INJECT-7: Periodic re-detection — re-run Tier A detection every N loops (default 10) and reconcile installed skills against current project state.
+- [x] TAP-573 SKILLS-INJECT-7: Periodic re-detection — re-run Tier A detection every N loops (default 10) and reconcile installed skills against current project state.
 
-- [ ] TAP-573 SKILLS-INJECT-8: Telemetry + metrics — surface skill hit rate in `ralph --stats`; emit `skill_triggered`, `skill_added`, `skill_removed` metric events to JSONL.
+- [x] TAP-573 SKILLS-INJECT-8: Telemetry + metrics — surface skill hit rate in `ralph --stats`; emit `skill_triggered`, `skill_added`, `skill_removed` metric events to JSONL.

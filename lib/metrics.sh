@@ -198,6 +198,7 @@ ralph_show_stats() {
         echo ""
         echo "Work type breakdown:"
         echo "$work_breakdown" | jq -r '.[] | "  \(.type): \(.count)"' 2>/dev/null
+        ralph_show_skill_stats "human"
     fi
 }
 
@@ -315,4 +316,81 @@ ralph_show_cost_dashboard() {
             echo "$model_breakdown" | jq -r '.[] | "  \(.model): $\(.cost | . * 100 | round / 100) (\(.iterations) calls, \(.input_tokens) in, \(.output_tokens) out)"' 2>/dev/null
         fi
     fi
+}
+
+# =============================================================================
+# SKILLS-INJECT-8: Skill telemetry
+# =============================================================================
+
+# record_skill_metric — Append a skill event to .ralph/metrics/skills.jsonl
+#
+# Usage: record_skill_metric <event_type> <skill_name> [project_dir]
+#   event_type  — skill_added | skill_removed | skill_triggered
+#   skill_name  — name of the skill
+#   project_dir — path to the project (default: $PWD)
+#
+record_skill_metric() {
+    local event_type="${1:-unknown}"
+    local skill_name="${2:-unknown}"
+    local project_dir="${3:-$PWD}"
+
+    local metrics_dir="${RALPH_DIR:-.ralph}/metrics"
+    mkdir -p "$metrics_dir"
+
+    local skills_file="$metrics_dir/skills.jsonl"
+    local timestamp loop_count
+    timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    loop_count="${LOOP_COUNT:-0}"
+
+    local line
+    line=$(jq -cn \
+        --arg ts "$timestamp" \
+        --arg ev "$event_type" \
+        --arg sk "$skill_name" \
+        --arg pd "$project_dir" \
+        --argjson lc "${loop_count:-0}" \
+        '{timestamp:$ts, event:$ev, skill:$sk, project_dir:$pd, loop_count:$lc}') || return 0
+
+    printf '%s\n' "$line" >> "$skills_file"
+}
+
+# ralph_show_skill_stats — Append skill stats section to ralph_show_stats output
+#
+# Called from ralph_show_stats to add a skill breakdown. Reads skills.jsonl.
+# Emits nothing when no skill events exist.
+#
+# Parameters:
+#   $1 (format) — "human" (default) or "json"
+#
+ralph_show_skill_stats() {
+    local format="${1:-human}"
+    local skills_file="${RALPH_DIR:-.ralph}/metrics/skills.jsonl"
+
+    [[ -f "$skills_file" ]] || return 0
+    command -v jq &>/dev/null || return 0
+
+    local summary
+    summary=$(jq -s '
+        {
+            total: length,
+            by_event: (group_by(.event) | map({event: .[0].event, count: length})),
+            top_skills: (group_by(.skill) | map({skill: .[0].skill, count: length}) | sort_by(-.count) | .[0:5])
+        }
+    ' "$skills_file" 2>/dev/null) || return 0
+
+    if [[ "$format" == "json" ]]; then
+        echo "$summary"
+        return 0
+    fi
+
+    local total
+    total=$(echo "$summary" | jq -r '.total')
+    [[ "${total:-0}" -eq 0 ]] && return 0
+
+    echo ""
+    echo "Skills:"
+    echo "$summary" | jq -r '.by_event[] | "  \(.event): \(.count)"' 2>/dev/null
+    local top
+    top=$(echo "$summary" | jq -r '.top_skills[] | "  \(.skill) (\(.count) events)"' 2>/dev/null)
+    [[ -n "$top" ]] && echo "  Top skills:" && echo "$top" | sed 's/^/  /'
 }

@@ -1039,6 +1039,13 @@ install_project_tier_a_skills() {
 
     if [[ ${#installed[@]} -gt 0 ]]; then
         enable_log "INFO" "Installed Tier A skills: ${installed[*]}"
+        # SKILLS-INJECT-8: emit skill_added metric for each installed skill
+        if declare -f record_skill_metric &>/dev/null; then
+            local s
+            for s in "${installed[@]}"; do
+                record_skill_metric "skill_added" "$s" "$PWD" 2>/dev/null || true
+            done
+        fi
     fi
     if [[ ${#skipped[@]} -gt 0 ]]; then
         enable_log "INFO" "Tier A skills not installed (not in ~/.claude/skills/): ${skipped[*]}"

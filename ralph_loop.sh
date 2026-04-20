@@ -24,6 +24,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/context_management.sh" ]] && source "$SCRIPT_DIR/lib/context_management.sh"
 [[ -f "$SCRIPT_DIR/lib/tracing.sh" ]] && source "$SCRIPT_DIR/lib/tracing.sh"
 [[ -f "$SCRIPT_DIR/lib/linear_backend.sh" ]] && source "$SCRIPT_DIR/lib/linear_backend.sh"
+[[ -f "$SCRIPT_DIR/lib/skill_retro.sh" ]] && source "$SCRIPT_DIR/lib/skill_retro.sh"
 
 # TAP-535: Bash 4+ required for `${BASH_VERSINFO[@]}`, mapfile/readarray, named
 # refs, and the rest of the modern bash features used throughout this script.
@@ -4569,6 +4570,10 @@ main() {
         # OTEL-1/3: Start trace for this iteration
         export LOOP_COUNT="$loop_count"
         declare -f ralph_trace_start &>/dev/null && ralph_trace_start
+
+        # SKILLS-INJECT-7: Periodic Tier A skill re-detection (every N loops)
+        declare -f skill_retro_periodic_reconcile &>/dev/null && \
+            skill_retro_periodic_reconcile "$loop_count" "$PWD" 2>/dev/null || true
 
         # FAILSPEC-4: Audit log — loop iteration start
         ralph_audit "loop_start" "ralph_loop" "begin_iteration" "loop_count=$loop_count,total=$persistent_loops" "started" 2>/dev/null
