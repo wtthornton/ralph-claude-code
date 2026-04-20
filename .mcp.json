@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "tapps-brain": {
+      "type": "http",
+      "url": "http://127.0.0.1:8080/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${TAPPS_BRAIN_AUTH_TOKEN}",
+        "X-Project-Id": "ralph-claude-code",
+        "X-Agent-Id": "ralph-loop"
+      },
+      "instructions": "Persistent cross-session memory for the Ralph dev repo. Use brain_recall at task start to surface prior learnings, brain_remember for non-obvious fixes, brain_learn_success / brain_learn_failure at epic boundaries. Tenant: project_id=ralph-claude-code (repo-brain profile)."
+    }
+  }
+}
