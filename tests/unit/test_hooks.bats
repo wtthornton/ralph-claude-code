@@ -388,9 +388,17 @@ _tap624_run() {
     [[ "$status" -eq 2 ]]
 }
 
-@test "HOOKS-5: protect-ralph-files.sh blocks .ralphrc edits" {
-    run bash -c 'echo "{\"tool_input\": {\"file_path\": \".ralphrc\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
+@test "HOOKS-5: protect-ralph-files.sh blocks .ralphrc edits when file exists" {
+    touch "$TEST_DIR/.ralphrc"
+    run bash -c 'echo "{\"tool_input\": {\"file_path\": \"'"$TEST_DIR"'/.ralphrc\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
     [[ "$status" -eq 2 ]]
+}
+
+@test "HOOKS-5: protect-ralph-files.sh allows creating a new .ralphrc when absent" {
+    # Initial-bootstrap case: a fresh project must be able to create .ralphrc.
+    # Existing .ralphrc files stay protected (see test above).
+    run bash -c 'echo "{\"tool_input\": {\"file_path\": \"'"$TEST_DIR"'/.ralphrc\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
+    assert_success
 }
 
 @test "HOOKS-5: protect-ralph-files.sh allows normal file edits" {

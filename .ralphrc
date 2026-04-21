@@ -1,0 +1,13 @@
+# Ralph configuration for the ralph-claude-code repo.
+#
+# Linear is the source of truth. fix_plan.md is archived as
+# .ralph/fix_plan.md.archive to prevent drift — do not reintroduce it
+# without updating RALPH_TASK_SOURCE.
+
+RALPH_TASK_SOURCE="linear"
+RALPH_LINEAR_PROJECT="Ralph Continuous Coding"
+RALPH_LINEAR_TEAM="TappsCodingAgents"
+
+# LINEAR_API_KEY: set in environment (not committed). If unset, Ralph runs in
+# push-mode — Claude fetches counts via the Linear MCP and writes them to
+# status.json via the on-stop hook (TAP-741).
