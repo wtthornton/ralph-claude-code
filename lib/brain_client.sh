@@ -118,9 +118,12 @@ brain_client_record_metric() {
             >> "$file" 2>/dev/null || true
     fi
 
-    # Trip the session kill-switch on any non-200 so a flaky brain never
-    # slows the loop. Cleared at next session start.
-    if [[ "$ok" == "false" ]]; then
+    # TAP-747: trip the kill-switch on network errors (000) or client errors
+    # (4xx), but NOT on 5xx. A 5xx is a server-side bug (the server received
+    # the request but errored internally — see TAP-747 where a Pydantic
+    # ValidationError returns 500 instead of 400). Silencing on 5xx would
+    # permanently disable writes for a server bug outside our control.
+    if [[ "$ok" == "false" && ( "$http_code" == "000" || "${http_code:0:1}" == "4" ) ]]; then
         touch "$ralph_dir/.brain_disabled_this_session" 2>/dev/null || true
     fi
 }

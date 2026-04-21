@@ -631,6 +631,15 @@ if [[ -f "$_ralph_log" ]]; then
   fi
 fi
 
+# TAP-750: token propagation for hooks launched outside ralph_loop.sh.
+# When Claude Code is launched from VSCode (not via ralph_loop.sh), secrets.env
+# is never sourced, so TAPPS_BRAIN_AUTH_TOKEN is absent. Load it here so the
+# brain client can authenticate — same fix as Phase A, applied to the hook path.
+if [[ -z "${TAPPS_BRAIN_AUTH_TOKEN:-}" && -f "$HOME/.ralph/secrets.env" ]]; then
+  # shellcheck source=/dev/null
+  set -a; source "$HOME/.ralph/secrets.env" 2>/dev/null || true; set +a
+fi
+
 # =============================================================================
 # BRAIN-PHASE-B1: Deterministic tapps-brain writes.
 #
