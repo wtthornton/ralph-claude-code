@@ -41,8 +41,8 @@ The last Linear comment on an In Review ticket **must** name one of these four r
 - Security bug fix or security hardening → Done (this is not a destructive action)
 - Uncertainty about correctness → Done if AC substantively met
 
-**R3. Ralph does not pick up In Review or In Progress.**
-`linear_get_next_task` queries only `state.type IN [backlog, unstarted]`. Tickets left in In Review or In Progress become invisible to Ralph and pile up silently. Because In Review is now rare, In Progress becomes Ralph's self-retry lane — a ticket sitting In Progress across loops means Ralph is working it, not that a human must act.
+**R3. Ralph retries In Progress tickets before starting new work.**
+`linear_get_in_progress_task` queries `state.type == "started"` and injects the highest-priority result as `RESUME IN PROGRESS` in each loop's context. Ralph resolves this ticket first — merging its branch to main — before picking a new issue from `linear_get_next_task` (which still queries only `backlog`/`unstarted`). Without this, every blocked self-merge leaves a branch unmerged while Ralph silently picks a new ticket, producing an ever-growing pile of In Progress branches. In Review tickets also have `state.type == "started"` and will appear here — Claude must recognize them by their last comment naming an R2 reason and leave them alone rather than retrying them.
 
 **R4. Backlog vs Todo is a signal for humans, not Ralph.**
 Ralph treats them identically (same priority-sorted queue). Use Backlog for "triaged but not yet ready"; use Todo for "spec-ready, pick this next". Tickets returning from In Review after a blocker clears go back to Todo, not Backlog.

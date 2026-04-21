@@ -276,6 +276,42 @@ linear_get_next_task() {
     return 0
 }
 
+# linear_get_in_progress_task — Get highest-priority in-progress (started) issue.
+# Used by build_loop_context to surface stuck tickets for retry before Ralph
+# picks new backlog work. API-key only — no push-mode fallback (Claude uses
+# Linear MCP for task selection in push-mode).
+#
+# Stdout: "IDENTIFIER: title" on success; empty when no started issues exist.
+# Exit:   0 on success (including empty), 1 on API/parse error or no API key.
+linear_get_in_progress_task() {
+    [[ -z "${LINEAR_API_KEY:-}" ]] && return 1
+
+    local query='query($project:String!){
+      issues(filter:{
+        project:{name:{eq:$project}},
+        state:{type:{eq:"started"}}
+      },first:50){nodes{id identifier title priority}}
+    }'
+    local result
+    result=$(_linear_api "$query" "{\"project\":\"${RALPH_LINEAR_PROJECT:-}\"}") || return 1
+
+    local next
+    next=$(printf '%s' "$result" | jq -r '
+        (.data.issues.nodes // [])
+        | map(. + {sortPriority: (if .priority == 0 then 99 else .priority end)})
+        | sort_by(.sortPriority)
+        | first
+        | if . then "\(.identifier): \(.title)" else "" end
+    ' 2>/dev/null)
+    if [[ $? -ne 0 ]]; then
+        _linear_log_error "in_progress_task" "parse"
+        return 1
+    fi
+
+    printf '%s\n' "$next"
+    return 0
+}
+
 # linear_check_configured — Returns 0 iff Linear backend is usable (env only).
 # Does not make an API call — see linear_get_open_count for liveness.
 #

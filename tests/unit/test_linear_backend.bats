@@ -559,6 +559,60 @@ _write_push_status() {
     assert_output "0"
 }
 
+# =============================================================================
+# linear_get_in_progress_task (5 tests)
+# =============================================================================
+
+@test "linear_get_in_progress_task: fails when LINEAR_API_KEY is not set (no push-mode)" {
+    export RALPH_LINEAR_PROJECT="My Project"
+    run linear_get_in_progress_task
+    assert_failure
+}
+
+@test "linear_get_in_progress_task: returns highest-priority started issue" {
+    export LINEAR_API_KEY="lin_api_test123"
+    export RALPH_LINEAR_PROJECT="My Project"
+    mock_curl_success '{"data":{"issues":{"nodes":[
+        {"id":"a","identifier":"RC-5","title":"Stuck low prio","priority":4},
+        {"id":"b","identifier":"RC-3","title":"Stuck urgent","priority":1},
+        {"id":"c","identifier":"RC-4","title":"Stuck high","priority":2}
+    ]}}}'
+    run linear_get_in_progress_task
+    restore_curl
+    assert_output "RC-3: Stuck urgent"
+}
+
+@test "linear_get_in_progress_task: returns empty string when no started issues" {
+    export LINEAR_API_KEY="lin_api_test123"
+    export RALPH_LINEAR_PROJECT="My Project"
+    mock_curl_success '{"data":{"issues":{"nodes":[]}}}'
+    run linear_get_in_progress_task
+    restore_curl
+    assert_success
+    assert_output ""
+}
+
+@test "linear_get_in_progress_task: treats priority 0 as lowest" {
+    export LINEAR_API_KEY="lin_api_test123"
+    export RALPH_LINEAR_PROJECT="My Project"
+    mock_curl_success '{"data":{"issues":{"nodes":[
+        {"id":"a","identifier":"RC-2","title":"No priority","priority":0},
+        {"id":"b","identifier":"RC-1","title":"Normal prio","priority":3}
+    ]}}}'
+    run linear_get_in_progress_task
+    restore_curl
+    assert_output "RC-1: Normal prio"
+}
+
+@test "linear_get_in_progress_task: fails loudly on curl failure" {
+    export LINEAR_API_KEY="lin_api_test123"
+    export RALPH_LINEAR_PROJECT="My Project"
+    mock_curl_failure
+    run linear_get_in_progress_task
+    restore_curl
+    assert_failure
+}
+
 @test "TAP-741 push-mode: API-key path takes precedence over status.json" {
     # With the API key set, the hook-count read must NOT be consulted —
     # preserves the existing TAP-536 contract for API-key deployments.
