@@ -247,9 +247,15 @@ linear_get_done_count() {
 
 # linear_get_next_task — Get highest-priority open issue.
 # Priority: 1=Urgent 2=High 3=Normal 4=Low 0=None (treated as lowest).
+# API-key only — no push-mode fallback (Claude picks tasks via Linear MCP in
+# push-mode, so abstaining here lets the caller treat "no shell-side hint" as
+# equivalent to a non-informational loop, rather than logging a false
+# linear_api_error on every iteration).
 # Stdout: "IDENTIFIER: title" on success; empty when backlog has no open issues.
-# Exit:   0 on success (including empty backlog), 1 on API/parse error.
+# Exit:   0 on success (including empty backlog), 1 on API/parse error or no API key.
 linear_get_next_task() {
+    [[ -z "${LINEAR_API_KEY:-}" ]] && return 1
+
     local query='query($project:String!){
       issues(filter:{
         project:{name:{eq:$project}},
