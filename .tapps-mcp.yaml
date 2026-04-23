@@ -1,0 +1,18 @@
+llm_engagement_level: medium
+quality_preset: standard
+thresholds:
+  overall: 70
+  security_floor: 50
+
+memory:
+  # Route this repo's memory through the ralph-claude-code tenant on tapps-brain.
+  # Set so `tapps-mcp doctor` (CLI, outside the MCP subprocess) can see the
+  # project_id without relying solely on the .mcp.json env var.
+  brain_project_id: ralph-claude-code
+  brain_http_url: http://127.0.0.1:8080
+
+adaptive:
+  enabled: true
+security:
+  content_safety: true
+  secret_scanning: true
