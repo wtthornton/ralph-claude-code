@@ -996,6 +996,13 @@ install_project_tier_a_skills() {
     _lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local skills_install_lib="$_lib_dir/skills_install.sh"
 
+    # TAP-576 AC #3: `--skip-skills` opts out entirely.
+    if [[ "${ENABLE_SKIP_SKILLS:-false}" == "true" ]]; then
+        enable_log "INFO" "Skipping Tier A skill install (--skip-skills)"
+        INSTALLED_TIER_A_SKILLS=""
+        return 0
+    fi
+
     if [[ ! -f "$skills_install_lib" ]]; then
         enable_log "WARN" "skills_install.sh not found — skipping Tier A skill install"
         return 0
@@ -1007,14 +1014,28 @@ install_project_tier_a_skills() {
     local target_skills_dir=".claude/skills"
     local version="${RALPH_VERSION:-unknown}"
 
+    # TAP-576 AC #3: `--skills a,b,c` overrides detection with an explicit list.
+    # Falls through to detect_tier_a_skills when the override is empty.
     local -a skills=()
     local line
-    while IFS= read -r line; do
-        [[ -n "$line" ]] && skills+=("$line")
-    done < <(detect_tier_a_skills)
+    if [[ -n "${ENABLE_SKILLS_OVERRIDE:-}" ]]; then
+        local IFS=','
+        read -ra skills <<< "$ENABLE_SKILLS_OVERRIDE"
+        local i
+        for i in "${!skills[@]}"; do
+            # Trim whitespace — users may pass "a, b, c"
+            skills[i]="$(echo "${skills[i]}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        done
+        enable_log "INFO" "Skill override in effect: ${skills[*]}"
+    else
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && skills+=("$line")
+        done < <(detect_tier_a_skills)
+    fi
 
     if [[ ${#skills[@]} -eq 0 ]]; then
         enable_log "INFO" "No Tier A skills detected for this project type"
+        INSTALLED_TIER_A_SKILLS=""
         return 0
     fi
 

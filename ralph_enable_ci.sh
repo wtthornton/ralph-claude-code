@@ -55,6 +55,9 @@ PROJECT_TYPE=""
 OUTPUT_JSON=false
 QUIET=false
 SHOW_HELP=false
+# TAP-576: Tier A skill install knobs mirror ralph_enable.sh.
+SKIP_SKILLS=false
+SKILLS_OVERRIDE=""
 
 # Version
 VERSION="0.11.0"
@@ -76,6 +79,8 @@ Options:
     --project-name <name> Override detected project name
     --project-type <type> Override detected type (typescript, python, etc.)
     --force               Overwrite existing .ralph/ configuration
+    --skip-skills         Skip Tier A project skill install (TAP-576)
+    --skills LIST         Override skill detection with comma-separated list (TAP-576)
     --json                Output result as JSON
     --quiet               Suppress non-error output
     -h, --help            Show this help message
@@ -115,6 +120,7 @@ JSON Output Format:
         "project_type": "typescript",
         "files_created": [".ralph/PROMPT.md", ...],
         "tasks_imported": 15,
+        "skills_installed": ["python-patterns", "claude-api"],
         "message": "Ralph enabled successfully"
     }
 
@@ -189,6 +195,18 @@ parse_arguments() {
                 FORCE_OVERWRITE=true
                 shift
                 ;;
+            --skip-skills)
+                SKIP_SKILLS=true
+                shift
+                ;;
+            --skills)
+                if [[ -z "${2:-}" || "$2" =~ ^-- ]]; then
+                    output_error "--skills requires a comma-separated list"
+                    exit $ENABLE_INVALID_ARGS
+                fi
+                SKILLS_OVERRIDE="$2"
+                shift 2
+                ;;
             --json)
                 if ! command -v jq &>/dev/null; then
                     echo "Error: --json requires jq to be installed" >&2
@@ -248,8 +266,16 @@ output_success() {
     local project_type="$2"
 
     if [[ "$OUTPUT_JSON" == "true" ]]; then
-        local files_json
+        local files_json skills_json
         files_json=$(printf '%s\n' "${CREATED_FILES[@]}" | jq -R . | jq -s .)
+        # TAP-576 AC #2: emit skills_installed array. INSTALLED_TIER_A_SKILLS is
+        # space-separated (set by install_project_tier_a_skills); empty when
+        # --skip-skills or no detections matched.
+        if [[ -n "${INSTALLED_TIER_A_SKILLS:-}" ]]; then
+            skills_json=$(printf '%s\n' ${INSTALLED_TIER_A_SKILLS} | jq -R . | jq -s .)
+        else
+            skills_json='[]'
+        fi
 
         cat << EOF
 {
@@ -258,6 +284,7 @@ output_success() {
     "project_type": "$project_type",
     "files_created": $files_json,
     "tasks_imported": $TASKS_IMPORTED,
+    "skills_installed": $skills_json,
     "message": "Ralph enabled successfully"
 }
 EOF
@@ -265,6 +292,9 @@ EOF
         echo "Ralph enabled successfully for: $project_name ($project_type)"
         echo "Files created: ${#CREATED_FILES[@]}"
         echo "Tasks imported: $TASKS_IMPORTED"
+        if [[ -n "${INSTALLED_TIER_A_SKILLS:-}" ]]; then
+            echo "Skills installed: $INSTALLED_TIER_A_SKILLS"
+        fi
     fi
 }
 
@@ -376,6 +406,9 @@ main() {
     export ENABLE_PROJECT_NAME="$DETECTED_PROJECT_NAME"
     export ENABLE_PROJECT_TYPE="$DETECTED_PROJECT_TYPE"
     export ENABLE_TASK_CONTENT="$imported_tasks"
+    # TAP-576: forward --skip-skills / --skills to install_project_tier_a_skills
+    export ENABLE_SKIP_SKILLS="$SKIP_SKILLS"
+    export ENABLE_SKILLS_OVERRIDE="$SKILLS_OVERRIDE"
 
     # Run core enable logic
     output_message ""
@@ -392,6 +425,17 @@ main() {
             output_error "Failed to enable Ralph"
             exit $ENABLE_ERROR
         fi
+    fi
+
+    # TAP-576: install Tier A project skills and inject PROMPT.md hints.
+    # Non-fatal — skill install failure must not block enable. In JSON mode,
+    # suppress human-readable log lines.
+    if [[ "$OUTPUT_JSON" == "true" ]]; then
+        install_project_tier_a_skills >/dev/null 2>&1 || true
+        inject_skill_hints_into_prompt >/dev/null 2>&1 || true
+    else
+        install_project_tier_a_skills || true
+        inject_skill_hints_into_prompt || true
     fi
 
     # Track created files

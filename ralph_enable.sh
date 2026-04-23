@@ -40,6 +40,8 @@ source "$LIB_DIR/task_sources.sh"
 # Command line options
 FORCE_OVERWRITE=false
 SKIP_TASKS=false
+SKIP_SKILLS=false
+SKILLS_OVERRIDE=""
 TASK_SOURCE=""
 PRD_FILE=""
 GITHUB_LABEL=""
@@ -67,6 +69,8 @@ Options:
     --label <label>     GitHub label filter (when --from github)
     --force             Overwrite existing .ralph/ configuration
     --skip-tasks        Skip task import, use default templates
+    --skip-skills       Skip Tier A project skill install (TAP-576)
+    --skills LIST       Override skill detection with comma-separated list (TAP-576)
     --dry-run           Preview planned changes without writing files
     --json              Emit machine-readable JSON output (for CI/automation)
     --non-interactive   Run with defaults (no prompts)
@@ -182,6 +186,18 @@ parse_arguments() {
             --skip-tasks)
                 SKIP_TASKS=true
                 shift
+                ;;
+            --skip-skills)
+                SKIP_SKILLS=true
+                shift
+                ;;
+            --skills)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --skills requires a comma-separated list" >&2
+                    exit $ENABLE_INVALID_ARGS
+                fi
+                SKILLS_OVERRIDE="$2"
+                shift 2
                 ;;
             --non-interactive)
                 NON_INTERACTIVE=true
@@ -593,6 +609,9 @@ phase_file_generation() {
     # Set up enable environment
     export ENABLE_FORCE="$FORCE_OVERWRITE"
     export ENABLE_SKIP_TASKS="$SKIP_TASKS"
+    # TAP-576: forward --skip-skills / --skills into install_project_tier_a_skills
+    export ENABLE_SKIP_SKILLS="$SKIP_SKILLS"
+    export ENABLE_SKILLS_OVERRIDE="$SKILLS_OVERRIDE"
     export ENABLE_PROJECT_NAME="$CONFIG_PROJECT_NAME"
     export ENABLE_TASK_CONTENT="$imported_tasks"
 
