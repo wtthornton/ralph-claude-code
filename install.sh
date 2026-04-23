@@ -540,6 +540,32 @@ echo "GitHub integration (optional):"
 check "gh CLI" "gh --version" "optional"
 echo ""
 
+# TAP-779: project files — PROMPT.md and fix_plan.md must exist before
+# Ralph can loop. A missing PROMPT.md makes the loop blind (no task
+# contract, no RALPH_STATUS requirement) and the exit gate never fires.
+echo "Project files (current directory):"
+if [[ -d ".ralph" ]]; then
+    if [[ -f ".ralph/PROMPT.md" ]]; then
+        if [[ -s ".ralph/PROMPT.md" ]]; then
+            echo "  [OK] .ralph/PROMPT.md: present"
+        else
+            echo "  [FAIL] .ralph/PROMPT.md: empty — Ralph will loop blind"
+        fi
+    else
+        echo "  [FAIL] .ralph/PROMPT.md: MISSING — Ralph cannot start"
+    fi
+    if [[ -f ".ralph/fix_plan.md" ]]; then
+        echo "  [OK] .ralph/fix_plan.md: present"
+    else
+        echo "  [WARN] .ralph/fix_plan.md: missing (required for file-backed task source)"
+    fi
+elif [[ -f "PROMPT.md" ]]; then
+    echo "  [FAIL] old flat structure detected (PROMPT.md at root, no .ralph/) — run ralph-migrate"
+else
+    echo "  [SKIP] not a Ralph project directory (.ralph/ not found in $(pwd))"
+fi
+echo ""
+
 # TAP-538: hooks drift check — compare .ralph/hooks/*.sh against the
 # installed templates/hooks/*.sh. Drift means a project is running a
 # stale hook that may be missing security or sanity hardening.

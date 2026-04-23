@@ -2113,6 +2113,35 @@ ralph_task_is_docs_related() {
     return $rc
 }
 
+# TAP-669: Sanitize untrusted text before it reaches --append-system-prompt
+# or the prompt body. fix_plan.md titles, Linear issue titles, status.json
+# recommendations, and continue-as-new carried state can all contain
+# attacker-editable content. Argv passing blocks shell injection, but the
+# string still reaches the model as system-level instructions — so we
+# defensively strip control chars, cap line length, and neutralize the
+# role-tag sequences that prompt-injection attempts rely on.
+#
+# Reads untrusted text from stdin; writes sanitized text to stdout.
+# Idempotent on already-clean input.
+ralph_sanitize_prompt_text() {
+    local max_line="${1:-300}"
+    awk -v max="$max_line" '
+        BEGIN { role_rx = "<\\|(system|assistant|user|end_of_turn|im_start|im_end)\\|>" }
+        {
+            # Strip ASCII control chars except \t (011), \n (012), \r (015)
+            gsub(/[\000-\010\013\014\016-\037\177]/, "")
+            # Truncate long lines (prompt-injection payloads are typically long)
+            if (length($0) > max) $0 = substr($0, 1, max) "…[truncated]"
+            # Neutralize explicit role-tag injections
+            gsub(role_rx, "[role-marker-stripped]")
+            # Neutralize common markdown chat-role prefixes at line start
+            sub(/^### (System|Assistant|User|Human):[[:space:]]*/, "### ")
+            sub(/^(SYSTEM|ASSISTANT|USER|HUMAN):[[:space:]]+/, "text: ")
+            print
+        }
+    '
+}
+
 # Build loop context for Claude Code session
 # Provides loop-specific context via --append-system-prompt
 build_loop_context() {
@@ -2139,7 +2168,10 @@ build_loop_context() {
         # be retried before picking new backlog work to prevent branch pile-up.
         local in_progress_task
         in_progress_task=$(linear_get_in_progress_task 2>/dev/null) || in_progress_task=""
+        # TAP-669: Linear titles are user-editable — sanitize before injecting
+        # into the model's system prompt.
         if [[ -n "$in_progress_task" ]]; then
+            in_progress_task=$(printf '%s' "$in_progress_task" | ralph_sanitize_prompt_text 300)
             context+="RESUME IN PROGRESS (do this FIRST): ${in_progress_task}. "
         fi
         # Inject Linear task source instructions for Claude
@@ -2147,6 +2179,7 @@ build_loop_context() {
         next_task=$(linear_get_next_task) || next_task=""
         context+="TASK SOURCE: Linear project '${RALPH_LINEAR_PROJECT}'. "
         if [[ -n "$next_task" ]]; then
+            next_task=$(printf '%s' "$next_task" | ralph_sanitize_prompt_text 300)
             context+="Next issue: ${next_task}. "
         fi
         context+="If 'RESUME IN PROGRESS' is shown above, work that ticket FIRST before starting any new issue — run \`git log main --grep='<TICKET-ID>'\` to check if commits exist; if the work is on an unmerged branch, merge it now (\`gh pr merge --squash --auto\` or \`git merge\`). Only start a new ticket after the in-progress one reaches Done or is confirmed blocked by a genuine R2 hard blocker. Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means commits are on \`main\`. Before Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists. If work is only on a branch, attempt to self-merge (\`gh pr merge --squash --auto\` or \`git merge\`); if the merge is blocked (no permission, required checks pending, conflicts you cannot resolve this loop), post a Linear comment listing unmerged SHAs and leave the ticket **In Progress** so Ralph retries next loop — do NOT move it to In Review for this. RALPH IS HEADLESS: there is no human on standby to review, merge, or answer questions. There is no human reviewer. 'In Review' is reserved for HARD blockers only — the EXACT four: (1) missing credentials/API keys a human must generate (e.g. OAuth token requiring browser click-through), (2) explicit budget/spend cap reached, (3) irreversible destructive operation requiring human sign-off: production database migration dropping data, secret rotation, mass deletion, credential exfiltration risk — NOT security bug fixes or hardening (those are Done), (4) genuinely ambiguous product decision where both interpretations have real cost and neither is a safe default. When in doubt between Done and In Review: pick Done if AC is substantively met, In Progress if it is not. NEVER pick In Review out of uncertainty. Everything else is NOT In Review: unmerged branch → In Progress + retry; flaky tests / red build / lint failures → fix them; 'code probably works but I'm unsure' → Done if AC substantively met; 'needs code review' → Done (no reviewer exists); security bug fix or hardening → Done; 'couldn't figure out how to do X' → leave In Progress, Ralph retries with fresh context next loop. When you do use In Review, the last Linear comment MUST name one of the four exact reasons above verbatim — if you cannot, pick Done or In Progress instead. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain. REQUIRED: include LINEAR_OPEN_COUNT: <N> and LINEAR_DONE_COUNT: <N> in your RALPH_STATUS block (counts of open and completed issues in project '${RALPH_LINEAR_PROJECT}', fetched via Linear MCP) — the harness reads these to replace its missing API-key lookup."
@@ -2158,6 +2191,10 @@ build_loop_context() {
     fi
 
     # PERF: Read circuit breaker state and previous summary in single jq call (was: 2 separate jq spawns)
+    # TAP-669: sanitize prev_summary — it's a pass-through of Claude's own
+    # recommendation from the prior loop, so in theory safe, but Claude's
+    # output has no hard role-tag guarantee and status.json can be edited
+    # externally between loops. Defense in depth.
     if [[ -f "$RALPH_DIR/.circuit_breaker_state" && -f "$RALPH_DIR/status.json" ]]; then
         local cb_state prev_summary
         cb_state=$(jq -r '.state // "CLOSED"' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "CLOSED")
@@ -2166,6 +2203,7 @@ build_loop_context() {
             context+="Circuit breaker: ${cb_state}. "
         fi
         if [[ -n "$prev_summary" && "$prev_summary" != "null" ]]; then
+            prev_summary=$(printf '%s' "$prev_summary" | ralph_sanitize_prompt_text 250)
             context+="Previous: ${prev_summary} "
         fi
     elif [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
@@ -2177,6 +2215,7 @@ build_loop_context() {
         local prev_summary
         prev_summary=$(jq -r '.recommendation // "" | .[0:200]' "$RALPH_DIR/status.json" 2>/dev/null || echo "")
         if [[ -n "$prev_summary" && "$prev_summary" != "null" ]]; then
+            prev_summary=$(printf '%s' "$prev_summary" | ralph_sanitize_prompt_text 250)
             context+="Previous: ${prev_summary} "
         fi
     fi
@@ -2192,10 +2231,13 @@ build_loop_context() {
     fi
 
     # CTXMGMT-3: Inject carried state from Continue-As-New reset
+    # TAP-669: continue-state values (current_task, recommendation) originate
+    # from Claude output or Linear — same untrusted surface as prev_summary.
     if [[ -f "$RALPH_CONTINUE_STATE_FILE" ]]; then
         local continued_context
         continued_context=$(ralph_inject_continue_state)
         if [[ -n "$continued_context" ]]; then
+            continued_context=$(printf '%s' "$continued_context" | ralph_sanitize_prompt_text 400)
             context+="$continued_context "
         fi
     fi
@@ -2823,10 +2865,14 @@ ${loop_context}"
 
             # CTXMGMT-1: Inject a progressive (trimmed) view of fix_plan.md so the agent
             # can use it directly without a full-file Read tool call on large plans.
+            # TAP-669: fix_plan.md is user-editable and lines from it become system-level
+            # context for Claude. Sanitize before injection to neutralize role-tag
+            # injection payloads in task titles.
             if [[ "${RALPH_PROGRESSIVE_CONTEXT:-false}" == "true" && "${RALPH_TASK_SOURCE:-file}" == "file" ]]; then
                 local _plan_excerpt
                 _plan_excerpt=$(ralph_build_progressive_context 2>/dev/null) || _plan_excerpt=""
                 if [[ -n "$_plan_excerpt" ]]; then
+                    _plan_excerpt=$(printf '%s' "$_plan_excerpt" | ralph_sanitize_prompt_text 500)
                     prompt_content="${prompt_content}
 
 ---
@@ -4401,6 +4447,49 @@ main() {
         fi
     fi
 
+    # TAP-779: Fail fast on missing PROMPT.md — before any expensive startup work
+    # (instance lock, MCP probes, version checks). Without task instructions Claude
+    # loops blind, never emits a RALPH_STATUS block, and the dual-condition exit
+    # gate never fires. Also handles old flat-structure projects that pre-date
+    # the .ralph/ migration.
+    #
+    # Note: `.ralph/logs` is created during script source (line 601), so we can't
+    # use `! -d ".ralph"` as the migration signal — it would always be false.
+    # Instead detect flat structure as "root PROMPT.md present AND .ralph/PROMPT.md
+    # absent", which is the actual pre-v0.10.0 layout.
+    if [[ -f "PROMPT.md" ]] && [[ ! -f "$PROMPT_FILE" ]]; then
+        log_status "ERROR" "This project uses the old flat structure."
+        echo ""
+        echo "Ralph v0.10.0+ uses a .ralph/ subfolder to keep your project root clean."
+        echo ""
+        echo "To upgrade your project, run:"
+        echo "  ralph-migrate"
+        echo ""
+        echo "This will move Ralph-specific files to .ralph/ while preserving src/ at root."
+        echo "A backup will be created before migration."
+        exit 1
+    fi
+    if [[ ! -f "$PROMPT_FILE" ]]; then
+        log_status "ERROR" "Prompt file '$PROMPT_FILE' not found!"
+        echo ""
+        if [[ -f "$RALPH_DIR/fix_plan.md" ]] || [[ -d "$RALPH_DIR/specs" ]] || [[ -f "$RALPH_DIR/AGENT.md" ]]; then
+            echo "This appears to be a Ralph project but is missing .ralph/PROMPT.md."
+            echo "You may need to create or restore the PROMPT.md file."
+        else
+            echo "This directory is not a Ralph project."
+        fi
+        echo ""
+        echo "To fix this:"
+        echo "  1. Enable Ralph in existing project: ralph-enable"
+        echo "  2. Create a new project: ralph-setup my-project"
+        echo "  3. Import existing requirements: ralph-import requirements.md"
+        echo "  4. Navigate to an existing Ralph project directory"
+        echo "  5. Or create .ralph/PROMPT.md manually in this directory"
+        echo ""
+        echo "Ralph projects should contain: .ralph/PROMPT.md, .ralph/fix_plan.md, .ralph/specs/, src/, etc."
+        exit 1
+    fi
+
     # LOCK-1: Acquire instance lock (prevents concurrent Ralph instances on same project)
     acquire_instance_lock
 
@@ -4440,44 +4529,9 @@ main() {
     log_status "INFO" "Max calls per hour: $MAX_CALLS_PER_HOUR"
     log_status "INFO" "Logs: $LOG_DIR/ | Docs: $DOCS_DIR/ | Status: $STATUS_FILE"
 
-    # Check if project uses old flat structure and needs migration
-    if [[ -f "PROMPT.md" ]] && [[ ! -d ".ralph" ]]; then
-        log_status "ERROR" "This project uses the old flat structure."
-        echo ""
-        echo "Ralph v0.10.0+ uses a .ralph/ subfolder to keep your project root clean."
-        echo ""
-        echo "To upgrade your project, run:"
-        echo "  ralph-migrate"
-        echo ""
-        echo "This will move Ralph-specific files to .ralph/ while preserving src/ at root."
-        echo "A backup will be created before migration."
-        exit 1
-    fi
-
-    # Check if this is a Ralph project directory
-    if [[ ! -f "$PROMPT_FILE" ]]; then
-        log_status "ERROR" "Prompt file '$PROMPT_FILE' not found!"
-        echo ""
-        
-        # Check if this looks like a partial Ralph project
-        if [[ -f "$RALPH_DIR/fix_plan.md" ]] || [[ -d "$RALPH_DIR/specs" ]] || [[ -f "$RALPH_DIR/AGENT.md" ]]; then
-            echo "This appears to be a Ralph project but is missing .ralph/PROMPT.md."
-            echo "You may need to create or restore the PROMPT.md file."
-        else
-            echo "This directory is not a Ralph project."
-        fi
-
-        echo ""
-        echo "To fix this:"
-        echo "  1. Enable Ralph in existing project: ralph-enable"
-        echo "  2. Create a new project: ralph-setup my-project"
-        echo "  3. Import existing requirements: ralph-import requirements.md"
-        echo "  4. Navigate to an existing Ralph project directory"
-        echo "  5. Or create .ralph/PROMPT.md manually in this directory"
-        echo ""
-        echo "Ralph projects should contain: .ralph/PROMPT.md, .ralph/fix_plan.md, .ralph/specs/, src/, etc."
-        exit 1
-    fi
+    # PROMPT.md / flat-structure checks run early (TAP-779) — fail fast before
+    # MCP probes or lock acquisition, so a misconfigured project doesn't burn
+    # 10–20 s of startup work before erroring.
 
     # File integrity validation removed — PreToolUse hooks handle file protection
     # (protect-ralph-files.sh blocks edits to .ralph/, validate-command.sh blocks destructive commands)

@@ -1,0 +1,137 @@
+#!/usr/bin/env bats
+# TAP-779: Startup guards — Ralph must fail fast with exit 1 when PROMPT.md
+# is missing, BEFORE expensive startup work (MCP probes, version checks,
+# instance lock acquisition).
+
+load '../helpers/test_helper'
+
+PROJECT_ROOT="${BATS_TEST_DIRNAME}/../.."
+RALPH_SCRIPT="${PROJECT_ROOT}/ralph_loop.sh"
+INSTALL_SCRIPT="${PROJECT_ROOT}/install.sh"
+
+setup() {
+    TEST_DIR="$(mktemp -d)"
+    cd "$TEST_DIR"
+}
+
+teardown() {
+    if [[ -n "$TEST_DIR" ]] && [[ -d "$TEST_DIR" ]]; then
+        cd /
+        rm -rf "$TEST_DIR"
+    fi
+}
+
+@test "ralph exits with code 1 when .ralph/PROMPT.md is missing" {
+    mkdir -p .ralph/logs
+    run bash "$RALPH_SCRIPT"
+    assert_failure
+    [ "$status" -eq 1 ]
+}
+
+@test "missing PROMPT.md error message mentions the file path" {
+    mkdir -p .ralph/logs
+    run bash "$RALPH_SCRIPT"
+    [[ "$output" == *"PROMPT.md"* ]]
+    [[ "$output" == *"not found"* ]] || [[ "$output" == *"missing"* ]]
+}
+
+@test "missing PROMPT.md detects partial Ralph project via fix_plan.md" {
+    mkdir -p .ralph/logs
+    touch .ralph/fix_plan.md
+    run bash "$RALPH_SCRIPT"
+    assert_failure
+    [[ "$output" == *"Ralph project"* ]]
+    [[ "$output" == *"missing .ralph/PROMPT.md"* ]]
+}
+
+@test "missing PROMPT.md suggests ralph-enable / ralph-setup" {
+    mkdir -p .ralph/logs
+    run bash "$RALPH_SCRIPT"
+    assert_failure
+    [[ "$output" == *"ralph-enable"* ]]
+    [[ "$output" == *"ralph-setup"* ]]
+}
+
+@test "old flat structure (root PROMPT.md, no .ralph/) triggers migration error" {
+    touch PROMPT.md
+    run bash "$RALPH_SCRIPT"
+    assert_failure
+    [[ "$output" == *"flat structure"* ]]
+    [[ "$output" == *"ralph-migrate"* ]]
+}
+
+@test "PROMPT.md check fires in --dry-run mode" {
+    mkdir -p .ralph/logs
+    run bash "$RALPH_SCRIPT" --dry-run
+    assert_failure
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"PROMPT.md"* ]]
+}
+
+@test "PROMPT.md check fires before MCP probes (fail-fast ordering)" {
+    # Verify the check is early enough in main() that a missing file
+    # short-circuits before ralph_probe_mcp_servers runs. We proxy this
+    # by asserting the startup never logs the "MCP probe" success/failure
+    # lines when PROMPT.md is absent.
+    mkdir -p .ralph/logs
+    run bash "$RALPH_SCRIPT"
+    assert_failure
+    [[ "$output" != *"MCP probe"* ]]
+    [[ "$output" != *"Probing MCP"* ]]
+}
+
+@test "PROMPT.md check precedes acquire_instance_lock in main()" {
+    # Source-level assertion: in ralph_loop.sh main(), the PROMPT_FILE
+    # check must appear before the call to acquire_instance_lock.
+    local main_start main_end
+    main_start=$(grep -n '^main() {' "$RALPH_SCRIPT" | head -1 | cut -d: -f1)
+    [ -n "$main_start" ]
+    main_end=$(awk -v s="$main_start" 'NR > s && /^}/ { print NR; exit }' "$RALPH_SCRIPT")
+    [ -n "$main_end" ]
+
+    local prompt_line lock_line
+    prompt_line=$(awk -v s="$main_start" -v e="$main_end" \
+        'NR >= s && NR <= e && /\[\[ ! -f "\$PROMPT_FILE" \]\]/ { print NR; exit }' "$RALPH_SCRIPT")
+    lock_line=$(awk -v s="$main_start" -v e="$main_end" \
+        'NR >= s && NR <= e && /acquire_instance_lock/ { print NR; exit }' "$RALPH_SCRIPT")
+
+    [ -n "$prompt_line" ]
+    [ -n "$lock_line" ]
+    [ "$prompt_line" -lt "$lock_line" ]
+}
+
+@test "ralph-doctor heredoc includes project-files section" {
+    # TAP-779 AC #2: doctor reports PROMPT.md when absent. The doctor is
+    # generated inline in install.sh; verify the project-files probe is
+    # present in the heredoc.
+    grep -q "Project files" "$INSTALL_SCRIPT"
+    grep -q '.ralph/PROMPT.md' "$INSTALL_SCRIPT"
+}
+
+@test "ralph-doctor flags missing PROMPT.md in a Ralph-shaped directory" {
+    # Extract and run the doctor script body against the test dir.
+    local doctor_script
+    doctor_script="$TEST_DIR/ralph-doctor"
+    awk '/ralph-doctor.*DOCTOREOF/ {flag=1; next} /^DOCTOREOF$/ {flag=0} flag' \
+        "$INSTALL_SCRIPT" > "$doctor_script"
+    chmod +x "$doctor_script"
+    mkdir -p .ralph
+    touch .ralph/fix_plan.md
+    run bash "$doctor_script"
+    [[ "$output" == *"PROMPT.md"* ]]
+    [[ "$output" == *"MISSING"* ]] || [[ "$output" == *"FAIL"* ]]
+}
+
+@test "ralph-doctor reports OK when PROMPT.md is present and non-empty" {
+    local doctor_script
+    doctor_script="$TEST_DIR/ralph-doctor"
+    awk '/ralph-doctor.*DOCTOREOF/ {flag=1; next} /^DOCTOREOF$/ {flag=0} flag' \
+        "$INSTALL_SCRIPT" > "$doctor_script"
+    chmod +x "$doctor_script"
+    mkdir -p .ralph
+    echo "Task instructions here" > .ralph/PROMPT.md
+    touch .ralph/fix_plan.md
+    run bash "$doctor_script"
+    [[ "$output" == *".ralph/PROMPT.md"* ]]
+    [[ "$output" == *"present"* ]] || [[ "$output" == *"OK"* ]]
+}
