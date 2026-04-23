@@ -106,9 +106,14 @@ class ContextManager:
             if line.strip().startswith(section_marker) and not line.strip().startswith(
                 section_marker + "#"
             ):
-                if current_heading or current_body:
+                # TAP-674: content before the first ##-heading is the
+                # preamble, not an anonymous section. The previous branch
+                # structure was unreachable (same predicate on both arms)
+                # and silently folded preamble into a blank-heading section
+                # which was then dropped downstream.
+                if current_heading:
                     sections.append((current_heading, current_body))
-                elif not current_heading and current_body:
+                elif current_body:
                     preamble_lines = current_body
                 current_heading = line
                 current_body = []
@@ -117,6 +122,9 @@ class ContextManager:
 
         if current_heading:
             sections.append((current_heading, current_body))
+        elif current_body and not preamble_lines:
+            # Document has no ##-headings at all — treat entire doc as preamble
+            preamble_lines = current_body
 
         return preamble_lines, sections
 
@@ -156,27 +164,48 @@ class ContextManager:
                     break
 
         # ----------------------------------------------------------
-        # All items complete — summary only
+        # All items complete — summary + section shape (TAP-674).
+        # The old behaviour collapsed to a single summary line, which
+        # dropped section names and made end-of-campaign reasoning hard
+        # for the dual-condition exit gate. Preserve the preamble and
+        # emit one line per section so the agent can see what ran.
         # ----------------------------------------------------------
         if active_idx == -1:
             total_items = 0
             total_checked = 0
-            for _, body in sections:
+            section_summaries: list[str] = []
+            for heading, body in sections:
+                section_total = 0
+                section_checked = 0
                 for line in body:
                     if re.match(r"\s*- \[x\]", line, re.IGNORECASE):
-                        total_items += 1
-                        total_checked += 1
+                        section_total += 1
+                        section_checked += 1
                     elif re.match(r"\s*- \[ \]", line):
-                        total_items += 1
+                        section_total += 1
+                total_items += section_total
+                total_checked += section_checked
+                if section_total > 0:
+                    section_summaries.append(
+                        f"{heading.rstrip()}  "
+                        f"({section_checked}/{section_total} done)"
+                    )
+                elif heading.strip():
+                    # Header with no items — still useful context
+                    section_summaries.append(heading.rstrip())
+
             result_parts: list[str] = []
             if preamble_lines:
                 result_parts.extend(preamble_lines)
+                result_parts.append("")
+            if section_summaries:
+                result_parts.extend(section_summaries)
                 result_parts.append("")
             if total_items > 0:
                 result_parts.append(
                     f"({total_checked}/{total_items} tasks complete — all tasks done)"
                 )
-            return "\n".join(result_parts)
+            return "\n".join(result_parts).rstrip()
 
         # ----------------------------------------------------------
         # Build output

@@ -624,6 +624,16 @@ get_tmux_base_index() {
 # Setup tmux session with monitor
 setup_tmux_session() {
     local session_name="ralph-$(date +%s)"
+    # TAP-678: defensive guard — reject whitespace in session name. Current
+    # construction is epoch-based and always safe, but a future change that
+    # interpolates $PROJECT_DIR or similar must not silently break `tmux
+    # send-keys -t`. Replace any whitespace with underscore + fail-loud if
+    # the result would still collide with a tmux metacharacter.
+    session_name="${session_name//[[:space:]]/_}"
+    if [[ "$session_name" =~ [[:space:].:] ]]; then
+        log_status "ERROR" "tmux session name contains invalid characters: $session_name"
+        return 1
+    fi
     local ralph_home="${RALPH_HOME:-$HOME/.ralph}"
     local project_dir="$(pwd)"
 
@@ -3346,15 +3356,28 @@ PSEOF
         killed=$(timeout 10s powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$win_path" 2>/dev/null || echo "0")
         rm -f "$ps_script" 2>/dev/null
     elif command -v pgrep &>/dev/null; then
-        # Linux / macOS: pgrep + parent-check.
-        # On Unix, orphaned processes are reparented to PID 1 (init/systemd).
-        # Only kill MCP servers whose PPID is 1 (true orphans).
+        # Linux / macOS: pgrep + parent-alive/reaper check (TAP-670).
+        # Mirrors the PowerShell branch: a process is an orphan if its current
+        # parent is a reaper that is not the original spawner. Three signals:
+        #   1. ppid == 1 — classic reparent target in bare shells and
+        #      PID-namespaced containers (tini is PID 1).
+        #   2. ppid refers to a process that no longer exists — true death
+        #      between pgrep and ps.
+        #   3. parent comm matches a known reaper (systemd-user service
+        #      manager, launchd on macOS, upstart-user). PID 1 heuristic
+        #      alone misses these; kill -0 alone misses them too (reaper
+        #      is always alive). Covers the WSL systemd-user case.
         local pids
         pids=$(pgrep -f "(tapps-mcp|docsmcp).*serve" 2>/dev/null) || true
         for pid in $pids; do
-            local ppid
+            local ppid pcomm
             ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
-            if [[ "$ppid" == "1" ]]; then
+            # Skip unreadable ppid (process exited mid-check)
+            [[ -z "$ppid" ]] && continue
+            pcomm=$(ps -o comm= -p "$ppid" 2>/dev/null | tr -d ' ')
+            if [[ "$ppid" == "1" ]] \
+               || ! kill -0 "$ppid" 2>/dev/null \
+               || [[ "$pcomm" =~ ^(systemd|init|tini|launchd|upstart)$ ]]; then
                 kill "$pid" 2>/dev/null && killed=$((killed + 1))
             fi
         done

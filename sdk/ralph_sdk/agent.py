@@ -546,6 +546,11 @@ class RalphAgent:
         self._cancelled = False
         self._current_proc: asyncio.subprocess.Process | None = None
         self._last_partial_output: str | None = None
+        # TAP-675: Reference to the event loop running `self.run()`.
+        # Captured at run() entry so `cancel()` can schedule work on the
+        # correct loop from any thread, without calling deprecated
+        # asyncio.get_event_loop() and without guessing via is_running().
+        self._loop: asyncio.AbstractEventLoop | None = None
 
         # SDK-LIFECYCLE-2: Iteration duration history for adaptive timeout
         self._iteration_durations: list[float] = []
@@ -657,43 +662,53 @@ class RalphAgent:
             except Exception:
                 logger.debug("Failed to send termination signal", exc_info=True)
 
-            # Wait for graceful exit
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # Called from a sync context while the event loop is running
-                    # (e.g. from a thread).  Schedule a deferred kill.
-                    async def _deferred_kill() -> None:
-                        nonlocal was_forced
-                        try:
-                            await asyncio.wait_for(proc.wait(), timeout=grace)
-                        except asyncio.TimeoutError:
-                            try:
-                                proc.kill()
-                                was_forced = True
-                            except (ProcessLookupError, OSError):
-                                pass
-
-                    asyncio.ensure_future(_deferred_kill())
-                else:
-                    # Sync context -- run the wait directly
+            # Wait for graceful exit (TAP-675: use get_running_loop() +
+            # stored loop reference instead of deprecated get_event_loop()).
+            async def _deferred_kill() -> None:
+                nonlocal was_forced
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=grace)
+                except asyncio.TimeoutError:
                     try:
-                        loop.run_until_complete(
-                            asyncio.wait_for(proc.wait(), timeout=grace)
+                        proc.kill()
+                        was_forced = True
+                    except (ProcessLookupError, OSError):
+                        pass
+
+            try:
+                # Case A: we're being called from within the agent's own loop.
+                # `asyncio.get_running_loop()` returns it; schedule directly.
+                current_loop = asyncio.get_running_loop()
+                if self._loop is not None and current_loop is self._loop:
+                    current_loop.create_task(_deferred_kill())
+                else:
+                    # Running inside some other loop than the agent's.
+                    # Fall through to the cross-thread path below.
+                    raise RuntimeError("cancel called from a different loop")
+            except RuntimeError:
+                # Case B: no running loop in this thread (sync context or
+                # supervisor thread). Use the agent's stored loop via
+                # call_soon_threadsafe so scheduling is thread-safe.
+                agent_loop = self._loop
+                if agent_loop is not None and not agent_loop.is_closed():
+                    try:
+                        agent_loop.call_soon_threadsafe(
+                            lambda: agent_loop.create_task(_deferred_kill())
                         )
-                    except asyncio.TimeoutError:
+                    except RuntimeError:
+                        # Loop is closed/stopping -- fall back to sync kill.
                         try:
                             proc.kill()
                             was_forced = True
                         except (ProcessLookupError, OSError):
                             pass
-            except RuntimeError:
-                # No event loop at all -- just kill
-                try:
-                    proc.kill()
-                    was_forced = True
-                except (ProcessLookupError, OSError):
-                    pass
+                else:
+                    # No loop at all (agent never started) -- synchronous kill.
+                    try:
+                        proc.kill()
+                        was_forced = True
+                    except (ProcessLookupError, OSError):
+                        pass
 
             # Try to capture partial output (best-effort)
             try:
@@ -787,6 +802,9 @@ class RalphAgent:
         self.start_time = time.time()
         self._running = True
         self._cancelled = False
+        # TAP-675: Capture the loop we're running on so cancel() from another
+        # thread can schedule work safely via call_soon_threadsafe.
+        self._loop = asyncio.get_running_loop()
 
         logger.info("Ralph SDK starting (v%s) [%s]", self.config.model, self.correlation_id,
                      extra={"correlation_id": self.correlation_id})
@@ -1541,8 +1559,19 @@ class RalphAgent:
 
         SDK-CONTEXT-3: Continue-As-New pattern — preserves progress while
         starting a fresh context window.
+
+        TAP-671: When the circuit breaker is non-CLOSED at rotation time,
+        the session is being reset because Claude's side is unhealthy.
+        Carrying the old session_id through continue-as-new would mislead
+        any downstream consumer into thinking --continue is still viable.
+        Blank it out so the next iteration uses a truly fresh session.
         """
         old_session_id = self.session_id
+
+        # Check CB state so we can decide whether to carry session_id forward
+        cb_data = await self.state_backend.read_circuit_breaker()
+        cb_state = (cb_data or {}).get("state", "CLOSED")
+        carry_session_id = cb_state == "CLOSED"
 
         # Build continue-as-new state
         continue_state = ContinueAsNewState(
@@ -1550,18 +1579,23 @@ class RalphAgent:
             progress=last_status.progress_summary,
             key_findings=[],
             continued_from_loop=self.loop_count,
-            previous_session_id=old_session_id,
+            previous_session_id=old_session_id if carry_session_id else "",
         )
         await self.state_backend.write_continue_as_new_state(continue_state.to_dict())
 
-        # Record old session in history
+        # Record old session in history — tag the reason when rotation was
+        # triggered with a tripped CB so post-mortem queries can find these.
+        history_reason = (
+            "continue_as_new_cb_open" if not carry_session_id else "continue_as_new"
+        )
         await self.state_backend.append_session_history({
             "session_id": old_session_id,
             "started_at": self._session_start_time,
             "ended_at": time.time(),
             "iteration_count": self._session_iteration_count,
             "loop_count_at_end": self.loop_count,
-            "reason": "continue_as_new",
+            "reason": history_reason,
+            "cb_state_at_rotation": cb_state,
             "correlation_id": self.correlation_id,
         })
 

@@ -164,11 +164,32 @@ parse_conversion_response() {
     # Error code (if any)
     PARSED_ERROR_CODE=$(jq -r '.metadata.error_code // .error_code // ""' "$output_file" 2>/dev/null)
 
-    # Files created (as array)
+    # Files created (as array). Assert the array shape explicitly: if the
+    # JSON has a non-array value at this path, the response is malformed
+    # regardless of the surface-level jq empty check. (TAP-672)
+    if ! jq -e '((.metadata.files_created // []) | type == "array") and ((.metadata.missing_files // []) | type == "array")' "$output_file" >/dev/null 2>&1; then
+        log "WARN" "Response JSON shape invalid: metadata.files_created/missing_files must be arrays"
+        return 1
+    fi
     PARSED_FILES_CREATED=$(jq -r '.metadata.files_created // [] | @json' "$output_file" 2>/dev/null)
 
     # Missing files (as array)
     PARSED_MISSING_FILES=$(jq -r '.metadata.missing_files // [] | @json' "$output_file" 2>/dev/null)
+
+    # Field-presence assertion (TAP-672): accepting an empty-but-valid JSON
+    # envelope as "success, 0 files" silently loses data when Claude returns
+    # a malformed body. Require at least one signal-of-work — either a
+    # non-empty result/summary, a non-zero files_changed count, or a
+    # non-empty files_created array. Explicit failure beats silent emptiness.
+    local files_created_count
+    files_created_count=$(jq -r '(.metadata.files_created // []) | length' "$output_file" 2>/dev/null || echo "0")
+    if [[ -z "$PARSED_RESULT" ]] \
+       && [[ "$PARSED_FILES_CHANGED" == "0" || "$PARSED_FILES_CHANGED" == "null" || -z "$PARSED_FILES_CHANGED" ]] \
+       && [[ "$files_created_count" == "0" ]]; then
+        log "WARN" "Response has no signal of work — result/summary empty, files_changed=0, files_created=[]"
+        log "WARN" "Raw response head (first 500 chars): $(head -c 500 "$output_file" | tr -d '\n' | sed 's/[A-Za-z0-9+\/=]\{40,\}/<redacted>/g')"
+        return 1
+    fi
 
     return 0
 }
