@@ -4565,6 +4565,16 @@ main() {
     # so only 1 more EXIT_SIGNAL: true loop is needed (avoids zombie verification loops).
     local _pre_uncompleted=1
     if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        # TAP-664: Resolve RALPH_LINEAR_PROJECT name → project UUID ONCE at
+        # startup. Without this, `name.eq` filtering is case/whitespace-sensitive
+        # and silently returns 0 issues when the configured name drifts from
+        # Linear's actual project name — which the TAP-536 fail-loud guard
+        # cannot distinguish from a legitimate empty backlog, leading to a
+        # bogus plan_complete exit on a populated project.
+        if [[ -n "${LINEAR_API_KEY:-}" ]] && declare -F linear_init >/dev/null 2>&1; then
+            linear_init || log_status "ERROR" "Linear init failed — queries will fall back to name-filter (vulnerable to whitespace/case mismatch)"
+        fi
+
         # TAP-536: API failure here defaults to "1 incomplete" (the safe answer
         # — never pre-seeds completion_indicators on failure, so we don't get a
         # zombie 1-loop verification cycle when Linear is down at startup).

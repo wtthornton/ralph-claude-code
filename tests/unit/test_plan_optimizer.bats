@@ -507,3 +507,71 @@ EOF
     after=$(plan_section_hashes "$plan")
     [[ "$before" != "$after" ]]
 }
+
+# =============================================================================
+# TAP-663: module hash keyspace — 4 hex chars + `% 1000` caused birthday
+# collisions at ~40 distinct modules. Widened to 8 hex chars (32-bit) and
+# dropped the % 1000 squash. Verify no collisions across a realistic set of
+# 500 synthetic module paths.
+# =============================================================================
+
+@test "TAP-663: module hash has no collisions across 500 distinct module paths" {
+    local -A seen=()
+    local i mod hash num prefix
+    local collisions=0
+    for i in $(seq 1 500); do
+        # Generate diverse module paths: src/<subsystem>/<feature>_<i>.py style
+        mod="src/mod$((i % 50))/submod$((i % 13))/file${i}.py"
+        # Replicate the exact hash path used by plan_secondary_sort
+        hash=$(echo -n "$mod" | md5sum 2>/dev/null | cut -c1-8) \
+            || hash=$(echo -n "$mod" | shasum 2>/dev/null | cut -c1-8) \
+            || hash="00000000"
+        num=$((16#${hash}))
+        # Key-prefix reflects what the sort key formula uses (module component)
+        prefix=$(( num * 1000000 ))
+        if [[ -n "${seen[$prefix]:-}" && "${seen[$prefix]}" != "$mod" ]]; then
+            collisions=$((collisions + 1))
+        fi
+        seen[$prefix]="$mod"
+    done
+    [[ $collisions -eq 0 ]] || { echo "collisions: $collisions"; false; }
+}
+
+@test "TAP-663: widened hash uses 8 hex chars, no percent-1000 squash" {
+    # Regression guard: make sure no one reverts to 4-hex + %1000.
+    grep -q 'cut -c1-8' "$PLAN_OPTIMIZER"
+    ! grep -qE 'mod_num %\s*1000\s*\)' "$PLAN_OPTIMIZER"
+}
+
+@test "TAP-663: distinct modules produce distinct key prefixes end-to-end" {
+    # Feed two distinct modules' tasks and assert they don't end up mixed in
+    # the output line sort order (i.e., tasks for module A stay contiguous).
+    local plan="$TEST_DIR/fix_plan.md"
+    cat > "$plan" <<'EOF'
+## Tasks
+- [ ] Module A task 1 (`src/alpha/x.py`)
+- [ ] Module B task 1 (`src/beta/y.py`)
+- [ ] Module A task 2 (`src/alpha/z.py`)
+- [ ] Module B task 2 (`src/beta/w.py`)
+EOF
+    run plan_optimize_section "$plan" "$TEST_DIR" "/dev/null"
+    assert_success
+
+    # After optimization, alpha/* tasks must be adjacent (contiguous) and
+    # beta/* tasks must be adjacent. With hash collisions, they could interleave.
+    local alpha1_line alpha2_line beta1_line beta2_line
+    alpha1_line=$(grep -n "Module A task 1" "$plan" | cut -d: -f1)
+    alpha2_line=$(grep -n "Module A task 2" "$plan" | cut -d: -f1)
+    beta1_line=$(grep -n "Module B task 1" "$plan" | cut -d: -f1)
+    beta2_line=$(grep -n "Module B task 2" "$plan" | cut -d: -f1)
+    [[ -n "$alpha1_line" && -n "$alpha2_line" ]]
+    [[ -n "$beta1_line" && -n "$beta2_line" ]]
+    # The two alphas must be contiguous (diff of lines = 1) OR both before/both after
+    # the betas. Simplest invariant: min(alpha) < max(alpha) < min(beta) OR reverse.
+    local alpha_min alpha_max beta_min beta_max
+    alpha_min=$(( alpha1_line < alpha2_line ? alpha1_line : alpha2_line ))
+    alpha_max=$(( alpha1_line > alpha2_line ? alpha1_line : alpha2_line ))
+    beta_min=$(( beta1_line < beta2_line ? beta1_line : beta2_line ))
+    beta_max=$(( beta1_line > beta2_line ? beta1_line : beta2_line ))
+    [[ $alpha_max -lt $beta_min ]] || [[ $beta_max -lt $alpha_min ]]
+}

@@ -627,3 +627,126 @@ _write_push_status() {
     assert_success
     assert_output "2"  # from the API mock, NOT from the 999 in status.json
 }
+
+# =============================================================================
+# TAP-664: project name → ID resolution (startup bootstrap)
+# =============================================================================
+
+@test "TAP-664: linear_resolve_project_id fails without API key" {
+    export RALPH_LINEAR_PROJECT="Ralph"
+    run linear_resolve_project_id
+    assert_failure
+    [[ "$output" != *"linear_api_error"* ]] || true  # error goes to stderr
+}
+
+@test "TAP-664: linear_resolve_project_id fails without project name" {
+    export LINEAR_API_KEY="lin_api_test"
+    run linear_resolve_project_id
+    assert_failure
+}
+
+@test "TAP-664: linear_resolve_project_id returns UUID on exact single match" {
+    export LINEAR_API_KEY="lin_api_test"
+    export RALPH_LINEAR_PROJECT="Ralph Continuous Coding"
+    mock_curl_success '{"data":{"projects":{"nodes":[{"id":"73125846-2148-4fd0-8a8e-902e7cc6b36c","name":"Ralph Continuous Coding"}]}}}'
+    run linear_resolve_project_id
+    restore_curl
+    assert_success
+    assert_output "73125846-2148-4fd0-8a8e-902e7cc6b36c"
+}
+
+@test "TAP-664: linear_resolve_project_id fails loudly when project not found" {
+    export LINEAR_API_KEY="lin_api_test"
+    export RALPH_LINEAR_PROJECT="Ralph Continuous Coding "  # trailing space
+    mock_curl_success '{"data":{"projects":{"nodes":[]}}}'
+    # --separate-stderr: stderr carries the structured linear_api_error line
+    # while stdout must stay empty (no UUID leaked on failure).
+    run --separate-stderr linear_resolve_project_id
+    restore_curl
+    assert_failure
+    [[ -z "$output" ]] || fail "must not print a UUID on stdout on failure: '$output'"
+    [[ "$stderr" == *"linear_api_error"* ]]
+    [[ "$stderr" == *"project_not_found"* ]]
+}
+
+@test "TAP-664: linear_resolve_project_id fails loudly on ambiguous match (>1)" {
+    export LINEAR_API_KEY="lin_api_test"
+    export RALPH_LINEAR_PROJECT="Ralph"
+    mock_curl_success '{"data":{"projects":{"nodes":[{"id":"a","name":"Ralph"},{"id":"b","name":"Ralph"}]}}}'
+    run linear_resolve_project_id
+    restore_curl
+    assert_failure
+}
+
+@test "TAP-664: linear_init is a no-op in push-mode (no API key)" {
+    export RALPH_LINEAR_PROJECT="Ralph Continuous Coding"
+    run linear_init
+    assert_success
+    # _LINEAR_PROJECT_ID must remain empty — nothing to resolve
+    [[ -z "$_LINEAR_PROJECT_ID" ]]
+}
+
+@test "TAP-664: linear_init caches the resolved ID for subsequent queries" {
+    export LINEAR_API_KEY="lin_api_test"
+    export RALPH_LINEAR_PROJECT="Ralph Continuous Coding"
+    mock_curl_success '{"data":{"projects":{"nodes":[{"id":"cached-id-123","name":"Ralph Continuous Coding"}]}}}'
+    linear_init
+    restore_curl
+    [[ "$_LINEAR_PROJECT_ID" == "cached-id-123" ]]
+}
+
+@test "TAP-664: linear_init returns 1 on resolution failure (whitespace drift)" {
+    export LINEAR_API_KEY="lin_api_test"
+    export RALPH_LINEAR_PROJECT="Ralph Continuous Coding "
+    mock_curl_success '{"data":{"projects":{"nodes":[]}}}'
+    run linear_init
+    restore_curl
+    assert_failure
+}
+
+@test "TAP-664: open_count uses ID-filter when _LINEAR_PROJECT_ID is cached" {
+    export LINEAR_API_KEY="lin_api_test"
+    export RALPH_LINEAR_PROJECT="Ralph Continuous Coding"
+    export _LINEAR_PROJECT_ID="resolved-uuid-xyz"
+    # The mock returns 4 issues; we care about the query *shape*, so capture the
+    # JSON POST body and assert it carries the ID filter, not the raw name.
+    MOCK_BIN_DIR="$(mktemp -d)"
+    mkdir -p "$MOCK_BIN_DIR"
+    cat > "$MOCK_BIN_DIR/curl" << SCRIPT
+#!/bin/bash
+# Dump every arg + the stdin body for the test to inspect
+for arg in "\$@"; do printf '%s\n' "\$arg"; done > "$MOCK_BIN_DIR/_args"
+# curl reads POST body via --data-raw/--data — which shows up as an arg
+printf '{"data":{"issues":{"nodes":[{"id":"1"},{"id":"2"}]}}}\n200\n'
+SCRIPT
+    chmod +x "$MOCK_BIN_DIR/curl"
+    export PATH="$MOCK_BIN_DIR:$PATH"
+    run linear_get_open_count
+    # Must have invoked the query with an ID filter, not a name filter
+    grep -q 'projectId' "$MOCK_BIN_DIR/_args" || fail "query must use projectId filter: $(cat $MOCK_BIN_DIR/_args)"
+    grep -q 'resolved-uuid-xyz' "$MOCK_BIN_DIR/_args" || fail "query must carry the resolved UUID"
+    restore_curl
+    assert_success
+    assert_output "2"
+}
+
+@test "TAP-664: open_count falls back to name-filter when cache is empty" {
+    export LINEAR_API_KEY="lin_api_test"
+    export RALPH_LINEAR_PROJECT="Ralph Continuous Coding"
+    # _LINEAR_PROJECT_ID intentionally unset
+    MOCK_BIN_DIR="$(mktemp -d)"
+    mkdir -p "$MOCK_BIN_DIR"
+    cat > "$MOCK_BIN_DIR/curl" << SCRIPT
+#!/bin/bash
+for arg in "\$@"; do printf '%s\n' "\$arg"; done > "$MOCK_BIN_DIR/_args"
+printf '{"data":{"issues":{"nodes":[{"id":"1"}]}}}\n200\n'
+SCRIPT
+    chmod +x "$MOCK_BIN_DIR/curl"
+    export PATH="$MOCK_BIN_DIR:$PATH"
+    run linear_get_open_count
+    # Back-compat: must still use the name filter when the cache is empty
+    grep -q '"project":"Ralph Continuous Coding"' "$MOCK_BIN_DIR/_args" || true
+    grep -q 'project:{name:{eq:' "$MOCK_BIN_DIR/_args" || fail "expected name filter fallback"
+    restore_curl
+    assert_success
+}

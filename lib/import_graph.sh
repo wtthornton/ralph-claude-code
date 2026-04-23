@@ -40,6 +40,11 @@ import_graph_build_python() {
 
     mkdir -p "$(dirname "$cache_file")" 2>/dev/null || true
 
+    # TAP-673: write atomically via `.new` temp so a partial or failed build
+    # cannot clobber the existing cache. Caller (import_graph_ensure) validates
+    # JSON and clears the `.stale` flag only when the final mv succeeds.
+    local tmp_file="${cache_file}.new.$$"
+
     # TAP-633: pass project_root via env, not heredoc interpolation — a path
     # containing triple quotes (''' …) would otherwise escape the Python
     # string literal and execute arbitrary code during session-start.
@@ -79,7 +84,18 @@ for f in root.rglob("*.py"):
         pass
 
 json.dump(graph, sys.stdout, indent=2)
-' > "$cache_file" 2>/dev/null || echo '{}' > "$cache_file"
+' > "$tmp_file" 2>/dev/null
+    local py_rc=$?
+
+    # TAP-673: validate before installing. On any failure (Python crash,
+    # missing python3, invalid JSON), leave the existing cache untouched so
+    # import_graph_ensure can treat this as a rebuild failure and keep `.stale`.
+    if [[ $py_rc -ne 0 ]] || ! jq -e . "$tmp_file" >/dev/null 2>&1; then
+        rm -f "$tmp_file" 2>/dev/null
+        return 1
+    fi
+
+    mv -f "$tmp_file" "$cache_file"
 }
 
 # ---------------------------------------------------------------------------
@@ -116,6 +132,8 @@ import_graph_build_js() {
     fi
 
     # Fallback: grep-based extraction via python3 (less accurate but zero dependencies)
+    # TAP-673: atomic write via `.new` temp — same contract as the Python path.
+    local tmp_file="${cache_file}.new.$$"
     # TAP-633: pass project_root via env to avoid heredoc injection.
     PROJECT_ROOT="$project_root" python3 -c '
 import json, os, re, pathlib, sys
@@ -153,7 +171,15 @@ for ext in ["*.js", "*.jsx", "*.ts", "*.tsx"]:
             pass
 
 json.dump(graph, sys.stdout, indent=2)
-' > "$cache_file" 2>/dev/null || echo '{}' > "$cache_file"
+' > "$tmp_file" 2>/dev/null
+    local py_rc=$?
+
+    if [[ $py_rc -ne 0 ]] || ! jq -e . "$tmp_file" >/dev/null 2>&1; then
+        rm -f "$tmp_file" 2>/dev/null
+        return 1
+    fi
+
+    mv -f "$tmp_file" "$cache_file"
 }
 
 # ---------------------------------------------------------------------------
@@ -257,9 +283,12 @@ import_graph_is_stale() {
     # No cache = stale
     [[ ! -f "$cache_file" ]] && return 0
 
-    # Stale flag set by incremental invalidation (from hooks)
+    # TAP-673: Stale flag set by incremental invalidation (from hooks).
+    # DO NOT remove the flag here — it is cleared only after a successful
+    # rebuild in import_graph_ensure. If we removed it eagerly and the
+    # subsequent rebuild failed, the next staleness check would return
+    # "fresh" based on mtime alone while the cache remained out of date.
     if [[ -f "${cache_file}.stale" ]]; then
-        rm -f "${cache_file}.stale" 2>/dev/null
         return 0
     fi
 
@@ -296,7 +325,20 @@ import_graph_ensure() {
     local cache_file="${2:-$IMPORT_GRAPH_CACHE}"
 
     if import_graph_is_stale "$project_root" "$cache_file"; then
-        import_graph_build "$project_root" "$cache_file"
+        # TAP-673: build → validate → clear .stale, in that order. If build
+        # fails or produces invalid JSON, leave .stale in place so the next
+        # invocation retries rather than masking the regression as "fresh".
+        if import_graph_build "$project_root" "$cache_file"; then
+            if jq -e . "$cache_file" >/dev/null 2>&1; then
+                rm -f "${cache_file}.stale" 2>/dev/null
+                return 0
+            fi
+        fi
+        # Rebuild failed or produced invalid JSON — keep the stale flag.
+        if declare -F log_status >/dev/null 2>&1; then
+            log_status "WARN" "import graph rebuild failed, keeping cached graph marked stale"
+        fi
+        return 1
     fi
 }
 

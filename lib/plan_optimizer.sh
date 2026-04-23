@@ -472,19 +472,25 @@ plan_secondary_sort() {
         phase=$(plan_phase_rank "$text")
         size=$(plan_size_rank "$text" "$file_count")
 
-        # Module hash: consistent grouping (first 4 hex chars of hash)
-        # md5sum with shasum fallback for cross-platform support
+        # TAP-663: Module hash — first 8 hex chars of md5 (32-bit keyspace).
+        # Was 4 chars (16 bits = 65536 buckets) then further squashed to 1000
+        # buckets via `% 1000`, giving birthday-paradox collisions at ~40
+        # distinct modules and guaranteed collisions above ~1000. Distinct
+        # modules colliding = their tasks merge into one locality group and
+        # module-locality ordering silently breaks.
+        # md5sum with shasum fallback for cross-platform support.
         local mod_hash
-        mod_hash=$(echo -n "$module" | md5sum 2>/dev/null | cut -c1-4) || \
-            mod_hash=$(echo -n "$module" | shasum 2>/dev/null | cut -c1-4) || \
-            mod_hash="0000"
+        mod_hash=$(echo -n "$module" | md5sum 2>/dev/null | cut -c1-8) || \
+            mod_hash=$(echo -n "$module" | shasum 2>/dev/null | cut -c1-8) || \
+            mod_hash="00000000"
         local mod_num
         mod_num=$((16#${mod_hash}))
 
-        # Key formula: module (primary) → phase → topo rank → size → original idx
-        # Module groups related tasks together; phase orders create→implement→test within
-        # a module; topo rank (from tsort) breaks phase ties while respecting import deps.
-        local key=$(( (mod_num % 1000) * 1000000 + phase * 10000 + rank * 100 + size * 10 + idx ))
+        # Key formula: module (primary) → phase → topo rank → size → original idx.
+        # mod_num fits in 32 bits (≤ 2^32-1 ≈ 4.3e9); mod_num * 1e6 ≤ 4.3e15,
+        # comfortably within 64-bit signed arithmetic even after the phase/rank
+        # terms are added.
+        local key=$(( mod_num * 1000000 + phase * 10000 + rank * 100 + size * 10 + idx ))
         echo "$key $idx $section"
         rank=$((rank + 1))
     done <<< "$topo_order"

@@ -247,8 +247,87 @@ pkey() {
     run import_graph_is_stale "." "$IMPORT_GRAPH_CACHE"
     [[ "$status" -eq 0 ]]
 
-    # After is_stale consumes it, the .stale file should be removed
+    # TAP-673: is_stale MUST NOT remove the flag — only ensure() does, and
+    # only after a successful rebuild. Previously the flag was cleared here
+    # and a failed rebuild left the cache masquerading as fresh.
+    [[ -f "${IMPORT_GRAPH_CACHE}.stale" ]]
+
+    # After ensure() completes a successful rebuild, the flag is cleared.
+    import_graph_ensure "." "$IMPORT_GRAPH_CACHE"
     [[ ! -f "${IMPORT_GRAPH_CACHE}.stale" ]]
+}
+
+# =============================================================================
+# TAP-673: rebuild-failure preserves .stale flag and existing cache
+# =============================================================================
+
+@test "TAP-673: failed python rebuild preserves .stale flag and prior cache" {
+    setup_python_project
+    import_graph_build_python "." "$IMPORT_GRAPH_CACHE"
+    local good_hash
+    good_hash=$(md5sum "$IMPORT_GRAPH_CACHE" | awk '{print $1}')
+
+    # Mark stale (simulates hook-based invalidation after a file edit)
+    touch "${IMPORT_GRAPH_CACHE}.stale"
+
+    # Force rebuild failure by shadowing python3 with a non-zero-exiting stub
+    local mock_bin
+    mock_bin="$(mktemp -d)"
+    cat > "$mock_bin/python3" <<'STUB'
+#!/bin/bash
+exit 1
+STUB
+    chmod +x "$mock_bin/python3"
+    local saved_path="$PATH"
+    export PATH="$mock_bin:$PATH"
+
+    run import_graph_ensure "." "$IMPORT_GRAPH_CACHE"
+
+    # Restore PATH
+    export PATH="$saved_path"
+    rm -rf "$mock_bin"
+
+    # The existing cache must be intact (atomic write protected it)
+    local post_hash
+    post_hash=$(md5sum "$IMPORT_GRAPH_CACHE" | awk '{print $1}')
+    [[ "$post_hash" == "$good_hash" ]]
+
+    # TAP-673 core: the .stale flag must still be present so the next run retries
+    [[ -f "${IMPORT_GRAPH_CACHE}.stale" ]]
+}
+
+@test "TAP-673: successful rebuild clears .stale flag" {
+    setup_python_project
+    import_graph_build_python "." "$IMPORT_GRAPH_CACHE"
+    touch "${IMPORT_GRAPH_CACHE}.stale"
+
+    import_graph_ensure "." "$IMPORT_GRAPH_CACHE"
+
+    # Flag cleared only on success
+    [[ ! -f "${IMPORT_GRAPH_CACHE}.stale" ]]
+    # Cache is still valid JSON
+    jq -e . "$IMPORT_GRAPH_CACHE" >/dev/null
+}
+
+@test "TAP-673: build_python returns non-zero when python3 fails" {
+    setup_python_project
+    local mock_bin
+    mock_bin="$(mktemp -d)"
+    cat > "$mock_bin/python3" <<'STUB'
+#!/bin/bash
+exit 1
+STUB
+    chmod +x "$mock_bin/python3"
+    local saved_path="$PATH"
+    export PATH="$mock_bin:$PATH"
+
+    run import_graph_build_python "." "$IMPORT_GRAPH_CACHE"
+    local rc="$status"
+
+    export PATH="$saved_path"
+    rm -rf "$mock_bin"
+
+    [[ "$rc" -ne 0 ]]
 }
 
 # =============================================================================

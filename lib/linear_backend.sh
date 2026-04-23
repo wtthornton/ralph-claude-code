@@ -29,6 +29,14 @@
 LINEAR_GRAPHQL_URL="https://api.linear.app/graphql"
 RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS_DEFAULT=900
 
+# TAP-664: Session-cached project ID resolved from RALPH_LINEAR_PROJECT name.
+# Populated by `linear_init` at session start. Queries prefer the cached ID
+# over the raw name because Linear's `name.eq` filter is case- and whitespace-
+# sensitive — any drift (trailing space, case difference, smart-quote vs ascii
+# dash) silently returns an empty page, which TAP-536's fail-loud guard cannot
+# distinguish from "zero open issues" and routes to a fake plan_complete exit.
+_LINEAR_PROJECT_ID=""
+
 # =============================================================================
 # Internal helpers
 # =============================================================================
@@ -195,14 +203,10 @@ _linear_read_hook_count() {
 # Exit:   0 on success, 1 on any failure (no stdout output).
 linear_get_open_count() {
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
-        local query='query($project:String!){
-          issues(filter:{
-            project:{name:{eq:$project}},
-            state:{type:{in:["backlog","unstarted","started"]}}
-          },first:250){nodes{id}}
-        }'
         local result
-        result=$(_linear_api "$query" "{\"project\":\"${RALPH_LINEAR_PROJECT:-}\"}") || return 1
+        result=$(_linear_run_issues_query \
+            'state:{type:{in:["backlog","unstarted","started"]}}' \
+            'id') || return 1
 
         local count
         count=$(printf '%s' "$result" | jq -r '.data.issues.nodes // [] | length' 2>/dev/null)
@@ -222,14 +226,10 @@ linear_get_open_count() {
 # Precedence identical to linear_get_open_count.
 linear_get_done_count() {
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
-        local query='query($project:String!){
-          issues(filter:{
-            project:{name:{eq:$project}},
-            state:{type:{eq:"completed"}}
-          },first:250){nodes{id}}
-        }'
         local result
-        result=$(_linear_api "$query" "{\"project\":\"${RALPH_LINEAR_PROJECT:-}\"}") || return 1
+        result=$(_linear_run_issues_query \
+            'state:{type:{eq:"completed"}}' \
+            'id') || return 1
 
         local count
         count=$(printf '%s' "$result" | jq -r '.data.issues.nodes // [] | length' 2>/dev/null)
@@ -256,14 +256,11 @@ linear_get_done_count() {
 linear_get_next_task() {
     [[ -z "${LINEAR_API_KEY:-}" ]] && return 1
 
-    local query='query($project:String!){
-      issues(filter:{
-        project:{name:{eq:$project}},
-        state:{type:{in:["backlog","unstarted"]}}
-      },first:50){nodes{id identifier title priority}}
-    }'
     local result
-    result=$(_linear_api "$query" "{\"project\":\"${RALPH_LINEAR_PROJECT:-}\"}") || return 1
+    result=$(_linear_run_issues_query \
+        'state:{type:{in:["backlog","unstarted"]}}' \
+        'id identifier title priority' \
+        50) || return 1
 
     local next
     next=$(printf '%s' "$result" | jq -r '
@@ -292,14 +289,11 @@ linear_get_next_task() {
 linear_get_in_progress_task() {
     [[ -z "${LINEAR_API_KEY:-}" ]] && return 1
 
-    local query='query($project:String!){
-      issues(filter:{
-        project:{name:{eq:$project}},
-        state:{type:{eq:"started"}}
-      },first:50){nodes{id identifier title priority}}
-    }'
     local result
-    result=$(_linear_api "$query" "{\"project\":\"${RALPH_LINEAR_PROJECT:-}\"}") || return 1
+    result=$(_linear_run_issues_query \
+        'state:{type:{eq:"started"}}' \
+        'id identifier title priority' \
+        50) || return 1
 
     local next
     next=$(printf '%s' "$result" | jq -r '
@@ -316,6 +310,141 @@ linear_get_in_progress_task() {
 
     printf '%s\n' "$next"
     return 0
+}
+
+# TAP-664: linear_resolve_project_id — Resolve RALPH_LINEAR_PROJECT (name) to
+# its Linear project UUID. Fails loudly on zero matches or >1 matches so that
+# whitespace/case drift in .ralphrc surfaces as a startup error instead of a
+# silent empty-result cascade that masquerades as "backlog empty → exit".
+#
+# Caches the resolved ID in the session-scoped `_LINEAR_PROJECT_ID` var.
+#
+# Stdout: UUID on success.
+# Exit:   0 on success (one match), 1 on any failure (API error, no match,
+#         ambiguous match). Emits a structured linear_api_error line on stderr.
+linear_resolve_project_id() {
+    if [[ -z "${LINEAR_API_KEY:-}" ]]; then
+        _linear_log_error "resolve_project_id" "no_api_key"
+        return 1
+    fi
+    if [[ -z "${RALPH_LINEAR_PROJECT:-}" ]]; then
+        _linear_log_error "resolve_project_id" "no_project_name"
+        return 1
+    fi
+
+    local query='query($name:String!){
+      projects(filter:{name:{eq:$name}},first:10){nodes{id name}}
+    }'
+    local result
+    result=$(_linear_api "$query" "{\"name\":\"${RALPH_LINEAR_PROJECT}\"}") || return 1
+
+    local count first_id
+    count=$(printf '%s' "$result" | jq -r '.data.projects.nodes // [] | length' 2>/dev/null)
+    if ! [[ "$count" =~ ^[0-9]+$ ]]; then
+        _linear_log_error "resolve_project_id" "parse"
+        return 1
+    fi
+
+    case "$count" in
+        0)
+            _linear_log_error "resolve_project_id" "project_not_found"
+            return 1
+            ;;
+        1)
+            first_id=$(printf '%s' "$result" | jq -r '.data.projects.nodes[0].id' 2>/dev/null)
+            if [[ -z "$first_id" || "$first_id" == "null" ]]; then
+                _linear_log_error "resolve_project_id" "parse"
+                return 1
+            fi
+            _LINEAR_PROJECT_ID="$first_id"
+            printf '%s\n' "$first_id"
+            return 0
+            ;;
+        *)
+            _linear_log_error "resolve_project_id" "project_ambiguous_${count}_matches"
+            return 1
+            ;;
+    esac
+}
+
+# linear_init — One-shot session bootstrap for the Linear backend. Resolves
+# the project name to an ID (if an API key is set) and logs the outcome so
+# mismatches surface in the first log line rather than after a fake
+# plan_complete. Safe to call multiple times; re-uses the cached ID.
+#
+# Stdout: nothing (diagnostics go through log_status on stderr).
+# Exit:   0 when the backend is ready to serve queries in whatever mode is
+#         configured; 1 only when an explicit resolve was attempted and failed.
+linear_init() {
+    # Push-mode (no API key) — nothing to resolve.
+    [[ -z "${LINEAR_API_KEY:-}" ]] && return 0
+    # Already resolved — idempotent re-use.
+    [[ -n "$_LINEAR_PROJECT_ID" ]] && return 0
+
+    # Call resolve directly (not via `$(...)`) — the function sets the
+    # session-global `_LINEAR_PROJECT_ID`, and a command-substitution subshell
+    # would throw that assignment away.
+    if linear_resolve_project_id >/dev/null; then
+        if declare -F log_status >/dev/null 2>&1; then
+            log_status "INFO" "Linear project resolved: '${RALPH_LINEAR_PROJECT}' -> ${_LINEAR_PROJECT_ID}"
+        fi
+        return 0
+    else
+        if declare -F log_status >/dev/null 2>&1; then
+            log_status "ERROR" "Linear project '${RALPH_LINEAR_PROJECT}' failed to resolve — check spelling, case, and trailing whitespace"
+        fi
+        return 1
+    fi
+}
+
+# _linear_project_filter — Emit the GraphQL project-filter fragment. Prefers
+# the cached UUID (exact match) over the raw name (case/whitespace-sensitive).
+#
+# Stdout: a JSON key-value pair (without leading/trailing braces) suitable for
+# interpolation inside an `issues(filter:{ ... })` clause.
+_linear_project_filter() {
+    if [[ -n "$_LINEAR_PROJECT_ID" ]]; then
+        printf 'project:{id:{eq:$projectId}}'
+    else
+        printf 'project:{name:{eq:$project}}'
+    fi
+}
+
+# _linear_project_vars_json — Emit the GraphQL variables-object JSON for the
+# current project filter. Pairs with _linear_project_filter.
+_linear_project_vars_json() {
+    if [[ -n "$_LINEAR_PROJECT_ID" ]]; then
+        printf '"%s"' "$_LINEAR_PROJECT_ID"
+    else
+        printf '"%s"' "${RALPH_LINEAR_PROJECT:-}"
+    fi
+}
+
+# _linear_run_issues_query — Factored GraphQL issues-query runner used by all
+# public count/get functions. Applies the current project filter (ID when
+# cached via linear_init, name otherwise — see TAP-664) so callers don't need
+# to duplicate the branching.
+#
+# Args:
+#   $1 state_clause — e.g. 'state:{type:{in:["backlog","unstarted","started"]}}'
+#   $2 selection    — e.g. 'id' or 'id identifier title priority'
+#   $3 first        — page size (default 250)
+#
+# Stdout: raw JSON response on success.
+# Exit:   0 on success, 1 on failure (same fail-loud contract as _linear_api).
+_linear_run_issues_query() {
+    local state_clause="$1"
+    local selection="$2"
+    local first="${3:-250}"
+    local query vars
+    if [[ -n "$_LINEAR_PROJECT_ID" ]]; then
+        query="query(\$projectId:String!){issues(filter:{project:{id:{eq:\$projectId}},${state_clause}},first:${first}){nodes{${selection}}}}"
+        vars="{\"projectId\":\"${_LINEAR_PROJECT_ID}\"}"
+    else
+        query="query(\$project:String!){issues(filter:{project:{name:{eq:\$project}},${state_clause}},first:${first}){nodes{${selection}}}}"
+        vars="{\"project\":\"${RALPH_LINEAR_PROJECT:-}\"}"
+    fi
+    _linear_api "$query" "$vars"
 }
 
 # linear_check_configured — Returns 0 iff Linear backend is usable (env only).
