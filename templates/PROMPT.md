@@ -31,10 +31,13 @@ about — fill it in for your project.
 - Read `.ralph/AGENT.md` for build/deploy/run commands specific to this project.
 
 ## Bash Command Guidelines
-- Use separate Bash tool calls instead of compound commands (`&&`, `||`, `|`).
-- Instead of `cd /path && git add file && git commit -m "msg"`, use three
-  separate calls: `cd /path`, `git add file`, `git commit -m "msg"`.
-- This avoids permission-denial issues with compound command matching.
+- Avoid `cd /path && <command>` chains — pass absolute paths to the
+  command instead (or use `git -C /path ...` for git). The Bash
+  permission matcher evaluates the full command string from the first
+  word; chaining `cd` with a write-capable command (`git commit`, `rm`,
+  `sed`) frequently trips permission prompts.
+- Pipes (`|`) and `&&` between **read-only** commands (`git status`,
+  `grep`, `find`) are fine and even encouraged for parallel observation.
 
 ## Protected Files (DO NOT MODIFY)
 These files are Ralph's control surface. Never delete, move, rename, or
@@ -63,15 +66,22 @@ project code. Deleting them halts the loop.
 
 ## Current Objectives
 1. Study `.ralph/specs/*` to learn about the project specifications.
-2. Review `.ralph/fix_plan.md` for current priorities.
-3. Implement the highest-priority item using best practices.
-4. Use sub-agents (ralph-explorer, ralph-tester) for expensive operations.
-5. Update `.ralph/fix_plan.md` and commit changes.
+2. Pick the next task from the configured backend (`fix_plan.md` or
+   Linear — see the **ralph-workflow** skill for the full contract).
+3. **Verify the task is still needed** before writing code: re-read the
+   acceptance criteria and search the codebase for prior work. If the
+   problem is already fixed, close the task with evidence and move on —
+   do not double-fix it. (This is step 2 of the ralph-workflow contract.)
+4. Implement the highest-priority remaining item using best practices.
+5. Use sub-agents (ralph-explorer, ralph-tester) for expensive operations.
+6. Update the task source (`fix_plan.md` checkbox or Linear status) and
+   commit changes.
 
 ## Current Task
-Follow `.ralph/fix_plan.md` and choose the most important item to
-implement next. Use your judgment to prioritize what will have the biggest
-impact on project progress.
+Follow the **ralph-workflow** skill's per-loop execution contract. Pick
+the next task from the configured backend, verify it is still needed,
+and implement it. Use your judgment to prioritize what will have the
+biggest impact on project progress.
 
 Remember: Quality over speed. Build it right the first time. Know when
-you're done.
+you're done — and know when the work is already done.

@@ -148,9 +148,14 @@ EOF
     grep -q 'Bash(xargs \*)' "$PROJECT_ROOT/lib/enable_core.sh"
 }
 
-@test "LOOP-3: PROMPT.md advises against compound commands" {
-    grep -q "separate Bash tool calls" "$PROJECT_ROOT/templates/PROMPT.md"
-    grep -q "compound command" "$PROJECT_ROOT/templates/PROMPT.md"
+@test "LOOP-3: PROMPT.md warns about cd-chained Bash compound commands" {
+    # The harness's Bash permission matcher trips on `cd /path && <cmd>`
+    # chains because it evaluates the full command string from the first
+    # word. PROMPT.md must keep this warning so Claude doesn't fight the
+    # permission system on every loop. We pin the substantive phrases —
+    # the surrounding prose is allowed to evolve.
+    grep -qE "cd /path && <command>|cd .* && .*command" "$PROJECT_ROOT/templates/PROMPT.md"
+    grep -qE "permission (matcher|prompt|denial)" "$PROJECT_ROOT/templates/PROMPT.md"
 }
 
 # =============================================================================

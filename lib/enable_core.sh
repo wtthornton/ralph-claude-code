@@ -590,6 +590,10 @@ ${objectives_section}
 
 ## Key Principles
 - ONE task per loop - focus on the most important thing
+- VERIFY the task is still needed before writing code: re-read the task,
+  search the codebase for prior work, and if the problem is already
+  fixed, close the task with evidence (tick the checkbox or move the
+  Linear issue to Done with a comment) and move on — do not double-fix.
 - Search the codebase before assuming something isn't implemented
 - Write comprehensive tests with clear documentation
 - Update fix_plan.md with your learnings
@@ -624,7 +628,7 @@ STATUS: IN_PROGRESS | COMPLETE | BLOCKED
 TASKS_COMPLETED_THIS_LOOP: <number>
 FILES_MODIFIED: <number>
 TESTS_STATUS: PASSING | FAILING | NOT_RUN
-WORK_TYPE: IMPLEMENTATION | TESTING | DOCUMENTATION | REFACTORING
+WORK_TYPE: IMPLEMENTATION | TESTING | DOCUMENTATION | REFACTORING | VERIFICATION
 EXIT_SIGNAL: false | true
 RECOMMENDATION: <one line summary of what to do next>
 ---END_RALPH_STATUS---
