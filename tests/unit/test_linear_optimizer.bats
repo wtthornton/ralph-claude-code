@@ -217,3 +217,175 @@ teardown() {
     linear_optimizer_run
     [[ "$_OPTIMIZER_EXPLORER_CALLS" -eq 0 ]]
 }
+
+# ---------------------------------------------------------------------------
+# TAP-592 helpers
+# ---------------------------------------------------------------------------
+
+# _write_import_graph — Write a fake import graph cache.
+# Args: a JSON string of {file: [imports...]}.
+_write_import_graph() {
+    local graph="$1"
+    printf '%s' "$graph" > "$RALPH_DIR/.import_graph.json"
+}
+
+# Source import_graph.sh helpers so import_graph_predecessors is available.
+_setup_import_graph_lib() {
+    source "${BATS_TEST_DIRNAME}/../../lib/import_graph.sh"
+}
+
+# =============================================================================
+# TAP-592 TEST 1: Candidate demoted when its file imports another open issue's file
+# =============================================================================
+
+@test "TAP-592: candidate demoted when it imports another open issue's file" {
+    _setup_import_graph_lib
+
+    # Two open candidates:
+    #   TAP-A owns src/foo.py  (high score — same module as last-completed)
+    #   TAP-B owns tests/test_foo.py — but tests/test_foo.py imports src/foo.py
+    # Even though TAP-B has the higher locality score, it must be demoted because
+    # src/foo.py is owned by TAP-A (still open).
+    printf 'tests/test_foo.py\n' > "$RALPH_DIR/.last_completed_files"
+
+    local node_a node_b
+    node_a=$(_issue_node "id-a" "TAP-A" "Implement foo" 2 "Edit src/foo.py")
+    node_b=$(_issue_node "id-b" "TAP-B" "Test foo" 2 "Edit tests/test_foo.py")
+
+    local mock_json
+    mock_json=$(_build_issues_json "[${node_a},${node_b}]")
+    _linear_run_issues_query() { printf '%s\n' "$mock_json"; return 0; }
+
+    # Import graph: tests/test_foo.py imports src/foo.py
+    _write_import_graph '{"tests/test_foo.py":["src/foo.py"]}'
+
+    linear_optimizer_run
+
+    local first_line
+    first_line=$(head -1 "$RALPH_DIR/.linear_next_issue")
+    # TAP-B locality-wins (last-completed is tests/test_foo.py) but is demoted
+    # because tests/test_foo.py imports src/foo.py owned by still-open TAP-A.
+    [[ "$first_line" == "TAP-A" ]]
+}
+
+# =============================================================================
+# TAP-592 TEST 2: When the dependency owner is Done, no demotion happens
+# =============================================================================
+
+@test "TAP-592: no demotion when the dependency owner is Done (out of fetch)" {
+    _setup_import_graph_lib
+
+    # Same setup as TEST 1 but TAP-A is omitted from the fetch result, simulating
+    # it being Done (the optimizer only fetches Backlog/Todo/Started). The graph
+    # still says tests/test_foo.py imports src/foo.py, but src/foo.py is no
+    # longer "owned by an open issue" because TAP-A isn't in the candidate set.
+    printf 'tests/test_foo.py\n' > "$RALPH_DIR/.last_completed_files"
+
+    local node_b
+    node_b=$(_issue_node "id-b" "TAP-B" "Test foo" 2 "Edit tests/test_foo.py")
+
+    local mock_json
+    mock_json=$(_build_issues_json "[${node_b}]")
+    _linear_run_issues_query() { printf '%s\n' "$mock_json"; return 0; }
+
+    _write_import_graph '{"tests/test_foo.py":["src/foo.py"]}'
+
+    linear_optimizer_run
+
+    local first_line
+    first_line=$(head -1 "$RALPH_DIR/.linear_next_issue")
+    [[ "$first_line" == "TAP-B" ]]
+}
+
+# =============================================================================
+# TAP-592 TEST 3: Missing import graph cache — no crash, no demotion
+# =============================================================================
+
+@test "TAP-592: no import-graph cache → falls through to score-based pick" {
+    _setup_import_graph_lib
+
+    printf 'tests/test_foo.py\n' > "$RALPH_DIR/.last_completed_files"
+
+    local node_a node_b
+    node_a=$(_issue_node "id-a" "TAP-A" "Implement foo" 2 "Edit src/foo.py")
+    node_b=$(_issue_node "id-b" "TAP-B" "Test foo" 2 "Edit tests/test_foo.py")
+
+    local mock_json
+    mock_json=$(_build_issues_json "[${node_a},${node_b}]")
+    _linear_run_issues_query() { printf '%s\n' "$mock_json"; return 0; }
+
+    # NO import graph cache written
+    rm -f "$RALPH_DIR/.import_graph.json" 2>/dev/null || true
+
+    run linear_optimizer_run
+    [[ "$status" -eq 0 ]]
+
+    local first_line
+    first_line=$(head -1 "$RALPH_DIR/.linear_next_issue")
+    # Without the graph, locality wins → TAP-B (matches last-completed)
+    [[ "$first_line" == "TAP-B" ]]
+}
+
+# =============================================================================
+# TAP-592 TEST 4: All candidates have open deps → fewest-deps wins
+# =============================================================================
+
+@test "TAP-592: all candidates have deps → picks fewest-deps fallback" {
+    _setup_import_graph_lib
+
+    # All three candidates import another candidate's file.
+    # TAP-A imports 1 (src/foo.py owned by TAP-B), score baseline
+    # TAP-B imports 2 (src/foo.py owned by TAP-C, src/bar.py owned by TAP-C)
+    # TAP-C imports 3 (a.py, b.py, c.py owned by TAP-A)
+    printf '__no_match__\n' > "$RALPH_DIR/.last_completed_files"
+
+    local node_a node_b node_c
+    node_a=$(_issue_node "id-a" "TAP-A" "A" 2 "Edit src/a.py")
+    node_b=$(_issue_node "id-b" "TAP-B" "B" 2 "Edit src/foo.py")
+    node_c=$(_issue_node "id-c" "TAP-C" "C" 2 "Edit src/c.py")
+
+    local mock_json
+    mock_json=$(_build_issues_json "[${node_a},${node_b},${node_c}]")
+    _linear_run_issues_query() { printf '%s\n' "$mock_json"; return 0; }
+
+    # Graph: A imports foo (1 dep on B); B imports c (1 dep on C); C imports a (1 dep on A)
+    # All three have exactly 1 cross-issue dep → fallback by score (all 0) → first by priority
+    _write_import_graph '{"src/a.py":["src/foo.py"],"src/foo.py":["src/c.py"],"src/c.py":["src/a.py"]}'
+
+    linear_optimizer_run
+
+    # All three demoted. Fallback fires. Either A, B, or C — assert non-empty.
+    [[ -s "$RALPH_DIR/.linear_next_issue" ]]
+    local first_line
+    first_line=$(head -1 "$RALPH_DIR/.linear_next_issue")
+    [[ "$first_line" == "TAP-A" || "$first_line" == "TAP-B" || "$first_line" == "TAP-C" ]]
+}
+
+# =============================================================================
+# TAP-592 TEST 5: RALPH_NO_DEP_DEMOTE=true bypasses dependency check
+# =============================================================================
+
+@test "TAP-592: RALPH_NO_DEP_DEMOTE=true bypasses demotion phase" {
+    _setup_import_graph_lib
+
+    printf 'tests/test_foo.py\n' > "$RALPH_DIR/.last_completed_files"
+
+    local node_a node_b
+    node_a=$(_issue_node "id-a" "TAP-A" "Implement foo" 2 "Edit src/foo.py")
+    node_b=$(_issue_node "id-b" "TAP-B" "Test foo" 2 "Edit tests/test_foo.py")
+
+    local mock_json
+    mock_json=$(_build_issues_json "[${node_a},${node_b}]")
+    _linear_run_issues_query() { printf '%s\n' "$mock_json"; return 0; }
+
+    _write_import_graph '{"tests/test_foo.py":["src/foo.py"]}'
+
+    # Opt out of demotion — locality should win like in TEST 3
+    export RALPH_NO_DEP_DEMOTE=true
+    linear_optimizer_run
+    unset RALPH_NO_DEP_DEMOTE
+
+    local first_line
+    first_line=$(head -1 "$RALPH_DIR/.linear_next_issue")
+    [[ "$first_line" == "TAP-B" ]]
+}

@@ -411,6 +411,29 @@ import_graph_dependents() {
 }
 
 # ---------------------------------------------------------------------------
+# import_graph_predecessors — What files does file A import?
+#
+# Usage: import_graph_predecessors <source_file> [cache_file]
+#
+# Prints one file path per line for each entry in source_file's import list.
+# Returns nothing (empty output) if file has no imports or cache is missing.
+# Inverse of import_graph_dependents (which walks "who imports X" — this walks
+# "what does X import"). Used by lib/linear_optimizer.sh (LINOPT-3 / TAP-592)
+# to demote candidates that depend on still-open Linear-issue files.
+# ---------------------------------------------------------------------------
+import_graph_predecessors() {
+    local source="$1"
+    local cache_file="${2:-$IMPORT_GRAPH_CACHE}"
+
+    [[ -z "$source" ]] && return 0
+    [[ ! -f "$cache_file" ]] && return 0
+
+    jq -r --arg s "$source" \
+        '.[$s] // [] | .[]' \
+        "$cache_file" 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
 # Exports
 # ---------------------------------------------------------------------------
 
@@ -423,3 +446,4 @@ export -f import_graph_ensure
 export -f import_graph_invalidate_file
 export -f import_graph_lookup
 export -f import_graph_dependents
+export -f import_graph_predecessors

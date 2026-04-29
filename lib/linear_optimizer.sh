@@ -22,6 +22,7 @@
 #   RALPH_NO_LINEAR_OPTIMIZE=true     — disable entirely (no API calls, no write)
 #   RALPH_OPTIMIZER_FETCH_LIMIT=20    — max issues to fetch and score
 #   RALPH_OPTIMIZER_EXPLORER_MAX=3    — max explorer fallback calls per session
+#   RALPH_NO_DEP_DEMOTE=true          — skip TAP-592 import-graph demotion phase
 
 RALPH_DIR="${RALPH_DIR:-.ralph}"
 RALPH_OPTIMIZER_FETCH_LIMIT="${RALPH_OPTIMIZER_FETCH_LIMIT:-20}"
@@ -141,6 +142,126 @@ _optimizer_explorer_resolve() {
     return 0
 }
 
+# _optimizer_select_winner — Phase-2 dependency-aware selection (LINOPT-3 / TAP-592).
+#
+# Reads from caller-scoped arrays:
+#   CAND_IDS[]         identifiers in input order
+#   CAND_SCORES[]      Jaccard scores
+#   CAND_PRIORITIES[]  sort_priority (0=Urgent→99=None)
+#   CAND_FILES_TMP[]   tempfile per candidate holding its path set (one per line)
+#
+# Writes the picked identifier and score into two caller-named variables via
+# bash nameref. Cleans up CAND_FILES_TMP[] regardless of outcome.
+#
+# Args: $1 = name of caller's "best_id" variable, $2 = name of "best_score" var.
+_optimizer_select_winner() {
+    local -n _out_id="$1"
+    local -n _out_score="$2"
+    _out_id=""
+    _out_score="0.0000"
+
+    local n=${#CAND_IDS[@]}
+    (( n == 0 )) && return 1
+
+    # Build sorted index list (score DESC, priority ASC). awk emits the
+    # negated-score key so ascending numeric sort puts the highest score first;
+    # using `sort -g` (general numeric) is essential because lexicographic
+    # comparison of "%012.6f -0" produces "-0000.000000" with a leading minus
+    # that sorts BEFORE positive negations like "-0001.300000".
+    local sorted_idx
+    sorted_idx=$(
+        local i
+        for (( i=0; i<n; i++ )); do
+            awk -v s="${CAND_SCORES[$i]}" -v p="${CAND_PRIORITIES[$i]}" -v i="$i" \
+                'BEGIN{printf "%.6f|%02d|%d\n", -s, p, i}'
+        done | sort -t'|' -k1,1g -k2,2n -k3,3n | awk -F'|' '{print $3}'
+    )
+
+    # Phase-2 dependency check (only when the import graph cache exists and the
+    # opt-out flag is not set). Build "files owned by any open candidate" map.
+    local cache_file="${RALPH_DIR}/.import_graph.json"
+    local do_dep_check=true
+    [[ "${RALPH_NO_DEP_DEMOTE:-false}" == "true" ]] && do_dep_check=false
+    [[ ! -f "$cache_file" ]] && {
+        do_dep_check=false
+        echo "linear_optimizer: import graph cache missing — skipping dep demotion" >&2
+    }
+    if ! declare -F import_graph_predecessors >/dev/null 2>&1; then
+        do_dep_check=false
+    fi
+
+    declare -A FILES_OWNED_BY_OPEN
+    if [[ "$do_dep_check" == "true" ]]; then
+        local i f
+        for (( i=0; i<n; i++ )); do
+            local id="${CAND_IDS[$i]}"
+            local files_tmp="${CAND_FILES_TMP[$i]}"
+            [[ -s "$files_tmp" ]] || continue
+            while IFS= read -r f; do
+                [[ -z "$f" ]] && continue
+                # First-write wins — multiple candidates "owning" the same file is
+                # a corner case; map.length >= 1 is enough to trigger demotion.
+                FILES_OWNED_BY_OPEN["$f"]="${FILES_OWNED_BY_OPEN[$f]:-$id}"
+            done < "$files_tmp"
+        done
+    fi
+
+    # Iterate sorted candidates. First clean (zero open-deps) wins. Track the
+    # fewest-deps fallback so we always emit a hint even when nothing is clean.
+    local best_idx="" fallback_idx="" fallback_dep_count=999999
+    local idx
+    while IFS= read -r idx; do
+        [[ -z "$idx" ]] && continue
+        local id="${CAND_IDS[$idx]}"
+        local files_tmp="${CAND_FILES_TMP[$idx]}"
+
+        local dep_count=0
+        if [[ "$do_dep_check" == "true" && -s "$files_tmp" ]]; then
+            local f pred owner
+            while IFS= read -r f; do
+                [[ -z "$f" ]] && continue
+                while IFS= read -r pred; do
+                    [[ -z "$pred" ]] && continue
+                    owner="${FILES_OWNED_BY_OPEN[$pred]:-}"
+                    if [[ -n "$owner" && "$owner" != "$id" ]]; then
+                        dep_count=$(( dep_count + 1 ))
+                    fi
+                done < <(import_graph_predecessors "$f" "$cache_file" 2>/dev/null)
+            done < "$files_tmp"
+        fi
+
+        if (( dep_count == 0 )); then
+            best_idx="$idx"
+            break
+        fi
+
+        echo "linear_optimizer: demoting ${id} (depends on ${dep_count} open-issue file(s))" >&2
+        if (( dep_count < fallback_dep_count )); then
+            fallback_idx="$idx"
+            fallback_dep_count=$dep_count
+        fi
+    done <<< "$sorted_idx"
+
+    # Cleanup per-candidate tempfiles regardless of outcome
+    local cleanup_tmp
+    for cleanup_tmp in "${CAND_FILES_TMP[@]}"; do
+        [[ -n "$cleanup_tmp" ]] && rm -f "$cleanup_tmp" 2>/dev/null
+    done
+
+    if [[ -n "$best_idx" ]]; then
+        _out_id="${CAND_IDS[$best_idx]}"
+        _out_score="${CAND_SCORES[$best_idx]}"
+        return 0
+    fi
+    if [[ -n "$fallback_idx" ]]; then
+        _out_id="${CAND_IDS[$fallback_idx]}"
+        _out_score="${CAND_SCORES[$fallback_idx]}"
+        echo "linear_optimizer: all candidates have open deps; picking fewest-deps: ${_out_id}" >&2
+        return 0
+    fi
+    return 1
+}
+
 # =============================================================================
 # Main entry point
 # =============================================================================
@@ -203,8 +324,14 @@ linear_optimizer_run() {
         | .[].id
     ' 2>/dev/null || true)
 
-    # Score each issue
-    local best_id="" best_score="0.0000" best_priority=99
+    # =========================================================================
+    # Phase 1 (LINOPT-2): score every candidate and accumulate the file sets
+    # =========================================================================
+    # Parallel arrays — index i identifies one candidate.
+    local -a CAND_IDS=()
+    local -a CAND_SCORES=()
+    local -a CAND_PRIORITIES=()
+    local -a CAND_FILES_TMP=()   # one tempfile per candidate, holding its paths
 
     local b_file
     b_file=$(mktemp /tmp/ralph_opt_b.XXXXXX) || { rm -f "$a_file"; return 0; }
@@ -240,32 +367,44 @@ linear_optimizer_run() {
         # Score: Jaccard + parent-dir bonus
         local score
         score=$(_optimizer_score_jaccard "$a_file" "$b_file")
+        local sort_priority=$(( priority == 0 ? 99 : priority ))
 
-        # Tiebreaker: lower sort_priority = higher Linear priority
-        local sort_priority
-        sort_priority=$(( priority == 0 ? 99 : priority ))
+        # Snapshot this candidate's file set for the dependency phase
+        local cand_files_tmp
+        cand_files_tmp=$(mktemp /tmp/ralph_opt_cand.XXXXXX) || continue
+        cp "$b_file" "$cand_files_tmp" 2>/dev/null || : > "$cand_files_tmp"
 
-        # Pick best: higher score wins; tie → lower sort_priority wins
-        local is_better=false
-        if awk "BEGIN{exit !(${score}+0 > ${best_score}+0)}"; then
-            is_better=true
-        elif awk "BEGIN{exit !(${score}+0 == ${best_score}+0)}" 2>/dev/null && \
-             (( sort_priority < best_priority )); then
-            is_better=true
-        fi
-
-        if [[ "$is_better" == "true" ]]; then
-            best_id="$identifier"
-            best_score="$score"
-            best_priority="$sort_priority"
-        fi
-
+        CAND_IDS+=("$identifier")
+        CAND_SCORES+=("$score")
+        CAND_PRIORITIES+=("$sort_priority")
+        CAND_FILES_TMP+=("$cand_files_tmp")
     done < <(printf '%s' "$issues_json" \
         | jq -c '(.data.issues.nodes // [])[]' 2>/dev/null)
 
     rm -f "$a_file" "$b_file" 2>/dev/null || true
 
+    if (( ${#CAND_IDS[@]} == 0 )); then
+        echo "linear_optimizer: no candidate found — no hint written" >&2
+        return 0
+    fi
+
+    # =========================================================================
+    # Phase 2 (LINOPT-3 / TAP-592): dependency-aware selection
+    # =========================================================================
+    # Sort candidate indexes by score desc, then sort_priority asc. Build the
+    # FILES_OWNED_BY_OPEN map from every candidate's path set, then iterate in
+    # score order — the first candidate whose files don't import anything
+    # owned by another candidate wins. If all candidates have ≥1 cross-issue
+    # dep, fall back to the lowest-dep-count candidate (then highest score).
+    #
+    # If the import graph cache is missing or RALPH_NO_DEP_DEMOTE=true, we
+    # skip the predecessor walk and pick by score only — preserving the
+    # phase-1 behavior.
+    local best_id best_score
+    _optimizer_select_winner best_id best_score
+
     if [[ -z "$best_id" ]]; then
+        # _optimizer_select_winner cleans up tempfiles even on failure
         echo "linear_optimizer: no candidate found — no hint written" >&2
         return 0
     fi
