@@ -4986,6 +4986,7 @@ Options:
     --reset-circuit         Reset circuit breaker to CLOSED state
     --circuit-status        Show circuit breaker status and exit
     --auto-reset-circuit    Auto-reset circuit breaker on startup (bypasses cooldown)
+    --optimize-linear       Run Linear cache-locality optimizer once and exit (TAP-594)
     --reset-session         Reset session state and exit (clears session continuity)
 
 Modern CLI Options (Phase 1.1):
@@ -5171,6 +5172,23 @@ while [[ $# -gt 0 ]]; do
             source "$SCRIPT_DIR/lib/circuit_breaker.sh"
             show_circuit_status
             exit 0
+            ;;
+        --optimize-linear)
+            # TAP-594: Manual rerun of the Linear cache-locality optimizer.
+            # Loads .ralphrc + secrets so RALPH_TASK_SOURCE / LINEAR_API_KEY /
+            # RALPH_LINEAR_PROJECT are available, then invokes linear_optimizer_run.
+            load_ralphrc 2>/dev/null || true
+            if [[ "${RALPH_TASK_SOURCE:-file}" != "linear" ]]; then
+                echo "Error: --optimize-linear requires RALPH_TASK_SOURCE=linear" >&2
+                exit 1
+            fi
+            if declare -F linear_optimizer_run >/dev/null 2>&1; then
+                linear_optimizer_run
+                exit 0
+            else
+                echo "Error: lib/linear_optimizer.sh not loaded" >&2
+                exit 1
+            fi
             ;;
         --output-format)
             if [[ "$2" == "json" || "$2" == "text" ]]; then

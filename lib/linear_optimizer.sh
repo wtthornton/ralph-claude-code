@@ -31,6 +31,160 @@ RALPH_OPTIMIZER_EXPLORER_MAX="${RALPH_OPTIMIZER_EXPLORER_MAX:-3}"
 _OPTIMIZER_EXPLORER_CALLS=0
 _OPTIMIZER_CACHE_FILE="${RALPH_DIR}/.linear_optimizer_cache.json"
 
+# TAP-594: Lock file path and metrics JSONL path. The metrics file is rotated
+# monthly (one file per YYYY-MM); ad-hoc analysis via jq.
+_OPTIMIZER_LOCK_FILE="${RALPH_DIR}/.linear_optimizer.lock"
+_OPTIMIZER_METRICS_DIR="${RALPH_DIR}/metrics"
+
+# _optimizer_log — Lightweight log_status replacement so this module stays
+# self-contained when sourced standalone in tests. Falls through to log_status
+# when ralph_loop.sh has defined it; otherwise emits to stderr.
+_optimizer_log() {
+    local level="$1"; shift
+    if declare -F log_status >/dev/null 2>&1; then
+        log_status "$level" "linear_optimizer: $*"
+    else
+        echo "[$level] linear_optimizer: $*" >&2
+    fi
+}
+
+# =============================================================================
+# TAP-594 safety rails
+# =============================================================================
+
+# _optimizer_acquire_lock — Acquire .linear_optimizer.lock with PID-stale check.
+# Returns 0 if acquired, 1 if another live process holds the lock.
+_optimizer_acquire_lock() {
+    if [[ -f "$_OPTIMIZER_LOCK_FILE" ]]; then
+        local existing_pid
+        existing_pid=$(head -1 "$_OPTIMIZER_LOCK_FILE" 2>/dev/null | tr -cd '0-9')
+        if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+            _optimizer_log "INFO" "another optimizer instance is running (pid=$existing_pid) — skipping"
+            return 1
+        fi
+        # Stale lock — owning PID is dead
+        rm -f "$_OPTIMIZER_LOCK_FILE" 2>/dev/null || true
+    fi
+    printf '%s\n' "$$" > "$_OPTIMIZER_LOCK_FILE" 2>/dev/null || return 1
+    return 0
+}
+
+_optimizer_release_lock() {
+    rm -f "$_OPTIMIZER_LOCK_FILE" 2>/dev/null || true
+}
+
+# _optimizer_elapsed_ms — Elapsed milliseconds since a start epoch. Falls back
+# to seconds*1000 when GNU date's %N isn't available (e.g. macOS without coreutils).
+_optimizer_elapsed_ms() {
+    local start="$1"
+    local now
+    now=$(date +%s%3N 2>/dev/null || date +%s)
+    # Strip non-digits (handles macOS literal "%3N" output if extension missing)
+    start=$(printf '%s' "$start" | tr -cd '0-9')
+    now=$(printf '%s' "$now" | tr -cd '0-9')
+    [[ -z "$start" || -z "$now" ]] && { echo 0; return; }
+    local diff=$(( now - start ))
+    (( diff < 0 )) && diff=0
+    echo "$diff"
+}
+
+# _optimizer_metrics_file — Resolve the current monthly metrics path. Caller
+# is responsible for creating the directory before writing.
+_optimizer_metrics_file() {
+    local ym
+    ym=$(date -u '+%Y-%m' 2>/dev/null || echo "unknown")
+    printf '%s/linear_optimizer_%s.jsonl' "$_OPTIMIZER_METRICS_DIR" "$ym"
+}
+
+# _optimizer_emit_telemetry — Append one JSONL record to the metrics file.
+# Args:
+#   $1 candidates_evaluated
+#   $2 explorer_calls
+#   $3 hint_written  (issue ID, or "" for null)
+#   $4 hint_score    (float, or "" for null)
+#   $5 hint_dep_clean (true|false|"" for null)
+#   $6 fallback_reason (string, or "" for null)
+#   $7 duration_ms
+_optimizer_emit_telemetry() {
+    local cand_eval="${1:-0}"
+    local expl_calls="${2:-0}"
+    local hint="${3:-}"
+    local score="${4:-}"
+    local dep_clean="${5:-}"
+    local reason="${6:-}"
+    local dur_ms="${7:-0}"
+
+    mkdir -p "$_OPTIMIZER_METRICS_DIR" 2>/dev/null || return 0
+    local mfile
+    mfile=$(_optimizer_metrics_file)
+    local ts session_id
+    ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")
+    session_id=$(cat "$RALPH_DIR/.ralph_run_id" 2>/dev/null || echo "")
+
+    # Build the record via jq so all values are properly JSON-encoded.
+    local record
+    record=$(jq -nc \
+        --arg ts "$ts" \
+        --arg sid "$session_id" \
+        --argjson ce "${cand_eval:-0}" \
+        --argjson ec "${expl_calls:-0}" \
+        --arg hw "$hint" \
+        --arg hs "$score" \
+        --arg dc "$dep_clean" \
+        --arg fr "$reason" \
+        --argjson dms "${dur_ms:-0}" \
+        '{
+            ts: $ts,
+            session_id: ($sid | if . == "" then null else . end),
+            candidates_evaluated: $ce,
+            explorer_calls: $ec,
+            hint_written: ($hw | if . == "" then null else . end),
+            hint_score: ($hs | if . == "" then null else (. | tonumber? // null) end),
+            hint_dep_clean: ($dc | if . == "true" then true elif . == "false" then false else null end),
+            fallback_reason: ($fr | if . == "" then null else . end),
+            duration_ms: $dms
+        }' 2>/dev/null) || return 0
+
+    [[ -n "$record" ]] && printf '%s\n' "$record" >> "$mfile" 2>/dev/null || true
+}
+
+# _optimizer_cleanup_stale_hint — Drop an existing .linear_next_issue when its
+# referenced issue is no longer Backlog/Todo/In Progress. Reuses
+# _linear_run_issues_query so it shares fail-loud semantics with the rest of
+# linear_backend.sh.
+#
+# Returns 0 if hint was cleaned (or nothing to do); 1 only on API error so the
+# caller can treat the hint state as unknown and skip the cleanup pass.
+_optimizer_cleanup_stale_hint() {
+    local hint_file="${RALPH_DIR}/.linear_next_issue"
+    [[ ! -s "$hint_file" ]] && return 0
+
+    local stale_id
+    stale_id=$(grep -v '^#' "$hint_file" 2>/dev/null | head -1 | tr -cd 'A-Z0-9a-z-')
+    [[ -z "$stale_id" ]] && return 0
+
+    # Query Linear for this specific issue's state. Reuse _linear_run_issues_query
+    # by filtering on identifier — the existing query path supports `state:` and
+    # the project filter, so we can't trivially scope by identifier without a
+    # different query. Instead, re-fetch the full open set and check membership.
+    local issues_json
+    issues_json=$(_linear_run_issues_query \
+        'state:{type:{in:["backlog","unstarted","started"]}}' \
+        'identifier' \
+        50) || return 1
+
+    local found
+    found=$(printf '%s' "$issues_json" \
+        | jq -r --arg sid "$stale_id" \
+            '(.data.issues.nodes // []) | map(.identifier) | index($sid) // "NO"' \
+        2>/dev/null)
+    if [[ "$found" == "NO" ]]; then
+        rm -f "$hint_file" 2>/dev/null || true
+        _optimizer_log "INFO" "cleared stale hint pointing at $stale_id (no longer Backlog/Todo/In-Progress)"
+    fi
+    return 0
+}
+
 # =============================================================================
 # Internal helpers
 # =============================================================================
@@ -276,25 +430,55 @@ _optimizer_select_winner() {
 #
 # Exit: 0 always. Failures are advisory — harness continues without a hint.
 linear_optimizer_run() {
-    # Guards
-    [[ "${RALPH_TASK_SOURCE:-file}" != "linear" ]] && return 0
-    [[ "${RALPH_NO_LINEAR_OPTIMIZE:-false}" == "true" ]] && return 0
-    [[ -z "${RALPH_LINEAR_PROJECT:-}" ]] && return 0
-    [[ -z "${LINEAR_API_KEY:-}" ]] && return 0  # push-mode: Claude picks via MCP
+    local _opt_start_epoch
+    _opt_start_epoch=$(date +%s%3N 2>/dev/null || date +%s)
+
+    # ---- Guards (TAP-594 safety rails 3 + 4) -----------------------------
+    if [[ "${RALPH_TASK_SOURCE:-file}" != "linear" ]]; then
+        return 0  # not in Linear mode — silent (no telemetry)
+    fi
+    if [[ "${RALPH_NO_LINEAR_OPTIMIZE:-false}" == "true" ]]; then
+        _optimizer_log "INFO" "RALPH_NO_LINEAR_OPTIMIZE=true — skipping (no API calls)"
+        _optimizer_emit_telemetry 0 0 "" "" "" "opt_out" 0
+        return 0
+    fi
+    if [[ -z "${RALPH_LINEAR_PROJECT:-}" ]]; then
+        _optimizer_log "ERROR" "RALPH_TASK_SOURCE=linear but RALPH_LINEAR_PROJECT is unset (misconfiguration)"
+        _optimizer_emit_telemetry 0 0 "" "" "" "project_unset" 0
+        return 0
+    fi
+    if [[ -z "${LINEAR_API_KEY:-}" ]]; then
+        # push-mode: Claude picks via MCP — silent return, no telemetry
+        return 0
+    fi
+
+    # ---- Lock (TAP-594 safety rail 5) ------------------------------------
+    if ! _optimizer_acquire_lock; then
+        _optimizer_emit_telemetry 0 0 "" "" "" "concurrent_run_skipped" 0
+        return 0
+    fi
 
     local lcf="${RALPH_DIR}/.last_completed_files"
     local hint_dest="${RALPH_DIR}/.linear_next_issue"
     local hint_tmp="${hint_dest}.tmp.$$"
 
+    # ---- Stale hint cleanup (TAP-594 safety rail 1) ----------------------
+    # Best-effort: if the API errors here we leave the hint alone (rail 2).
+    _optimizer_cleanup_stale_hint || true
+
     # Fetch top-N open issues with description for path extraction
     local issues_json
-    issues_json=$(_linear_run_issues_query \
+    if ! issues_json=$(_linear_run_issues_query \
         'state:{type:{in:["backlog","unstarted","started"]}}' \
         'id identifier title priority updatedAt description' \
-        "$RALPH_OPTIMIZER_FETCH_LIMIT") || {
-        echo "linear_optimizer: fetch failed — no hint written" >&2
+        "$RALPH_OPTIMIZER_FETCH_LIMIT"); then
+        # ---- TAP-594 safety rail 2: fail-loud, preserve existing hint ----
+        _optimizer_log "WARN" "Linear list_issues failed — existing hint (if any) preserved"
+        _optimizer_emit_telemetry 0 "$_OPTIMIZER_EXPLORER_CALLS" "" "" "" "linear_api_error" \
+            $(_optimizer_elapsed_ms "$_opt_start_epoch")
+        _optimizer_release_lock
         return 0
-    }
+    fi
 
     local n_issues
     n_issues=$(printf '%s' "$issues_json" \
@@ -304,6 +488,9 @@ linear_optimizer_run() {
 
     if (( n_issues == 0 )); then
         : > "$hint_dest" 2>/dev/null || true
+        _optimizer_emit_telemetry 0 "$_OPTIMIZER_EXPLORER_CALLS" "" "" "" "no_eligible_candidates" \
+            $(_optimizer_elapsed_ms "$_opt_start_epoch")
+        _optimizer_release_lock
         return 0
     fi
 
@@ -384,7 +571,10 @@ linear_optimizer_run() {
     rm -f "$a_file" "$b_file" 2>/dev/null || true
 
     if (( ${#CAND_IDS[@]} == 0 )); then
-        echo "linear_optimizer: no candidate found — no hint written" >&2
+        _optimizer_log "INFO" "no candidate found — no hint written"
+        _optimizer_emit_telemetry 0 "$_OPTIMIZER_EXPLORER_CALLS" "" "" "" "no_eligible_candidates" \
+            $(_optimizer_elapsed_ms "$_opt_start_epoch")
+        _optimizer_release_lock
         return 0
     fi
 
@@ -405,7 +595,11 @@ linear_optimizer_run() {
 
     if [[ -z "$best_id" ]]; then
         # _optimizer_select_winner cleans up tempfiles even on failure
-        echo "linear_optimizer: no candidate found — no hint written" >&2
+        _optimizer_log "INFO" "no candidate found — no hint written"
+        _optimizer_emit_telemetry "${#CAND_IDS[@]}" "$_OPTIMIZER_EXPLORER_CALLS" "" "" "" \
+            "no_eligible_candidates" \
+            $(_optimizer_elapsed_ms "$_opt_start_epoch")
+        _optimizer_release_lock
         return 0
     fi
 
@@ -416,6 +610,10 @@ linear_optimizer_run() {
         rm -f "$hint_tmp" 2>/dev/null
     fi
 
-    echo "linear_optimizer: hint → ${best_id} (score=${best_score})" >&2
+    _optimizer_log "INFO" "hint → ${best_id} (score=${best_score})"
+    _optimizer_emit_telemetry "${#CAND_IDS[@]}" "$_OPTIMIZER_EXPLORER_CALLS" \
+        "$best_id" "$best_score" "true" "" \
+        $(_optimizer_elapsed_ms "$_opt_start_epoch")
+    _optimizer_release_lock
     return 0
 }

@@ -389,3 +389,150 @@ _setup_import_graph_lib() {
     first_line=$(head -1 "$RALPH_DIR/.linear_next_issue")
     [[ "$first_line" == "TAP-B" ]]
 }
+
+# =============================================================================
+# TAP-594 TEST 1: API error preserves existing hint, emits linear_api_error
+# =============================================================================
+
+@test "TAP-594: Linear API error preserves existing hint, records linear_api_error" {
+    # Pre-existing hint that must NOT be deleted
+    printf 'TAP-EXISTING\n' > "$RALPH_DIR/.linear_next_issue"
+
+    # Mock fetcher returns non-zero (simulating API timeout)
+    _linear_run_issues_query() { return 1; }
+
+    linear_optimizer_run
+
+    # Hint must be preserved
+    [[ -s "$RALPH_DIR/.linear_next_issue" ]]
+    local first_line
+    first_line=$(head -1 "$RALPH_DIR/.linear_next_issue")
+    [[ "$first_line" == "TAP-EXISTING" ]]
+
+    # Telemetry: monthly file should contain a fallback_reason=linear_api_error record
+    local mfile
+    mfile="$RALPH_DIR/metrics/linear_optimizer_$(date -u '+%Y-%m').jsonl"
+    [[ -s "$mfile" ]]
+    grep -q '"fallback_reason":"linear_api_error"' "$mfile"
+}
+
+# =============================================================================
+# TAP-594 TEST 2: Stale hint pointing at not-open issue is cleaned up
+# =============================================================================
+
+@test "TAP-594: stale hint pointing at not-open issue is cleaned up" {
+    # Pre-existing hint pointing at TAP-OLD which is not in the open set
+    printf 'TAP-OLD\n' > "$RALPH_DIR/.linear_next_issue"
+
+    # Open issues do NOT include TAP-OLD — only TAP-NEW
+    local node_new
+    node_new=$(_issue_node "id-new" "TAP-NEW" "New work" 2 "Edit lib/foo.sh")
+    local mock_json
+    mock_json=$(_build_issues_json "[${node_new}]")
+
+    _linear_run_issues_query() { printf '%s\n' "$mock_json"; return 0; }
+
+    linear_optimizer_run
+
+    # Hint should now reference TAP-NEW (the new pick), not TAP-OLD
+    local first_line
+    first_line=$(head -1 "$RALPH_DIR/.linear_next_issue")
+    [[ "$first_line" == "TAP-NEW" ]]
+}
+
+# =============================================================================
+# TAP-594 TEST 3: Stale lock from dead PID is auto-cleaned, second run acquires
+# =============================================================================
+
+@test "TAP-594: stale lock from dead PID is auto-cleaned" {
+    # Write a lock with a PID that's almost certainly dead (PID 1 is init,
+    # but on Linux we use PID 999999 which is unlikely to exist).
+    mkdir -p "$RALPH_DIR"
+    printf '999999\n' > "$RALPH_DIR/.linear_optimizer.lock"
+
+    local node_a
+    node_a=$(_issue_node "id-a" "TAP-A" "Work" 2 "Edit lib/foo.sh")
+    local mock_json
+    mock_json=$(_build_issues_json "[${node_a}]")
+    _linear_run_issues_query() { printf '%s\n' "$mock_json"; return 0; }
+
+    linear_optimizer_run
+
+    # Run completed and picked TAP-A (lock was reclaimed)
+    local first_line
+    first_line=$(head -1 "$RALPH_DIR/.linear_next_issue")
+    [[ "$first_line" == "TAP-A" ]]
+    # Lock cleaned up at end of run
+    [[ ! -f "$RALPH_DIR/.linear_optimizer.lock" ]]
+}
+
+# =============================================================================
+# TAP-594 TEST 4: RALPH_NO_LINEAR_OPTIMIZE=true → no API calls, opt_out telemetry
+# =============================================================================
+
+@test "TAP-594: opt-out short-circuits before any API calls" {
+    export RALPH_NO_LINEAR_OPTIMIZE=true
+
+    local _api_called=0
+    _linear_run_issues_query() { _api_called=1; return 0; }
+
+    linear_optimizer_run
+    unset RALPH_NO_LINEAR_OPTIMIZE
+
+    [[ "$_api_called" -eq 0 ]]
+
+    local mfile
+    mfile="$RALPH_DIR/metrics/linear_optimizer_$(date -u '+%Y-%m').jsonl"
+    [[ -s "$mfile" ]]
+    grep -q '"fallback_reason":"opt_out"' "$mfile"
+}
+
+# =============================================================================
+# TAP-594 TEST 5: Project-unset → ERROR log, project_unset telemetry, no crash
+# =============================================================================
+
+@test "TAP-594: project unset emits project_unset telemetry, no crash" {
+    export RALPH_LINEAR_PROJECT=""
+
+    local _api_called=0
+    _linear_run_issues_query() { _api_called=1; return 0; }
+
+    run linear_optimizer_run
+    [[ "$status" -eq 0 ]]
+    export RALPH_LINEAR_PROJECT="TestProject"
+
+    [[ "$_api_called" -eq 0 ]]
+
+    local mfile
+    mfile="$RALPH_DIR/metrics/linear_optimizer_$(date -u '+%Y-%m').jsonl"
+    [[ -s "$mfile" ]]
+    grep -q '"fallback_reason":"project_unset"' "$mfile"
+}
+
+# =============================================================================
+# TAP-594 TEST 6: Successful run writes a valid JSONL telemetry record
+# =============================================================================
+
+@test "TAP-594: successful run emits valid JSONL telemetry record" {
+    printf 'lib/foo.sh\n' > "$RALPH_DIR/.last_completed_files"
+
+    local node_a
+    node_a=$(_issue_node "id-a" "TAP-A" "Work" 2 "Edit lib/foo.sh")
+    local mock_json
+    mock_json=$(_build_issues_json "[${node_a}]")
+    _linear_run_issues_query() { printf '%s\n' "$mock_json"; return 0; }
+
+    linear_optimizer_run
+
+    local mfile
+    mfile="$RALPH_DIR/metrics/linear_optimizer_$(date -u '+%Y-%m').jsonl"
+    [[ -s "$mfile" ]]
+
+    # The line must parse as JSON and have the expected fields
+    local last_line
+    last_line=$(tail -1 "$mfile")
+    printf '%s' "$last_line" | jq -e '.hint_written == "TAP-A"' >/dev/null
+    printf '%s' "$last_line" | jq -e '.fallback_reason == null' >/dev/null
+    printf '%s' "$last_line" | jq -e '.candidates_evaluated == 1' >/dev/null
+    printf '%s' "$last_line" | jq -e 'has("duration_ms")' >/dev/null
+}
