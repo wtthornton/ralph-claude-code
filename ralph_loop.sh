@@ -4,9 +4,11 @@
 # Adaptation of the Ralph technique for Claude Code with usage management
 
 # Note: CLAUDE_CODE_ENABLE_DANGEROUS_PERMISSIONS_IN_SANDBOX and IS_SANDBOX
-# environment variables are NOT exported here. Tool restrictions are handled
-# via --allowedTools flag in CLAUDE_CMD_ARGS, which is the proper approach.
-# Exporting sandbox variables without a verified sandbox would be misleading.
+# environment variables are NOT exported here. Tool restrictions are owned
+# by the agent file (.claude/agents/ralph.md `tools:` allowlist +
+# `disallowedTools:` blocklist) and PreToolUse hooks (validate-command.sh,
+# protect-ralph-files.sh). Exporting sandbox variables without a verified
+# sandbox would be misleading.
 
 # Source library components
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
@@ -133,7 +135,6 @@ RALPH_LINEAR_TEAM=""       # Linear team name (optional, used in log messages)
 _env_MAX_CALLS_PER_HOUR="${MAX_CALLS_PER_HOUR:-}"
 _env_CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-}"
 _env_CLAUDE_OUTPUT_FORMAT="${CLAUDE_OUTPUT_FORMAT:-}"
-_env_CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-}"
 _env_CLAUDE_USE_CONTINUE="${CLAUDE_USE_CONTINUE:-}"
 _env_CLAUDE_SESSION_EXPIRY_HOURS="${CLAUDE_SESSION_EXPIRY_HOURS:-}"
 _env_VERBOSE_PROGRESS="${VERBOSE_PROGRESS:-}"
@@ -165,22 +166,14 @@ CLAUDE_TIMEOUT_MINUTES="${CLAUDE_TIMEOUT_MINUTES:-15}"
 
 # Modern Claude CLI configuration (Phase 1.1)
 CLAUDE_OUTPUT_FORMAT="${CLAUDE_OUTPUT_FORMAT:-json}"
-# Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
-# Issue #154: Store default so we can detect user customization (needed for agent mode fallback)
-# BRAIN-PHASE-B0: tapps-brain exposes ~55 MCP tools (agent_*, diagnostics_*,
-# feedback_*, flywheel_*, hive_*, memory_* (26 of them), profile_*, plus the
-# five agent-facing brain_* tools). Whitelisting the whole namespace with
-# `mcp__tapps-brain__*` dumped all ~55 into Claude's tool catalog, drowning
-# out the five that actually matter for an autonomous dev loop. This is a
-# Ralph-side proxy for tapps-brain's STORY-070.9 (operator/agent split)
-# until that ships — narrow the surface to the only tools Ralph wants Claude
-# reaching for: recall on task start, remember for non-obvious fixes, forget
-# to prune, and learn_success/learn_failure at outcome boundaries.
-RALPH_DEFAULT_ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*,mcp__tapps-brain__brain_recall,mcp__tapps-brain__brain_remember,mcp__tapps-brain__brain_forget,mcp__tapps-brain__brain_learn_success,mcp__tapps-brain__brain_learn_failure"
-CLAUDE_ALLOWED_TOOLS="${CLAUDE_ALLOWED_TOOLS:-$RALPH_DEFAULT_ALLOWED_TOOLS}"
+# Tool restrictions are owned by .claude/agents/ralph.md (`tools:` allowlist
+# + `disallowedTools:` blocklist) and the .claude/hooks/validate-command.sh
+# PreToolUse hook. The historical RALPH_DEFAULT_ALLOWED_TOOLS allowlist
+# (Issue #149) was deleted along with legacy `-p` mode — see
+# docs/decisions/0006-delete-legacy-mode.md and MIGRATING.md.
 CLAUDE_USE_CONTINUE="${CLAUDE_USE_CONTINUE:-true}"
 CLAUDE_SESSION_FILE="$RALPH_DIR/.claude_session_id" # Session ID persistence file
-CLAUDE_MIN_VERSION="2.0.76"              # Minimum required Claude CLI version
+CLAUDE_MIN_VERSION="2.1.0"               # --agent flag requires CLI v2.1+
 CLAUDE_AUTO_UPDATE="${CLAUDE_AUTO_UPDATE:-true}"  # Auto-update Claude CLI at startup
 
 # GUARD-2: Consecutive timeout circuit breaker (Phase 13)
@@ -226,27 +219,6 @@ RALPH_CONTINUE_STATE_FILE="$RALPH_DIR/.continue_state.json"
 _session_iteration_count=0
 _session_start_epoch=""
 
-# Valid tool patterns for --allowed-tools validation
-# Tools can be exact matches or pattern matches with wildcards in parentheses
-VALID_TOOL_PATTERNS=(
-    "Write"
-    "Read"
-    "Edit"
-    "MultiEdit"
-    "Glob"
-    "Grep"
-    "Task"
-    "TodoWrite"
-    "WebFetch"
-    "WebSearch"
-    "Bash"
-    "Bash(git *)"
-    "Bash(npm *)"
-    "Bash(bats *)"
-    "Bash(python *)"
-    "Bash(node *)"
-    "NotebookEdit"
-)
 
 # Exit detection configuration
 EXIT_SIGNALS_FILE="$RALPH_DIR/.exit_signals"
@@ -270,7 +242,6 @@ JSON_CONFIG_LOADED=false
 #   - MAX_CALLS_PER_HOUR
 #   - CLAUDE_TIMEOUT_MINUTES
 #   - CLAUDE_OUTPUT_FORMAT
-#   - ALLOWED_TOOLS (mapped to CLAUDE_ALLOWED_TOOLS)
 #   - SESSION_CONTINUITY (mapped to CLAUDE_USE_CONTINUE)
 #   - SESSION_EXPIRY_HOURS (mapped to CLAUDE_SESSION_EXPIRY_HOURS)
 #   - CB_NO_PROGRESS_THRESHOLD
@@ -292,9 +263,6 @@ load_ralphrc() {
     source "$RALPHRC_FILE"
 
     # Map .ralphrc variable names to internal names
-    if [[ -n "${ALLOWED_TOOLS:-}" ]]; then
-        CLAUDE_ALLOWED_TOOLS="$ALLOWED_TOOLS"
-    fi
     if [[ -n "${SESSION_CONTINUITY:-}" ]]; then
         CLAUDE_USE_CONTINUE="$SESSION_CONTINUITY"
     fi
@@ -311,7 +279,6 @@ load_ralphrc() {
     [[ -n "$_env_MAX_CALLS_PER_HOUR" ]] && MAX_CALLS_PER_HOUR="$_env_MAX_CALLS_PER_HOUR"
     [[ -n "$_env_CLAUDE_TIMEOUT_MINUTES" ]] && CLAUDE_TIMEOUT_MINUTES="$_env_CLAUDE_TIMEOUT_MINUTES"
     [[ -n "$_env_CLAUDE_OUTPUT_FORMAT" ]] && CLAUDE_OUTPUT_FORMAT="$_env_CLAUDE_OUTPUT_FORMAT"
-    [[ -n "$_env_CLAUDE_ALLOWED_TOOLS" ]] && CLAUDE_ALLOWED_TOOLS="$_env_CLAUDE_ALLOWED_TOOLS"
     [[ -n "$_env_CLAUDE_USE_CONTINUE" ]] && CLAUDE_USE_CONTINUE="$_env_CLAUDE_USE_CONTINUE"
     [[ -n "$_env_CLAUDE_SESSION_EXPIRY_HOURS" ]] && CLAUDE_SESSION_EXPIRY_HOURS="$_env_CLAUDE_SESSION_EXPIRY_HOURS"
     [[ -n "$_env_VERBOSE_PROGRESS" ]] && VERBOSE_PROGRESS="$_env_VERBOSE_PROGRESS"
@@ -361,7 +328,6 @@ load_json_config() {
       maxCallsPerHour: (.maxCallsPerHour // "" | tostring),
       timeoutMinutes: (.timeoutMinutes // "" | tostring),
       outputFormat: (.outputFormat // ""),
-      allowedTools: (if .allowedTools then (.allowedTools | join(",")) else "" end),
       sessionContinuity: (.sessionContinuity // "" | tostring),
       sessionExpiryHours: (.sessionExpiryHours // "" | tostring),
       cbNoProgressThreshold: (.cbNoProgressThreshold // "" | tostring),
@@ -374,7 +340,6 @@ load_json_config() {
       claudeAutoUpdate: (.claudeAutoUpdate // "" | tostring),
       verbose: (.verbose // "" | tostring),
       agentName: (.agentName // ""),
-      useAgent: (.useAgent // "" | tostring),
       enableTeams: (.enableTeams // "" | tostring),
       maxTeammates: (.maxTeammates // "" | tostring),
       webhookUrl: (.notifications.webhookUrl // ""),
@@ -401,7 +366,6 @@ load_json_config() {
     val=$(_jc maxCallsPerHour);    [[ -n "$val" ]] && MAX_CALLS_PER_HOUR="$val"
     val=$(_jc timeoutMinutes);     [[ -n "$val" ]] && CLAUDE_TIMEOUT_MINUTES="$val"
     val=$(_jc outputFormat);       [[ -n "$val" ]] && CLAUDE_OUTPUT_FORMAT="$val"
-    val=$(_jc allowedTools);       [[ -n "$val" ]] && CLAUDE_ALLOWED_TOOLS="$val"
     val=$(_jc sessionContinuity);  [[ -n "$val" ]] && CLAUDE_USE_CONTINUE="$val"
     val=$(_jc sessionExpiryHours); [[ -n "$val" ]] && CLAUDE_SESSION_EXPIRY_HOURS="$val"
     val=$(_jc cbNoProgressThreshold); [[ -n "$val" ]] && CB_NO_PROGRESS_THRESHOLD="$val"
@@ -414,7 +378,6 @@ load_json_config() {
     val=$(_jc claudeAutoUpdate);   [[ -n "$val" ]] && CLAUDE_AUTO_UPDATE="$val"
     val=$(_jc verbose);            [[ -n "$val" ]] && VERBOSE_PROGRESS="$val"
     val=$(_jc agentName);          [[ -n "$val" ]] && RALPH_AGENT_NAME="$val"
-    val=$(_jc useAgent);           [[ -n "$val" ]] && RALPH_USE_AGENT="$val"
     val=$(_jc enableTeams);        [[ -n "$val" ]] && RALPH_ENABLE_TEAMS="$val"
     val=$(_jc maxTeammates);       [[ -n "$val" ]] && RALPH_MAX_TEAMMATES="$val"
     val=$(_jc webhookUrl);         [[ -n "$val" ]] && RALPH_WEBHOOK_URL="$val"
@@ -430,7 +393,6 @@ load_json_config() {
     [[ -n "$_env_MAX_CALLS_PER_HOUR" ]] && MAX_CALLS_PER_HOUR="$_env_MAX_CALLS_PER_HOUR"
     [[ -n "$_env_CLAUDE_TIMEOUT_MINUTES" ]] && CLAUDE_TIMEOUT_MINUTES="$_env_CLAUDE_TIMEOUT_MINUTES"
     [[ -n "$_env_CLAUDE_OUTPUT_FORMAT" ]] && CLAUDE_OUTPUT_FORMAT="$_env_CLAUDE_OUTPUT_FORMAT"
-    [[ -n "$_env_CLAUDE_ALLOWED_TOOLS" ]] && CLAUDE_ALLOWED_TOOLS="$_env_CLAUDE_ALLOWED_TOOLS"
     [[ -n "$_env_CLAUDE_USE_CONTINUE" ]] && CLAUDE_USE_CONTINUE="$_env_CLAUDE_USE_CONTINUE"
     [[ -n "$_env_CLAUDE_SESSION_EXPIRY_HOURS" ]] && CLAUDE_SESSION_EXPIRY_HOURS="$_env_CLAUDE_SESSION_EXPIRY_HOURS"
     [[ -n "$_env_VERBOSE_PROGRESS" ]] && VERBOSE_PROGRESS="$_env_VERBOSE_PROGRESS"
@@ -697,10 +659,6 @@ setup_tmux_session() {
     if [[ "$CLAUDE_TIMEOUT_MINUTES" != "15" ]]; then
         ralph_cmd="$ralph_cmd --timeout $CLAUDE_TIMEOUT_MINUTES"
     fi
-    # Forward --allowed-tools if non-default (Issue #154: use constant instead of hardcoded string)
-    if [[ "$CLAUDE_ALLOWED_TOOLS" != "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
-        ralph_cmd="$ralph_cmd --allowed-tools '$CLAUDE_ALLOWED_TOOLS'"
-    fi
     # Forward --no-continue if session continuity disabled
     if [[ "$CLAUDE_USE_CONTINUE" == "false" ]]; then
         ralph_cmd="$ralph_cmd --no-continue"
@@ -939,8 +897,9 @@ ralph_log_permission_denials_from_raw_output() {
 
     [[ $_denial_count -gt 0 ]] || return 0
 
-    # LOGFIX-7: Distinguish between bash command denials (fixable via ALLOWED_TOOLS)
-    # and built-in tool denials (Glob, Grep, Read, Write, Edit — filesystem scope)
+    # LOGFIX-7: Distinguish between bash command denials (fixable via the
+    # agent file's disallowedTools blocklist or validate-command.sh) and
+    # built-in tool denials (Glob, Grep, Read, Write, Edit — filesystem scope)
     local _builtin_pattern="^(Glob|Grep|Read|Write|Edit|NotebookEdit)$"
     local _has_bash_denials=false _has_builtin_denials=false
     local IFS_bak="$IFS"
@@ -957,15 +916,10 @@ ralph_log_permission_denials_from_raw_output() {
 
     log_status "WARN" "Permission denied for $_denial_count command(s): $_denied_cmds"
     if [[ "$_has_bash_denials" == "true" ]]; then
-        # Issue #154: Guide user to the right config depending on mode
-        if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support && [[ "$CLAUDE_ALLOWED_TOOLS" == "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
-            log_status "WARN" "Agent mode active — edit disallowedTools in .claude/agents/ralph.md (or customize ALLOWED_TOOLS in .ralphrc to auto-switch to legacy mode)"
-        else
-            log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required bash tools"
-        fi
+        log_status "WARN" "Edit .claude/agents/ralph.md (disallowedTools blocklist) or .claude/hooks/validate-command.sh to lift the restriction."
     fi
     if [[ "$_has_builtin_denials" == "true" ]]; then
-        log_status "INFO" "Built-in tool denials (Glob/Grep/Read) are filesystem scope restrictions, not ALLOWED_TOOLS issues"
+        log_status "INFO" "Built-in tool denials (Glob/Grep/Read) are filesystem scope restrictions, not blocklist issues"
     fi
 }
 
@@ -1486,12 +1440,7 @@ should_exit_gracefully() {
         perm_denials=$(jq -r '.consecutive_permission_denials // 0' "$RALPH_DIR/.circuit_breaker_state" 2>/dev/null || echo "0")
         if [[ "$perm_denials" -ge "${CB_PERMISSION_DENIAL_THRESHOLD:-2}" ]]; then
             log_status "WARN" "🚫 Permission denied in $perm_denials consecutive loops"
-            # Issue #154: Guide user to the right config depending on mode
-            if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support && [[ "$CLAUDE_ALLOWED_TOOLS" == "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
-                log_status "WARN" "Agent mode active — edit disallowedTools in .claude/agents/ralph.md (or customize ALLOWED_TOOLS in .ralphrc to auto-switch to legacy mode)"
-            else
-                log_status "WARN" "Update ALLOWED_TOOLS in .ralphrc to include the required tools"
-            fi
+            log_status "WARN" "Edit .claude/agents/ralph.md (disallowedTools blocklist) or .claude/hooks/validate-command.sh to lift the restriction."
             echo "permission_denied"
             return 0
         fi
@@ -1994,14 +1943,10 @@ dry_run_simulate() {
     log_status "INFO" "[DRY-RUN]   Output format: $CLAUDE_OUTPUT_FORMAT"
     log_status "INFO" "[DRY-RUN]   Timeout: ${CLAUDE_TIMEOUT_MINUTES}m"
     log_status "INFO" "[DRY-RUN]   Session continuity: $CLAUDE_USE_CONTINUE"
-    # Issue #154: Show whether agent mode or legacy mode (with --allowedTools) will be used
-    if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support && [[ "$CLAUDE_ALLOWED_TOOLS" == "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
-        log_status "INFO" "[DRY-RUN]   Mode: agent (--agent ${RALPH_AGENT_NAME:-ralph}) — permissions via .claude/agents/ralph.md"
+    if check_agent_support; then
+        log_status "INFO" "[DRY-RUN]   Mode: --agent ${RALPH_AGENT_NAME:-ralph} (permissions via .claude/agents/ralph.md)"
     else
-        log_status "INFO" "[DRY-RUN]   Mode: legacy (--allowedTools) — $(echo "$CLAUDE_ALLOWED_TOOLS" | tr ',' '\n' | wc -l | tr -d ' ') tools"
-        if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && [[ "$CLAUDE_ALLOWED_TOOLS" != "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
-            log_status "INFO" "[DRY-RUN]   Note: Agent mode auto-disabled due to custom ALLOWED_TOOLS (Issue #154)"
-        fi
+        log_status "ERROR" "[DRY-RUN]   Claude CLI does not support --agent. Update to v$CLAUDE_MIN_VERSION or higher: $CLAUDE_CODE_CMD update"
     fi
 
     if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
@@ -2034,63 +1979,6 @@ dry_run_simulate() {
 EOF
 
     log_status "SUCCESS" "[DRY-RUN] Simulation complete (no API call made)"
-    return 0
-}
-
-# Validate allowed tools against whitelist
-# Returns 0 if valid, 1 if invalid with error message
-validate_allowed_tools() {
-    local tools_input=$1
-
-    if [[ -z "$tools_input" ]]; then
-        return 0  # Empty is valid (uses defaults)
-    fi
-
-    # Disable glob expansion to preserve wildcard patterns like Bash(git add *)
-    local _old_glob
-    _old_glob=$(set +o | grep noglob)
-    set -o noglob
-
-    # Split by comma
-    local IFS=','
-    read -ra tools <<< "$tools_input"
-
-    for tool in "${tools[@]}"; do
-        # Trim whitespace
-        tool=$(echo "$tool" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-
-        if [[ -z "$tool" ]]; then
-            continue
-        fi
-
-        local valid=false
-
-        # Check against valid patterns
-        for pattern in "${VALID_TOOL_PATTERNS[@]}"; do
-            if [[ "$tool" == "$pattern" ]]; then
-                valid=true
-                break
-            fi
-
-            # Check for Bash(*) pattern - any Bash with parentheses is allowed
-            if [[ "$tool" =~ ^Bash\(.+\)$ ]]; then
-                valid=true
-                break
-            fi
-        done
-
-        if [[ "$valid" == "false" ]]; then
-            # Restore glob setting before returning
-            eval "$_old_glob"
-            echo "Error: Invalid tool in --allowed-tools: '$tool'"
-            echo "Valid tools: ${VALID_TOOL_PATTERNS[*]}"
-            echo "Note: Bash(...) patterns with any content are allowed (e.g., 'Bash(git *)')"
-            return 1
-        fi
-    done
-
-    # Restore glob setting
-    eval "$_old_glob"
     return 0
 }
 
@@ -2825,8 +2713,17 @@ ralph_scope_prompt_for_service() {
         "$prompt_content" "$service_name" "$service_dir" "$service_dir" "$service_dir"
 }
 
-# Uses -p flag with prompt content (Claude CLI does not have --prompt-file)
-# When RALPH_USE_AGENT=true and CLI supports it, uses --agent ralph instead
+# build_claude_command — assemble the Claude CLI invocation array.
+#
+# Always invokes `claude --agent <RALPH_AGENT_NAME>` (default "ralph").
+# Tool restrictions are owned by the agent file
+# (.claude/agents/ralph.md — `tools:` allowlist + `disallowedTools:`
+# blocklist) plus the validate-command.sh / protect-ralph-files.sh
+# PreToolUse hooks. The legacy `-p` mode + ALLOWED_TOOLS allowlist were
+# removed (see docs/decisions/0006-delete-legacy-mode.md).
+#
+# Requires Claude CLI v2.1+ (CLAUDE_MIN_VERSION). Hard-fails if --agent
+# is unsupported — silent fallback was the bug we were trying to fix.
 build_claude_command() {
     local prompt_file=$1
     local loop_context=$2
@@ -2835,142 +2732,75 @@ build_claude_command() {
     # Reset global array
     CLAUDE_CMD_ARGS=("$CLAUDE_CODE_CMD")
 
-    # Add model and effort flags (apply to both agent and legacy modes)
+    # Hard-fail when the CLI is too old. The startup version check
+    # (compare_semver against CLAUDE_MIN_VERSION) should already have
+    # caught this, but defense in depth.
+    if ! check_agent_support; then
+        log_status "ERROR" "Claude CLI does not support --agent. Update to v$CLAUDE_MIN_VERSION+ via: $CLAUDE_CODE_CMD update"
+        return 1
+    fi
+
+    # Model + effort flags
     [[ -n "$CLAUDE_MODEL" ]] && CLAUDE_CMD_ARGS+=("--model" "$CLAUDE_MODEL")
     [[ -n "$CLAUDE_EFFORT" ]] && CLAUDE_CMD_ARGS+=("--effort" "$CLAUDE_EFFORT")
 
-    # Issue #154: Detect if user has customized ALLOWED_TOOLS beyond the template default.
-    # Agent mode uses permissionMode: bypassPermissions + disallowedTools (blocklist),
-    # which is architecturally incompatible with --allowedTools (allowlist).
-    # If the user customized ALLOWED_TOOLS, fall back to legacy mode where --allowedTools works.
-    local _allowed_tools_customized=false
-    if [[ "$CLAUDE_ALLOWED_TOOLS" != "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
-        _allowed_tools_customized=true
+    # Agent invocation
+    CLAUDE_CMD_ARGS+=("--agent" "${RALPH_AGENT_NAME:-ralph}")
+
+    # Output format (json implies --print, which requires explicit input)
+    if [[ "$CLAUDE_OUTPUT_FORMAT" == "json" ]]; then
+        CLAUDE_CMD_ARGS+=("--output-format" "json")
     fi
 
-    # Agent mode (HOOKS-6): use --agent ralph when supported
-    # Issue #154: Skip agent mode if user has customized ALLOWED_TOOLS
-    if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support && [[ "$_allowed_tools_customized" == "false" ]]; then
-        CLAUDE_CMD_ARGS+=("--agent" "${RALPH_AGENT_NAME:-ralph}")
-
-        # Add output format flag
-        if [[ "$CLAUDE_OUTPUT_FORMAT" == "json" ]]; then
-            CLAUDE_CMD_ARGS+=("--output-format" "json")
-        fi
-
-        # In agent mode: no --allowedTools (agent definition handles it),
-        # no --resume (agent memory replaces session continuity).
-        # Still need -p with prompt content — --output-format json implies
-        # --print mode which requires explicit input.
-        if [[ -f "$prompt_file" ]]; then
-            local prompt_content
-            prompt_content=$(cat "$prompt_file")
-            # Issue #163: Scope prompt to monorepo service if --service was specified
-            prompt_content=$(ralph_scope_prompt_for_service "$prompt_content")
-
-            # In agent mode there is no --append-system-prompt, so inject loop context
-            # (loop count, remaining tasks, MCP guidance, CB state) into the user turn.
-            # Without this, build_loop_context() output was computed but silently dropped —
-            # MCP guidance (tapps-mcp, tapps-brain, docs-mcp) never reached Claude.
-            if [[ -n "$loop_context" ]]; then
-                prompt_content="${prompt_content}
-
----
-${loop_context}"
-            fi
-
-            # CTXMGMT-1: Inject a progressive (trimmed) view of fix_plan.md so the agent
-            # can use it directly without a full-file Read tool call on large plans.
-            # TAP-669: fix_plan.md is user-editable and lines from it become system-level
-            # context for Claude. Sanitize before injection to neutralize role-tag
-            # injection payloads in task titles.
-            if [[ "${RALPH_PROGRESSIVE_CONTEXT:-false}" == "true" && "${RALPH_TASK_SOURCE:-file}" == "file" ]]; then
-                local _plan_excerpt
-                _plan_excerpt=$(ralph_build_progressive_context 2>/dev/null) || _plan_excerpt=""
-                if [[ -n "$_plan_excerpt" ]]; then
-                    _plan_excerpt=$(printf '%s' "$_plan_excerpt" | ralph_sanitize_prompt_text 500)
-                    prompt_content="${prompt_content}
-
----
-Current fix_plan.md (progressive view — use this directly, skip re-reading the full file unless you need completed items):
-${_plan_excerpt}"
-                fi
-            fi
-
-            CLAUDE_CMD_ARGS+=("-p" "$prompt_content")
-        fi
-        log_status "INFO" "Using agent mode: --agent ${RALPH_AGENT_NAME:-ralph}"
-        return 0
+    # Session continuity: --resume with explicit session ID. --continue is
+    # avoided because it picks "most recent session in cwd" and can
+    # hijack active interactive Claude Code sessions (Issue #151).
+    if [[ "$CLAUDE_USE_CONTINUE" == "true" && -n "$session_id" ]]; then
+        CLAUDE_CMD_ARGS+=("--resume" "$session_id")
     fi
 
-    # Legacy mode (v0.11.x compatible) — fallback when agent mode unavailable or ALLOWED_TOOLS customized
-    if [[ "${RALPH_USE_AGENT:-false}" == "true" ]]; then
-        if [[ "$_allowed_tools_customized" == "true" ]]; then
-            # Issue #154: Agent mode uses disallowedTools blocklist in the agent definition,
-            # which is incompatible with the ALLOWED_TOOLS allowlist from .ralphrc.
-            # Fall back to legacy mode where --allowedTools is honored.
-            log_status "WARN" "Custom ALLOWED_TOOLS detected — falling back to legacy mode (Issue #154)"
-            log_status "WARN" "Agent mode uses disallowedTools (blocklist) in .claude/agents/ralph.md,"
-            log_status "WARN" "which cannot enforce ALLOWED_TOOLS (allowlist) from .ralphrc."
-            log_status "WARN" "To use agent mode, remove custom ALLOWED_TOOLS and edit disallowedTools"
-            log_status "WARN" "in .claude/agents/ralph.md instead. Set RALPH_USE_AGENT=false to silence."
-        elif ! check_agent_support; then
-            log_status "WARN" "Agent mode requested but CLI does not support --agent. Falling back to legacy mode."
-        fi
-    fi
-
-    # Check if prompt file exists
+    # Build the user-turn payload. Agent mode does not honor
+    # --append-system-prompt, so loop context is concatenated into -p.
     if [[ ! -f "$prompt_file" ]]; then
         log_status "ERROR" "Prompt file not found: $prompt_file"
         return 1
     fi
 
-    # Add output format flag
-    if [[ "$CLAUDE_OUTPUT_FORMAT" == "json" ]]; then
-        CLAUDE_CMD_ARGS+=("--output-format" "json")
-    fi
-
-    # Add allowed tools (each tool as separate array element)
-    if [[ -n "$CLAUDE_ALLOWED_TOOLS" ]]; then
-        CLAUDE_CMD_ARGS+=("--allowedTools")
-        # Disable glob expansion to preserve wildcard patterns like Bash(git add *)
-        local _old_glob
-        _old_glob=$(set +o | grep noglob)
-        set -o noglob
-        # Split by comma and add each tool
-        local IFS=','
-        read -ra tools_array <<< "$CLAUDE_ALLOWED_TOOLS"
-        for tool in "${tools_array[@]}"; do
-            # Trim whitespace
-            tool=$(echo "$tool" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            if [[ -n "$tool" ]]; then
-                CLAUDE_CMD_ARGS+=("$tool")
-            fi
-        done
-        # Restore glob setting
-        eval "$_old_glob"
-    fi
-
-    # Add session continuity flag
-    # IMPORTANT: Use --resume with explicit session ID instead of --continue
-    # --continue resumes the "most recent session in current directory" which
-    # can hijack active Claude Code sessions. --resume with a specific session ID
-    # ensures we only resume Ralph's own sessions. (Issue #151)
-    if [[ "$CLAUDE_USE_CONTINUE" == "true" && -n "$session_id" ]]; then
-        CLAUDE_CMD_ARGS+=("--resume" "$session_id")
-    fi
-
-    # Add loop context as system prompt (no escaping needed - array handles it)
-    if [[ -n "$loop_context" ]]; then
-        CLAUDE_CMD_ARGS+=("--append-system-prompt" "$loop_context")
-    fi
-
-    # Read prompt file content and use -p flag
     local prompt_content
     prompt_content=$(cat "$prompt_file")
     # Issue #163: Scope prompt to monorepo service if --service was specified
     prompt_content=$(ralph_scope_prompt_for_service "$prompt_content")
+
+    # Inject loop context (loop count, MCP guidance, remaining tasks, CB
+    # state) into the user turn. Without this, build_loop_context() was
+    # computed but silently dropped — MCP guidance never reached Claude.
+    if [[ -n "$loop_context" ]]; then
+        prompt_content="${prompt_content}
+
+---
+${loop_context}"
+    fi
+
+    # CTXMGMT-1: progressive (trimmed) view of fix_plan.md so the agent
+    # can use it directly without a full-file Read on large plans.
+    # TAP-669: fix_plan.md is user-editable and lines from it become
+    # system-level context — sanitize before injection to neutralize
+    # role-tag injection payloads in task titles.
+    if [[ "${RALPH_PROGRESSIVE_CONTEXT:-false}" == "true" && "${RALPH_TASK_SOURCE:-file}" == "file" ]]; then
+        local _plan_excerpt
+        _plan_excerpt=$(ralph_build_progressive_context 2>/dev/null) || _plan_excerpt=""
+        if [[ -n "$_plan_excerpt" ]]; then
+            _plan_excerpt=$(printf '%s' "$_plan_excerpt" | ralph_sanitize_prompt_text 500)
+            prompt_content="${prompt_content}
+
+---
+Current fix_plan.md (progressive view — use this directly, skip re-reading the full file unless you need completed items):
+${_plan_excerpt}"
+        fi
+    fi
+
     CLAUDE_CMD_ARGS+=("-p" "$prompt_content")
+    return 0
 }
 
 # PERF: Shared helper for git file-change counting (was: duplicated ~30 lines in 2 places)
@@ -3543,10 +3373,9 @@ execute_claude_code() {
         # Based on: https://www.ytyng.com/en/blog/claude-stream-json-jq/
         #
         # Uses CLAUDE_CMD_ARGS from build_claude_command() to preserve:
-        # - --allowedTools (tool permissions)
-        # - --append-system-prompt (loop context)
-        # - --continue (session continuity)
-        # - -p (prompt content)
+        # - --agent (agent definition + tool permissions)
+        # - --resume (session continuity)
+        # - -p (prompt content + loop context)
 
         # Check dependencies for live mode
         if ! command -v awk &> /dev/null; then
@@ -3952,9 +3781,10 @@ END {
             fi
         fi
 
-        # Fall back to legacy stdin piping if modern mode failed or not enabled
-        # Note: Legacy mode doesn't use --allowedTools, so tool permissions
-        # will be handled by Claude Code's default permission system
+        # Fall back to stdin-pipe invocation if modern CLI flag assembly failed.
+        # Note: this path bypasses --agent, so the run uses Claude Code's
+        # default permissions (no agent-defined disallowedTools). Use as
+        # last resort only.
         if [[ "$use_modern_cli" == "false" ]]; then
             if portable_timeout ${timeout_seconds}s $CLAUDE_CODE_CMD < "$PROMPT_FILE" > "$output_file" 2>&1 &
             then
@@ -4830,39 +4660,19 @@ main() {
                 echo -e "${YELLOW}Claude Code was denied permission to execute commands.${NC}"
                 echo ""
                 echo -e "${YELLOW}To fix this:${NC}"
-                # Issue #154: Different guidance for agent mode vs legacy mode
-                if [[ "${RALPH_USE_AGENT:-false}" == "true" ]] && check_agent_support && [[ "$CLAUDE_ALLOWED_TOOLS" == "$RALPH_DEFAULT_ALLOWED_TOOLS" ]]; then
-                    echo "  Agent mode is active. Permissions are controlled by the agent definition."
-                    echo "  1. Edit .claude/agents/ralph.md and adjust 'disallowedTools' (blocklist)"
-                    echo "  2. The agent uses permissionMode: bypassPermissions with a blocklist."
-                    echo "     Add specific Bash(...) patterns to disallowedTools to block commands,"
-                    echo "     or remove patterns to allow them."
-                    echo ""
-                    echo "  Alternatively, to use ALLOWED_TOOLS (allowlist) from .ralphrc instead:"
-                    echo "  1. Set RALPH_USE_AGENT=false in .ralphrc to use legacy mode"
-                    echo "  2. Or customize ALLOWED_TOOLS in .ralphrc (auto-disables agent mode)"
-                else
-                    echo "  1. Edit .ralphrc and update ALLOWED_TOOLS to include the required tools"
-                    echo "  2. Common patterns:"
-                    echo "     - Bash(npm *)     - All npm commands"
-                    echo "     - Bash(npm install) - Only npm install"
-                    echo "     - Bash(pnpm *)    - All pnpm commands"
-                    echo "     - Bash(yarn *)    - All yarn commands"
-                fi
+                echo "  Permissions are controlled by the agent file and the bash command hook."
+                echo ""
+                echo "  1. Edit .claude/agents/ralph.md — adjust 'disallowedTools' (blocklist)."
+                echo "     Add a Bash(...) pattern to block a command, or remove one to allow it."
+                echo ""
+                echo "  2. Edit .claude/hooks/validate-command.sh — this PreToolUse hook"
+                echo "     blocks specific bash patterns at the harness layer regardless"
+                echo "     of agent settings (e.g. 'rm -rf', 'git reset --hard')."
                 echo ""
                 echo -e "${YELLOW}After updating:${NC}"
                 echo "  ralph --reset-session  # Clear stale session state"
                 echo "  ralph --monitor        # Restart the loop"
                 echo ""
-
-                # Show current ALLOWED_TOOLS if .ralphrc exists
-                if [[ -f ".ralphrc" ]]; then
-                    local current_tools=$(grep "^ALLOWED_TOOLS=" ".ralphrc" 2>/dev/null | cut -d= -f2- | tr -d '"')
-                    if [[ -n "$current_tools" ]]; then
-                        echo -e "${BLUE}Current ALLOWED_TOOLS:${NC} $current_tools"
-                        echo ""
-                    fi
-                fi
 
                 break
             fi
@@ -5124,7 +4934,6 @@ Options:
 Modern CLI Options (Phase 1.1):
     --output-format FORMAT  Set Claude output format: json or text (default: $CLAUDE_OUTPUT_FORMAT)
                             Note: --live mode requires JSON and will auto-switch
-    --allowed-tools TOOLS   Comma-separated list of allowed tools (default: $CLAUDE_ALLOWED_TOOLS)
     --no-continue           Disable session continuity across loops
     --session-expiry HOURS  Set session expiration time in hours (default: $CLAUDE_SESSION_EXPIRY_HOURS)
     --dry-run               Preview loop execution without calling Claude Code API
@@ -5313,13 +5122,6 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: --output-format must be 'json' or 'text'"
                 exit 1
             fi
-            shift 2
-            ;;
-        --allowed-tools)
-            if ! validate_allowed_tools "$2"; then
-                exit 1
-            fi
-            CLAUDE_ALLOWED_TOOLS="$2"
             shift 2
             ;;
         --no-continue)
