@@ -26,6 +26,7 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/context_management.sh" ]] && source "$SCRIPT_DIR/lib/context_management.sh"
 [[ -f "$SCRIPT_DIR/lib/tracing.sh" ]] && source "$SCRIPT_DIR/lib/tracing.sh"
 [[ -f "$SCRIPT_DIR/lib/linear_backend.sh" ]] && source "$SCRIPT_DIR/lib/linear_backend.sh"
+[[ -f "$SCRIPT_DIR/lib/linear_optimizer.sh" ]] && source "$SCRIPT_DIR/lib/linear_optimizer.sh"
 [[ -f "$SCRIPT_DIR/lib/skill_retro.sh" ]] && source "$SCRIPT_DIR/lib/skill_retro.sh"
 # BRAIN-PHASE-B1: memory writes from on-stop hook. Sourced here so the main
 # loop also has access if we later want to write outside hook context.
@@ -2077,6 +2078,18 @@ build_loop_context() {
         if [[ -n "$in_progress_task" ]]; then
             in_progress_task=$(printf '%s' "$in_progress_task" | ralph_sanitize_prompt_text 300)
             context+="RESUME IN PROGRESS (do this FIRST): ${in_progress_task}. "
+        fi
+        # TAP-593 (LINOPT-4): Inject cache-locality optimizer hint when available.
+        # linear_optimizer_run() wrote this at session start (TAP-591). Read the
+        # first non-comment line as the issue identifier; strip to alphanumeric
+        # and dash only to prevent prompt injection.
+        if [[ -f "${RALPH_DIR}/.linear_next_issue" ]]; then
+            local _opt_hint
+            _opt_hint=$(grep -v '^#' "${RALPH_DIR}/.linear_next_issue" 2>/dev/null \
+                | head -1 | tr -cd 'A-Z0-9a-z-')
+            if [[ -n "$_opt_hint" ]]; then
+                context+="LOCALITY HINT: ${_opt_hint} is cache-hot (its files overlap the last-completed loop). If ${_opt_hint} is Backlog/Todo/In-Progress, prefer it over normal priority selection; then run: rm -f .ralph/.linear_next_issue (so the stale hint does not re-apply). If the issue is Done/Cancelled or the hint seems wrong, ignore it and use normal priority. "
+            fi
         fi
         # Inject Linear task source instructions for Claude
         local next_task
@@ -4432,6 +4445,14 @@ main() {
         # bogus plan_complete exit on a populated project.
         if [[ -n "${LINEAR_API_KEY:-}" ]] && declare -F linear_init >/dev/null 2>&1; then
             linear_init || log_status "ERROR" "Linear init failed — queries will fall back to name-filter (vulnerable to whitespace/case mismatch)"
+        fi
+
+        # TAP-591 (LINOPT-2): Fire the cache-locality optimizer in the background.
+        # Writes .ralph/.linear_next_issue for build_loop_context() to consume.
+        # Background fire-and-forget: the hint is read on the first list_issues
+        # consultation, so blocking startup is unnecessary.
+        if declare -F linear_optimizer_run >/dev/null 2>&1; then
+            linear_optimizer_run 2>>"${LOG_DIR}/ralph.log" &
         fi
 
         # TAP-536: API failure here defaults to "1 incomplete" (the safe answer

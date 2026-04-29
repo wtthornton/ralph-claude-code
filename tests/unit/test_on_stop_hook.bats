@@ -388,3 +388,144 @@ LINEAR_DONE_COUNT: 4
     run jq -r '.linear_done_count' "$TEST_TEMP_DIR/.ralph/status.json"
     assert_output "4"
 }
+
+# =============================================================================
+# TAP-590 (epic TAP-589 LINOPT): on-stop.sh captures this loop's edited file set
+# into .ralph/.last_completed_files for cache-locality scoring downstream in
+# lib/linear_optimizer.sh. Walks the transcript JSONL for Edit/Write/MultiEdit/
+# NotebookEdit tool_use records.
+# =============================================================================
+
+# Helper: build a transcript JSONL with the given assistant tool_use records,
+# then construct the INPUT envelope the hook reads from stdin.
+_input_with_transcript() {
+    local transcript="$1"
+    jq -n --arg tp "$transcript" '
+        {transcript_path: $tp,
+         result: "Did work.\n\n---RALPH_STATUS---\nSTATUS: IN_PROGRESS\nTASKS_COMPLETED_THIS_LOOP: 0\nFILES_MODIFIED: 0\nTESTS_STATUS: NOT_RUN\nWORK_TYPE: IMPLEMENTATION\nEXIT_SIGNAL: false\nRECOMMENDATION: x\n---END_RALPH_STATUS---"}'
+}
+
+# Helper: emit a single assistant message JSONL line carrying a tool_use record.
+_assistant_tool_use() {
+    local tool="$1" path_key="$2" path_val="$3"
+    jq -nc --arg tool "$tool" --arg pk "$path_key" --arg pv "$path_val" '
+        {type: "assistant",
+         message: {content: [{type: "tool_use", name: $tool, input: {($pk): $pv}}]}}'
+}
+
+@test "TAP-590: 3 Edits to same path collapse to 1 line" {
+    local t="$TEST_TEMP_DIR/.ralph/transcript.jsonl"
+    {
+        _assistant_tool_use Edit file_path "src/foo.py"
+        _assistant_tool_use Edit file_path "src/foo.py"
+        _assistant_tool_use Edit file_path "src/foo.py"
+    } > "$t"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_input_with_transcript "$t")"
+    assert_success
+
+    [[ -f "$TEST_TEMP_DIR/.ralph/.last_completed_files" ]] || fail ".last_completed_files missing"
+    run wc -l < "$TEST_TEMP_DIR/.ralph/.last_completed_files"
+    [[ "${output// /}" == "1" ]] || fail "expected 1 line, got '$output'"
+    run cat "$TEST_TEMP_DIR/.ralph/.last_completed_files"
+    assert_output "src/foo.py"
+}
+
+@test "TAP-590: Edit + Write to different paths produce 2 sorted lines" {
+    local t="$TEST_TEMP_DIR/.ralph/transcript.jsonl"
+    {
+        _assistant_tool_use Write file_path "z/last.sh"
+        _assistant_tool_use Edit  file_path "a/first.py"
+    } > "$t"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_input_with_transcript "$t")"
+    assert_success
+
+    run cat "$TEST_TEMP_DIR/.ralph/.last_completed_files"
+    # `unique` in jq sorts as a side effect.
+    [[ "${lines[0]}" == "a/first.py" ]] || fail "first line: ${lines[0]}"
+    [[ "${lines[1]}" == "z/last.sh" ]] || fail "second line: ${lines[1]}"
+}
+
+@test "TAP-590: MultiEdit + NotebookEdit are recognized" {
+    local t="$TEST_TEMP_DIR/.ralph/transcript.jsonl"
+    {
+        _assistant_tool_use MultiEdit    file_path     "lib/multi.sh"
+        _assistant_tool_use NotebookEdit notebook_path "notebooks/x.ipynb"
+    } > "$t"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_input_with_transcript "$t")"
+    assert_success
+
+    run cat "$TEST_TEMP_DIR/.ralph/.last_completed_files"
+    [[ "$output" == *"lib/multi.sh"* ]] || fail "missing MultiEdit path: $output"
+    [[ "$output" == *"notebooks/x.ipynb"* ]] || fail "missing NotebookEdit path: $output"
+}
+
+@test "TAP-590: no edit-class tools → empty file (not missing)" {
+    local t="$TEST_TEMP_DIR/.ralph/transcript.jsonl"
+    # Only Read + Bash (non-edit-class) — should produce empty file, not absence.
+    jq -nc '{type: "assistant", message: {content: [{type: "tool_use", name: "Read", input: {file_path: "x.txt"}}]}}' > "$t"
+    jq -nc '{type: "assistant", message: {content: [{type: "tool_use", name: "Bash", input: {command: "ls"}}]}}' >> "$t"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_input_with_transcript "$t")"
+    assert_success
+
+    [[ -f "$TEST_TEMP_DIR/.ralph/.last_completed_files" ]] || fail ".last_completed_files should exist"
+    [[ ! -s "$TEST_TEMP_DIR/.ralph/.last_completed_files" ]] || \
+        fail "expected empty, got: $(cat "$TEST_TEMP_DIR/.ralph/.last_completed_files")"
+}
+
+@test "TAP-590: 150 unique edits → cap at 100 lines" {
+    local t="$TEST_TEMP_DIR/.ralph/transcript.jsonl"
+    : > "$t"
+    local i
+    for i in $(seq 1 150); do
+        _assistant_tool_use Edit file_path "src/file_$i.py" >> "$t"
+    done
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_input_with_transcript "$t")"
+    assert_success
+
+    run wc -l < "$TEST_TEMP_DIR/.ralph/.last_completed_files"
+    [[ "${output// /}" == "100" ]] || fail "expected 100 lines, got '$output'"
+}
+
+@test "TAP-590: CLAUDE_PROJECT_DIR prefix is stripped to repo-relative" {
+    local t="$TEST_TEMP_DIR/.ralph/transcript.jsonl"
+    # Write absolute path that includes CLAUDE_PROJECT_DIR.
+    _assistant_tool_use Edit file_path "$TEST_TEMP_DIR/src/abs.py" > "$t"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_input_with_transcript "$t")"
+    assert_success
+
+    run cat "$TEST_TEMP_DIR/.ralph/.last_completed_files"
+    assert_output "src/abs.py"
+}
+
+@test "TAP-590: stale .last_completed_files is overwritten when current loop has no edits" {
+    # Pre-seed a stale list from a prior loop.
+    printf 'old/stale.py\n' > "$TEST_TEMP_DIR/.ralph/.last_completed_files"
+
+    local t="$TEST_TEMP_DIR/.ralph/transcript.jsonl"
+    # Empty transcript (no assistant messages with edit-class tools).
+    : > "$t"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_input_with_transcript "$t")"
+    assert_success
+
+    [[ -f "$TEST_TEMP_DIR/.ralph/.last_completed_files" ]] || fail "file missing"
+    [[ ! -s "$TEST_TEMP_DIR/.ralph/.last_completed_files" ]] || \
+        fail "expected empty (stale cleared), got: $(cat "$TEST_TEMP_DIR/.ralph/.last_completed_files")"
+}
+
+@test "TAP-590: missing transcript → empty .last_completed_files (graceful, no crash)" {
+    local input
+    input=$(jq -n '{result: "no transcript path here", transcript_path: ""}')
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$input"
+    assert_success
+
+    [[ -f "$TEST_TEMP_DIR/.ralph/.last_completed_files" ]] || fail "file missing"
+    [[ ! -s "$TEST_TEMP_DIR/.ralph/.last_completed_files" ]] || fail "expected empty"
+}
