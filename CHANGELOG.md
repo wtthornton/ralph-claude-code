@@ -10,6 +10,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.9.0] — 2026-04-29
+
+### Added
+
+- **TAP-589 LINOPT epic — Linear cache-locality optimizer.** End-to-end:
+  - **TAP-590 (LINOPT-1)**: `templates/hooks/on-stop.sh` walks the JSONL session transcript after each loop, extracts edited file paths from Edit/Write/MultiEdit/NotebookEdit tool uses, dedupes/caps at 100, strips `CLAUDE_PROJECT_DIR` prefix, writes `.ralph/.last_completed_files` atomically (8 BATS tests).
+  - **TAP-591 (LINOPT-2)**: new `lib/linear_optimizer.sh` with `linear_optimizer_run` entry point — fetches top-N open issues, scores by `Jaccard(last_completed_files, issue_body_paths) + 0.3 × shared-parent-dir bonus`, ralph-explorer (Haiku) fallback for top-3 priority issues with no body paths (cached at `.ralph/.linear_optimizer_cache.json`, capped at 3 calls/session), atomic write to `.ralph/.linear_next_issue` (5 BATS tests).
+  - **TAP-592 (LINOPT-3)**: import-graph dependency demotion. New `import_graph_predecessors` helper in `lib/import_graph.sh`. Two-phase optimizer: phase-1 collects scored candidates, phase-2 walks `FILES_OWNED_BY_OPEN` map and demotes candidates that import another open issue's file. `RALPH_NO_DEP_DEMOTE=true` opts out (5 BATS tests).
+  - **TAP-593 (LINOPT-4)**: `build_loop_context()` in `ralph_loop.sh` reads `.ralph/.linear_next_issue`, sanitizes to `[A-Z0-9a-z-]`, injects `LOCALITY HINT: <ID>` into Claude's `--append-system-prompt`. ralph-workflow skill step 0 instructs Claude to honor the hint and delete the file after use (2 BATS tests).
+  - **TAP-594 (LINOPT-5)**: telemetry + 5 fail-loud safety rails — stale-hint cleanup, fail-loud on Linear API error (preserves existing hint), project-unset guard, opt-out guard, PID-based lock file with stale-lock auto-cleanup. Per-session JSONL telemetry at `.ralph/metrics/linear_optimizer_YYYY-MM.jsonl`. New `ralph --optimize-linear` CLI flag for manual reruns (6 BATS tests).
+  - **TAP-595 (LINOPT-6)**: full epic spec at `docs/specs/epic-linear-mode-optimizer.md`, README + `templates/ralphrc.template` + CLAUDE.md updated.
+
+### Fixed
+
+- **TAP-1103**: `ralph --dry-run` (and other CLI flags) silently overridden by `.ralphrc` because `load_ralphrc()` ran AFTER arg parsing and re-sourced variables of the same name. Burned $5.81 in NLTlabsPE before being killed. Fix: parallel `_cli_*` capture for every flag with a config-file counterpart (`--dry-run`, `--no-continue`, `--session-expiry`, `--output-format`, `--auto-reset-circuit`, `--log-max-size`, `--log-max-files`), restored AFTER `load_ralphrc()` and `load_json_config()`. Final precedence is now CLI > env > .ralphrc/json > defaults — same shape as the existing `_env_*` block. 7 BATS tests in `tests/unit/test_cli_rc_precedence.bats`.
+
+### Configuration
+
+- New `.ralphrc` knobs (all defaulted):
+  - `RALPH_NO_LINEAR_OPTIMIZE=false` — disable optimizer entirely
+  - `RALPH_NO_DEP_DEMOTE=false` — skip phase-2 dependency demotion
+  - `RALPH_OPTIMIZER_FETCH_LIMIT=20` — max issues fetched per run
+  - `RALPH_OPTIMIZER_EXPLORER_MAX=3` — max ralph-explorer calls per session
+
+---
+
 ## [2.8.3] — 2026-04-20
 
 ### Added
