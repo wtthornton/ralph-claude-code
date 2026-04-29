@@ -216,6 +216,7 @@ Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 - `RALPH_NO_LINEAR_OPTIMIZE` — Disable Linear cache-locality optimizer entirely (no API calls, no hint file written)
 - `RALPH_OPTIMIZER_FETCH_LIMIT` — Max issues to fetch and score per optimizer run (default: 20)
 - `RALPH_OPTIMIZER_EXPLORER_MAX` — Max ralph-explorer calls per optimizer session (default: 3)
+- `RALPH_MCP_PROBE_TIMEOUT_SECONDS` — Upper bound on the startup `claude mcp list` probe (default: 15). Bump if you have many MCP servers and the probe times out before they all complete their health checks.
 - `RALPH_SKILL_AUTO_TUNE` — When `true`, `skill_retro_apply` installs up to 1 recommended skill per loop automatically (default: `false`)
 - `RALPH_SKILL_RETRO_WINDOW` — Number of recent loops to examine for friction patterns (default: 5)
 - `RALPH_SKILL_REDETECT_INTERVAL` — Run periodic Tier A skill re-detection every N loops (default: 10)

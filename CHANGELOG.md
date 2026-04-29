@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.9.1] — 2026-04-29
+
+### Changed
+
+- **MCP probe timeout** is now configurable via `RALPH_MCP_PROBE_TIMEOUT_SECONDS` (default `15`, was hardcoded `5`). The previous 5-second cap was too tight for setups with 5+ MCP servers — `claude mcp list` health-checks each server in turn, so machines with Drive/Calendar/Gmail/Linear/docs-mcp/tapps-mcp/tapps-brain regularly tripped the timeout and lost the prompt-side guidance for the reachable servers. The probe failure was cosmetic (Claude's own MCP loading is independent), but the lost guidance reduced the chance Claude reaches for `mcp__tapps-brain__*` etc. organically.
+
+---
+
 ## [2.9.0] — 2026-04-29
 
 ### Added

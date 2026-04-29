@@ -109,7 +109,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.9.0"
+RALPH_VERSION="2.9.1"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -3072,14 +3072,17 @@ ralph_probe_mcp_servers() {
         return 0
     fi
 
-    # 5s upper bound — a hung MCP transport must not stall startup.
+    # Upper bound on the probe wait — a hung MCP transport must not stall startup.
+    # Default 15s is enough for a typical setup with 5–7 MCP servers (each does
+    # an HTTP health check). Set RALPH_MCP_PROBE_TIMEOUT_SECONDS to override.
     # Use a temp file instead of $() to avoid the pipe-stays-open problem:
     # claude spawns MCP server child processes that keep the pipe's write-fd
     # open after claude exits from SIGTERM, so $() never sees EOF and hangs.
     # Redirecting to a file lets timeout exit cleanly regardless of children.
-    local probe_output probe_tmp
+    local probe_output probe_tmp probe_timeout
+    probe_timeout="${RALPH_MCP_PROBE_TIMEOUT_SECONDS:-15}"
     probe_tmp=$(mktemp)
-    timeout --kill-after=3s 5s $CLAUDE_CODE_CMD mcp list >"$probe_tmp" 2>&1 || true
+    timeout --kill-after=3s "${probe_timeout}s" $CLAUDE_CODE_CMD mcp list >"$probe_tmp" 2>&1 || true
     probe_output=$(cat "$probe_tmp" 2>/dev/null)
     rm -f "$probe_tmp"
     if [[ -z "$probe_output" ]]; then
