@@ -131,6 +131,20 @@ RALPH_TASK_SOURCE="file"   # Task backend: "file" (fix_plan.md) or "linear"
 RALPH_LINEAR_PROJECT=""    # Linear project name (required when RALPH_TASK_SOURCE=linear)
 RALPH_LINEAR_TEAM=""       # Linear team name (optional, used in log messages)
 
+# TAP-1103: CLI-flag values get a parallel `_cli_*` capture so they survive
+# `.ralphrc` and `ralph.config.json` sourcing. Final precedence after
+# load_ralphrc() / load_json_config() runs the restore blocks:
+#   CLI flag > env var > .ralphrc / ralph.config.json > script default.
+# These are populated by the CLI dispatcher case statement near EOF when the
+# user passes a flag, and restored at the end of load_ralphrc / load_json_config.
+_cli_DRY_RUN=""
+_cli_CLAUDE_USE_CONTINUE=""
+_cli_CLAUDE_SESSION_EXPIRY_HOURS=""
+_cli_CLAUDE_OUTPUT_FORMAT=""
+_cli_CB_AUTO_RESET=""
+_cli_LOG_MAX_SIZE_MB=""
+_cli_LOG_MAX_FILES=""
+
 # Save environment variable state BEFORE setting defaults
 # These are used by load_ralphrc() to determine which values came from environment
 _env_MAX_CALLS_PER_HOUR="${MAX_CALLS_PER_HOUR:-}"
@@ -294,6 +308,18 @@ load_ralphrc() {
     [[ -n "$_env_LOG_MAX_FILES" ]] && LOG_MAX_FILES="$_env_LOG_MAX_FILES"
     [[ -n "$_env_LOG_MAX_OUTPUT_FILES" ]] && LOG_MAX_OUTPUT_FILES="$_env_LOG_MAX_OUTPUT_FILES"
 
+    # TAP-1103: Restore CLI-flag overrides AFTER the env restore so the final
+    # precedence is CLI > env > .ralphrc > defaults. Without this, sourcing
+    # `.ralphrc` silently clobbers any flag the user passed (e.g. `ralph
+    # --dry-run` runs a real Claude call when `.ralphrc` has DRY_RUN=false).
+    [[ -n "$_cli_DRY_RUN" ]] && DRY_RUN="$_cli_DRY_RUN"
+    [[ -n "$_cli_CLAUDE_USE_CONTINUE" ]] && CLAUDE_USE_CONTINUE="$_cli_CLAUDE_USE_CONTINUE"
+    [[ -n "$_cli_CLAUDE_SESSION_EXPIRY_HOURS" ]] && CLAUDE_SESSION_EXPIRY_HOURS="$_cli_CLAUDE_SESSION_EXPIRY_HOURS"
+    [[ -n "$_cli_CLAUDE_OUTPUT_FORMAT" ]] && CLAUDE_OUTPUT_FORMAT="$_cli_CLAUDE_OUTPUT_FORMAT"
+    [[ -n "$_cli_CB_AUTO_RESET" ]] && CB_AUTO_RESET="$_cli_CB_AUTO_RESET"
+    [[ -n "$_cli_LOG_MAX_SIZE_MB" ]] && LOG_MAX_SIZE_MB="$_cli_LOG_MAX_SIZE_MB"
+    [[ -n "$_cli_LOG_MAX_FILES" ]] && LOG_MAX_FILES="$_cli_LOG_MAX_FILES"
+
     RALPHRC_LOADED=true
     return 0
 }
@@ -407,6 +433,16 @@ load_json_config() {
     [[ -n "$_env_LOG_MAX_SIZE_MB" ]] && LOG_MAX_SIZE_MB="$_env_LOG_MAX_SIZE_MB"
     [[ -n "$_env_LOG_MAX_FILES" ]] && LOG_MAX_FILES="$_env_LOG_MAX_FILES"
     [[ -n "$_env_LOG_MAX_OUTPUT_FILES" ]] && LOG_MAX_OUTPUT_FILES="$_env_LOG_MAX_OUTPUT_FILES"
+
+    # TAP-1103: Restore CLI-flag overrides AFTER env restore. Same precedence
+    # as load_ralphrc: CLI > env > ralph.config.json > defaults.
+    [[ -n "$_cli_DRY_RUN" ]] && DRY_RUN="$_cli_DRY_RUN"
+    [[ -n "$_cli_CLAUDE_USE_CONTINUE" ]] && CLAUDE_USE_CONTINUE="$_cli_CLAUDE_USE_CONTINUE"
+    [[ -n "$_cli_CLAUDE_SESSION_EXPIRY_HOURS" ]] && CLAUDE_SESSION_EXPIRY_HOURS="$_cli_CLAUDE_SESSION_EXPIRY_HOURS"
+    [[ -n "$_cli_CLAUDE_OUTPUT_FORMAT" ]] && CLAUDE_OUTPUT_FORMAT="$_cli_CLAUDE_OUTPUT_FORMAT"
+    [[ -n "$_cli_CB_AUTO_RESET" ]] && CB_AUTO_RESET="$_cli_CB_AUTO_RESET"
+    [[ -n "$_cli_LOG_MAX_SIZE_MB" ]] && LOG_MAX_SIZE_MB="$_cli_LOG_MAX_SIZE_MB"
+    [[ -n "$_cli_LOG_MAX_FILES" ]] && LOG_MAX_FILES="$_cli_LOG_MAX_FILES"
 
     JSON_CONFIG_LOADED=true
     return 0
@@ -5139,6 +5175,7 @@ while [[ $# -gt 0 ]]; do
         --output-format)
             if [[ "$2" == "json" || "$2" == "text" ]]; then
                 CLAUDE_OUTPUT_FORMAT="$2"
+                _cli_CLAUDE_OUTPUT_FORMAT="$2"
             else
                 echo "Error: --output-format must be 'json' or 'text'"
                 exit 1
@@ -5147,6 +5184,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-continue)
             CLAUDE_USE_CONTINUE=false
+            _cli_CLAUDE_USE_CONTINUE=false
             shift
             ;;
         --session-expiry)
@@ -5155,14 +5193,17 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             CLAUDE_SESSION_EXPIRY_HOURS="$2"
+            _cli_CLAUDE_SESSION_EXPIRY_HOURS="$2"
             shift 2
             ;;
         --auto-reset-circuit)
             CB_AUTO_RESET=true
+            _cli_CB_AUTO_RESET=true
             shift
             ;;
         --dry-run)
             DRY_RUN=true
+            _cli_DRY_RUN=true
             shift
             ;;
         --log-max-size)
@@ -5171,6 +5212,7 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             LOG_MAX_SIZE_MB="$2"
+            _cli_LOG_MAX_SIZE_MB="$2"
             shift 2
             ;;
         --log-max-files)
@@ -5179,6 +5221,7 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             LOG_MAX_FILES="$2"
+            _cli_LOG_MAX_FILES="$2"
             shift 2
             ;;
         --sdk)
