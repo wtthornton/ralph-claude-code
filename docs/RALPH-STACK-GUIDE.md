@@ -29,7 +29,7 @@ Expected outcome on a 40-ticket backlog like NLTlabsPE: **$15 instead of $85**, 
 **Tools available to the main ralph agent** (per [.claude/agents/ralph.md](../.claude/agents/ralph.md)):
 - `Read, Write, Edit` — file IO
 - `Glob, Grep` — local search (cheap, should be the first choice over `Bash(find …)` / `Bash(grep …)`)
-- `Bash` — shell with the ALLOWED_TOOLS whitelist
+- `Bash` — shell, gated by the agent file's `disallowedTools:` blocklist + `validate-command.sh` hook
 - `Task` — spawn sub-agents
 - `TodoWrite, WebFetch` — ancillary
 
@@ -208,16 +208,16 @@ Claude should emit the standard RALPH_STATUS block at end, as always.
 
 ```bash
 # Default model: Sonnet for main agent (not Opus)
+# Optional override of the agent file's model: directive
 CLAUDE_MODEL="claude-sonnet-4-6"
 
 # Effort: low is fine for routine batching; Sonnet handles it
 CLAUDE_EFFORT="low"
 
-# ALLOWED_TOOLS must include all MCP servers so Claude can reach them.
-# Note: setting ALLOWED_TOOLS disables agent-mode (Issue #154). Keep legacy
-# mode + silence the warning with RALPH_USE_AGENT=false.
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git *),Bash(npm *),Bash(grep *),Bash(find *),Bash(gh *),...,mcp__tapps-mcp__*,mcp__tapps-brain__*,mcp__docs-mcp__*,mcp__plugin_linear_linear__*"
-RALPH_USE_AGENT=false
+# Tool surface lives in .claude/agents/ralph.md, not here. To add an MCP
+# server's tools to the agent's catalog, add `mcp__server__*` (or specific
+# tool names) to the agent file's `tools:` block. ALLOWED_TOOLS in
+# .ralphrc is no longer honored (see MIGRATING.md).
 
 # Context management: auto-reset at 20 iterations keeps cost flat
 RALPH_CONTINUE_AS_NEW_ENABLED=true
@@ -237,7 +237,7 @@ CONTEXT7_API_KEY="<get from context7.com/dashboard>"
 # If tapps-brain HTTP deployment:
 TAPPS_BRAIN_AUTH_TOKEN="<token>"
 
-# Never commit. Never export via ALLOWED_TOOLS.
+# Never commit.
 ```
 
 **Note on context7:** tapps-mcp already wraps it ([packages/tapps-core/src/tapps_core/knowledge/lookup.py](../../tapps-mcp/packages/tapps-core/src/tapps_core/knowledge/lookup.py)). **Do not install context7 as a separate MCP server** — you'd get double billing and split caches.
@@ -334,7 +334,7 @@ Watch these counters:
 
 1. **tapps-brain startup race.** If the brain container starts *after* `ralph --live`, Ralph's probe misses it, prompt omits brain guidance, Claude never calls `brain_*`. Fix: start tapps-brain FIRST, then ralph. Verify with `docker ps | grep brain` before launching.
 2. **`tapps_validate_changed` without explicit paths is a time sink.** Minutes instead of seconds. Always pass `file_paths=`.
-3. **Agent mode vs `ALLOWED_TOOLS`.** Setting `ALLOWED_TOOLS` auto-disables agent mode (Ralph's Issue #154). Agent mode's `disallowedTools` blocklist is cleaner but excludes MCP tools — so you need the allowlist. Accept legacy mode + `RALPH_USE_AGENT=false`.
+3. **Adding MCP tools to the agent's catalog.** MCP tools are gated by the agent file's `tools:` allowlist, not auto-granted. To make Claude reach for `mcp__your-server__*`, list the namespace (or specific tool names) in `.claude/agents/ralph.md` `tools:`. Wildcards (`mcp__server__*`) are fine for small surfaces; for large surfaces (tapps-brain has ~55 tools), narrow to the specific tool names you want — see BRAIN-PHASE-B0 in the agent file.
 4. **`linear_get_next_task` in push-mode without the TAP-741 fix.** Emits false `linear_api_error: reason=no_api_key` every loop. Upgrade source repo + `ralph-upgrade`.
 5. **Context7 cache staleness.** 24h TTL default. If an upstream library ships a breaking change, cache serves stale info for up to a day. For security-sensitive libs, invalidate manually.
 6. **tapps-brain max entries is silent.** 5000 entry cap auto-evicts without warning. Monitor via `brain_status()` and clean up with `maintenance_gc` periodically.
@@ -347,7 +347,7 @@ Watch these counters:
 - Note the counters (especially the zeros)
 
 **Phase 1 — Fix the config (15 min):**
-- Update `.ralphrc`: Sonnet default, `RALPH_USE_AGENT=false`, continue-as-new, ALLOWED_TOOLS with all MCPs
+- Update `.ralphrc`: Sonnet default (`CLAUDE_MODEL=claude-sonnet-4-6`), continue-as-new enabled. Tool surface lives in `.claude/agents/ralph.md` — add MCP namespaces there if needed.
 - Patch `PROMPT.md` with the "Delegate before drafting" + "Epic-boundary QA" + "Remember when it matters" sections
 - Add `CONTEXT7_API_KEY` to `~/.ralph/secrets.env` (if you have one)
 

@@ -187,7 +187,7 @@ Check `.ralph/logs/` for the latest log. Common reasons:
 - Rate limit reached (waits for reset)
 - Circuit breaker opened (detected stuck loop)
 - All tasks marked complete
-- Permission denied for a tool — update `ALLOWED_TOOLS` in `.ralphrc` and then `ralph --reset-session`
+- Permission denied for a tool — edit `.claude/agents/ralph.md` (`tools:` allowlist or `disallowedTools:` blocklist) and then `ralph --reset-session`
 - For more symptoms and fixes, see [../TROUBLESHOOTING.md](../TROUBLESHOOTING.md)
 
 ### Ralph keeps running tests without implementing anything

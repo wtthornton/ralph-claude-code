@@ -51,7 +51,6 @@ ralph [OPTIONS]
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--output-format FORMAT` | `json` or `text` | json |
-| `--allowed-tools TOOLS` | Comma-separated tool list | (see .ralphrc) |
 | `--log-max-size MB` | Max ralph.log size before rotation | 10 |
 | `--log-max-files NUM` | Max rotated log files | 5 |
 
@@ -136,7 +135,8 @@ Bash file sourced at startup. See `templates/ralphrc.template` for all options.
 |----------|-------------|---------|
 | `CLAUDE_CODE_CMD` | CLI command to invoke | `"claude"` |
 | `CLAUDE_OUTPUT_FORMAT` | `json` or `text` | `json` |
-| `ALLOWED_TOOLS` | Tool permission whitelist | (see template) |
+| `CLAUDE_MODEL` | Override agent file's `model:` directive | (agent file) |
+| `RALPH_AGENT_NAME` | Agent file basename under `.claude/agents/` | `"ralph"` |
 | `CLAUDE_USE_CONTINUE` | Session continuity toggle | true |
 | `CLAUDE_AUTO_UPDATE` | Auto-update CLI at startup | true |
 | `CB_COOLDOWN_MINUTES` | Circuit breaker recovery wait | 30 |

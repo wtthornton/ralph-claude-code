@@ -186,7 +186,9 @@ MAX_CALLS_PER_HOUR=200
 MAX_TOKENS_PER_HOUR=0                 # 0 = disabled
 CLAUDE_TIMEOUT_MINUTES=15
 
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),..."   # See templates/ralphrc.template
+# Tool permissions live in .claude/agents/ralph.md, not .ralphrc.
+RALPH_AGENT_NAME="ralph"
+# CLAUDE_MODEL="claude-sonnet-4-6"      # optional override of agent file's model:
 
 SESSION_CONTINUITY=true
 SESSION_EXPIRY_HOURS=24
@@ -219,7 +221,6 @@ ralph [OPTIONS]
   -l, --live              Real-time streaming output
   -t, --timeout MIN       Execution timeout (1-120 min)
       --output-format     json (default) or text
-      --allowed-tools     Tool permission list
       --no-continue       Disable session continuity
       --session-expiry H  Session expiration (default: 24)
       --dry-run           Preview without API calls

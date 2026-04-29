@@ -157,14 +157,17 @@ Use HTTPException with these codes:
 PROJECT_NAME="my-project"
 PROJECT_TYPE="typescript"
 MAX_CALLS_PER_HOUR=100
-# Match templates/ralphrc.template for the full default string
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)"
+RALPH_AGENT_NAME="ralph"
+# Tool permissions live in .claude/agents/ralph.md (tools: + disallowedTools:)
+# and .claude/hooks/validate-command.sh, not in this file.
 ```
 
 **When to edit**:
-- Restricting tool permissions for security
-- Adjusting rate limits
-- Changing session timeout
+- Adjusting rate limits / session timeout
+- Pinning a specific Claude model (`CLAUDE_MODEL=claude-sonnet-4-6`)
+- Switching task backend (`RALPH_TASK_SOURCE=linear`)
+
+To restrict **tool permissions**, edit `.claude/agents/ralph.md` (`tools:` allowlist or `disallowedTools:` blocklist) — not `.ralphrc`. See [MIGRATING.md](../../MIGRATING.md) if your project still has the historical `ALLOWED_TOOLS=` line.
 
 ## File Relationships
 

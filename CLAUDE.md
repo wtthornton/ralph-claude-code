@@ -125,7 +125,7 @@ Python Agent SDK for dual-mode operation. All models are **Pydantic v2 BaseModel
 
 **Session continuity**: Claude session IDs persist in `.ralph/.claude_session_id` with 24-hour expiration. Sessions auto-reset on circuit breaker open, manual interrupt, or `is_error: true` API responses.
 
-**File protection**: Two layers — (1) granular `ALLOWED_TOOLS` restrictions prevent destructive git commands, (2) PreToolUse hooks (`protect-ralph-files.sh`, `validate-command.sh`) block modifications to `.ralph/` in real-time.
+**File protection**: Two layers — (1) the agent file `.claude/agents/ralph.md` `disallowedTools:` blocklist prevents destructive bash patterns and `tools:` allowlists the surface; (2) PreToolUse hooks (`protect-ralph-files.sh`, `validate-command.sh`) block modifications to `.ralph/`, `.claude/`, and `.ralphrc` in real-time and hard-block destructive patterns (`rm -rf`, `git reset --hard`, `git clean`, `git rm`) regardless of agent config. The historical `ALLOWED_TOOLS` allowlist in `.ralphrc` was removed with legacy `-p` mode — see [docs/decisions/0006-delete-legacy-mode.md](docs/decisions/0006-delete-legacy-mode.md) and [MIGRATING.md](MIGRATING.md).
 
 **Hook-based response analysis**: The `on-stop.sh` hook runs after every Claude response, extracts RALPH_STATUS fields (auto-unescaping JSON-encoded `\n` from JSONL stream output), writes `status.json`, and updates circuit breaker state. The loop reads from `status.json` instead of parsing raw CLI output. The hook includes a text fallback when no JSON path matches the response payload, and infers `WORK_TYPE: IMPLEMENTATION` when files are modified but the field is UNKNOWN. Atomic writes use `rm -f` after `mv` to prevent orphaned temp files on WSL/NTFS.
 
@@ -193,7 +193,8 @@ The main Ralph agent (Sonnet) handles routine work with task batching (up to 5 s
 Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 - `CLAUDE_CODE_CMD` — CLI command (default: `"claude"`, fallback: `"npx @anthropic-ai/claude-code"`)
 - `CLAUDE_OUTPUT_FORMAT` — `json` (default) or `text`
-- `ALLOWED_TOOLS` / `CLAUDE_ALLOWED_TOOLS` — Tool permission whitelist (defaults include `Bash(git -C *)`, `Bash(grep *)`, `Bash(find *)`; see `templates/ralphrc.template`)
+- `CLAUDE_MODEL` — Model override (e.g. `claude-sonnet-4-6`); falls through to the agent file's `model:` directive when unset
+- `RALPH_AGENT_NAME` — Agent file basename (default: `"ralph"`, resolves to `.claude/agents/ralph.md`)
 - `CLAUDE_USE_CONTINUE` — Session continuity toggle
 - `CLAUDE_AUTO_UPDATE` — Auto-update CLI at startup (disable for Docker/air-gapped)
 - `CB_COOLDOWN_MINUTES`, `CB_AUTO_RESET` — Circuit breaker recovery config

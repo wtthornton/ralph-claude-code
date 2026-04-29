@@ -146,8 +146,10 @@ ralph-doctor            # verify hooks match templates
 # Ralph logged the denied command — find the last one
 grep -E 'permission|denied' .ralph/logs/ralph.log | tail -5
 
-# Add the pattern to ALLOWED_TOOLS in .ralphrc
-# Then reset the session so Claude re-reads permissions
+# Edit .claude/agents/ralph.md — either widen the tools: allowlist or
+# remove the matching pattern from disallowedTools:. For destructive
+# patterns hard-blocked by .claude/hooks/validate-command.sh, edit that
+# hook instead. Then reset the session so Claude re-reads permissions:
 ralph --reset-session
 ```
 

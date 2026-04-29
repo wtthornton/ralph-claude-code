@@ -274,8 +274,9 @@ Each MCP is registered **by the project** (via `.mcp.json` or `claude mcp add`),
 ## Loop safety
 
 - **flock on `.ralph/.ralph.lock`** — prevents concurrent instances.
-- **File protection hooks** — block modifications to `.ralph/` and `.claude/` in real-time.
-- **`ALLOWED_TOOLS` whitelist** — deny-by-default tool permissions, with granular bash patterns.
+- **File protection hooks** — block modifications to `.ralph/`, `.claude/`, and `.ralphrc` in real-time.
+- **Agent file `tools:` + `disallowedTools:`** — tool surface allowlist + bash-pattern blocklist defined in `.claude/agents/ralph.md`.
+- **`validate-command.sh` PreToolUse hook** — hard-blocks destructive bash patterns (`rm -rf`, `git reset --hard`, `git clean`, `git rm`) regardless of agent settings.
 - **Git integrity** — `git status` failure halts the loop (progress detection requires it).
 - **Killswitch sentinel** — `touch .ralph/.killswitch` for headless stop; checked at the top of every iteration.
 - **Atomic state writes** — every counter and state file goes through `atomic_write`.
