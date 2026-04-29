@@ -125,6 +125,18 @@ STUBEOF
     [ "$remaining" -le 3 ]
 }
 
+@test "cleanup_old_output_logs removes oldest by mtime not lexicographic name (TAP-676)" {
+    source_ralph
+    # Lexicographic order would be 2000, 2010, 2099 — but mtimes pick a different oldest victim.
+    touch -t 202001010000 "$LOG_DIR/claude_output_2099-01-01_00-00-00.log"
+    touch -t 202502010000 "$LOG_DIR/claude_output_2000-01-01_00-00-00.log"
+    touch -t 202601010000 "$LOG_DIR/claude_output_2010-01-01_00-00-00.log"
+    LOG_MAX_OUTPUT_FILES=2 cleanup_old_output_logs
+    [ ! -f "$LOG_DIR/claude_output_2099-01-01_00-00-00.log" ]
+    [ -f "$LOG_DIR/claude_output_2000-01-01_00-00-00.log" ]
+    [ -f "$LOG_DIR/claude_output_2010-01-01_00-00-00.log" ]
+}
+
 @test "LOG_MAX_SIZE_MB defaults to 10" {
     run bash -c "cd '$TEST_DIR' && mkdir -p lib && echo ':' > lib/circuit_breaker.sh && echo ':' > lib/date_utils.sh && echo ':' > lib/timeout_utils.sh && source '$RALPH_SCRIPT' && echo \$LOG_MAX_SIZE_MB"
     [[ "$output" == *"10"* ]]

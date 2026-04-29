@@ -1965,10 +1965,16 @@ cleanup_old_output_logs() {
     local to_remove=$((count - LOG_MAX_OUTPUT_FILES))
     log_status "INFO" "Cleaning up $to_remove old output log(s) (keeping newest $LOG_MAX_OUTPUT_FILES)"
 
-    # Remove oldest files (sorted by name which includes timestamp)
-    find "$LOG_DIR" -maxdepth 1 -name 'claude_output_*.log' -print0 2>/dev/null \
-        | sort -z \
+    # TAP-676: prune oldest by mtime (not lexicographic name). Requires GNU sort/head -z (same as prior pipeline).
+    while IFS= read -r -d '' f; do
+        [[ -f "$f" ]] || continue
+        local m
+        m=$(stat -c '%Y' "$f" 2>/dev/null || stat -f '%m' "$f" 2>/dev/null || echo 0)
+        printf '%s\t%s\0' "$m" "$f"
+    done < <(find "$LOG_DIR" -maxdepth 1 -name 'claude_output_*.log' -print0 2>/dev/null) \
+        | sort -z -t $'\t' -k1,1n \
         | head -z -n "$to_remove" \
+        | cut -z -f2- \
         | xargs -0 rm -f 2>/dev/null
 }
 

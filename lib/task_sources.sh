@@ -525,7 +525,7 @@ RALPH_MAX_TASKS_TOTAL=${RALPH_MAX_TASKS_TOTAL:-100}
 #   Sets DEDUP_REMOVED_COUNT (exported) with number of duplicates removed
 #
 # Deduplication strategy:
-#   1. Exact match after lowercasing and stripping punctuation/whitespace
+#   1. Key = lowercase, checkbox + bracket IDs stripped, punctuation → space (hyphens kept) — TAP-679
 #   2. Strips leading "- [ ]" prefix, issue IDs like [#123] or [issue-001]
 #
 deduplicate_tasks() {
@@ -544,14 +544,14 @@ deduplicate_tasks() {
         # Skip empty lines and comment lines
         if (line ~ /^[[:space:]]*$/ || line ~ /^#/) { print line; next }
 
-        # Build normalized key: lowercase, strip checkbox prefix, strip IDs, strip punctuation
+        # Build normalized key: lowercase, strip checkbox prefix, strip IDs; keep hyphens (TAP-679)
         key = tolower(line)
         # Remove checkbox prefix "- [ ] " or "- [x] "
         gsub(/^[[:space:]]*-[[:space:]]*\[[[:space:]]*[xX ]?[[:space:]]*\][[:space:]]*/, "", key)
         # Remove issue IDs like [#123] or [issue-001]
         gsub(/\[#?[a-zA-Z0-9_-]+\][[:space:]]*/, "", key)
-        # Remove punctuation and collapse whitespace
-        gsub(/[^a-z0-9 ]/, "", key)
+        # Map non-alphanumeric (except hyphen) to space, then collapse whitespace
+        gsub(/[^a-z0-9 -]/, " ", key)
         gsub(/[[:space:]]+/, " ", key)
         # Trim
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
