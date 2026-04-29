@@ -108,6 +108,13 @@ extract_frontmatter() {
     assert_success
     grep -qF '.claude/skills' "${BATS_TEST_DIRNAME}/../../setup.sh" \
         || fail "setup.sh must write into .claude/skills/"
+    grep -qF '.cursor/skills' "${BATS_TEST_DIRNAME}/../../setup.sh" \
+        || fail "setup.sh must mirror skills into .cursor/skills/"
+}
+
+@test "upgrade_skills_local mirrors skills-local into .cursor/skills/" {
+    grep -qF '.cursor/skills' "${BATS_TEST_DIRNAME}/../../ralph_upgrade_project.sh" \
+        || fail "ralph_upgrade_project.sh must mirror skills into .cursor/skills/"
 }
 
 @test "ralph_upgrade_project.sh has upgrade_skills_local()" {

@@ -8,11 +8,13 @@ You are Ralph, an autonomous AI development agent working on a [YOUR PROJECT NAM
 
 Ralph's per-loop execution contract — one-task-at-a-time, the
 `---RALPH_STATUS---` block, epic-boundary QA deferral, and the
-`EXIT_SIGNAL` gate — is defined by the **ralph-workflow** skill installed
-at `.claude/skills/ralph-workflow/SKILL.md`. Claude Code auto-loads that
-skill when it runs here. Follow its contract every loop; do not reimplement
-the rules in this file. If the skill is missing, re-run `ralph-upgrade` to
-reinstall it.
+`EXIT_SIGNAL` gate — is defined by the **ralph-workflow** skill at
+`.claude/skills/ralph-workflow/SKILL.md` (Claude Code) or
+`.cursor/skills/ralph-workflow/SKILL.md` (Cursor). The IDE loads project
+skills from the matching tree. Follow its contract every loop; do not
+reimplement the rules in this file. If the skill is missing, re-run
+`ralph-upgrade` to reinstall it (or ensure the repo copy under `.cursor/`
+is present for Cursor-only workflows).
 
 The rest of this file is project-specific context the skill can't know
 about — fill it in for your project.
@@ -45,9 +47,9 @@ overwrite them:
 
 - `.ralph/` (entire directory and all contents)
 - `.ralphrc` (project configuration)
-- `.claude/agents/ralph*.md` (edit via `ralph-upgrade`)
+- `.claude/agents/ralph*.md` and `.cursor/agents/ralph*.md` (edit via `ralph-upgrade` where applicable)
 - `.claude/hooks/on-stop.sh`, `.claude/hooks/protect-ralph-files.sh`
-- `.claude/skills/ralph-workflow/` (edit via `ralph-upgrade`)
+- `.claude/skills/ralph-workflow/` and `.cursor/skills/ralph-workflow/` (edit via `ralph-upgrade` or repo PRs)
 
 When performing cleanup / refactor tasks: these are *not* part of your
 project code. Deleting them halts the loop.
@@ -59,7 +61,7 @@ project code. Deleting them halts the loop.
   - `AGENT.md`: Project build and run instructions
   - `PROMPT.md`: This file
   - `logs/`: Loop execution logs
-- `.claude/skills/ralph-workflow/`: The per-loop execution contract
+- `.claude/skills/ralph-workflow/` or `.cursor/skills/ralph-workflow/`: The per-loop execution contract
 - `src/`: Source code implementation
 - `examples/`: Example usage and test cases
 <!-- RALPH:END -->

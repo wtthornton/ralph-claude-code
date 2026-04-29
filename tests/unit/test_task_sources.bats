@@ -239,6 +239,28 @@ EOF
 }
 
 # =============================================================================
+# DEDUPLICATION (TAP-679)
+# =============================================================================
+
+@test "deduplicate_tasks preserves Bug-fix vs Bugfix as distinct" {
+    local tasks="- [ ] Bug-fix login flow
+- [ ] Bugfix login flow"
+    local out n
+    out=$(deduplicate_tasks "$tasks")
+    n=$(echo "$out" | grep -cE '^\s*-\s*\[' || true)
+    [[ "$n" -eq 2 ]]
+}
+
+@test "deduplicate_tasks still collapses identical normalized lines" {
+    local tasks="- [ ] same task
+- [ ] same task"
+    local out n
+    out=$(deduplicate_tasks "$tasks")
+    n=$(echo "$out" | grep -cE '^\s*-\s*\[' || true)
+    [[ "$n" -eq 1 ]]
+}
+
+# =============================================================================
 # COMBINED IMPORT (3 tests)
 # =============================================================================
 

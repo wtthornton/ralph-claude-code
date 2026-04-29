@@ -1,6 +1,14 @@
-# Ralph Operations Runbook
+---
+title: Ralph operations runbook
+description: Run Ralph against one or more projects in production — deployment, multi-project patterns, secrets, symptom-based troubleshooting.
+audience: [operator]
+diataxis: how-to
+last_reviewed: 2026-04-23
+---
 
-Operational guide for running Ralph against one or more projects on a shared server (e.g. `tapps-brain` alongside other managed projects). Focused on deployment, multi-project patterns, and symptom-based troubleshooting.
+# Ralph operations runbook
+
+Operational guide for running Ralph against one or more projects on a shared server (e.g. `tapps-brain` alongside other managed projects). Focused on deployment, multi-project patterns, and symptom-based troubleshooting. For the full failure catalog see [../FAILURE.md](../FAILURE.md). For symptom-first recovery see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 For installation see [README.md](../README.md). For CLI flags see [cli-reference.md](cli-reference.md). For the Python SDK see [sdk-guide.md](sdk-guide.md).
 

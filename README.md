@@ -1,279 +1,192 @@
-# ralph-claude-code
+---
+title: Ralph for Claude Code
+description: Autonomous AI development loop with dual-condition exit gate, circuit breaker, and hourly rate limiting.
+audience: [user, operator, contributor]
+diataxis: how-to
+last_reviewed: 2026-04-23
+---
 
-## What's New in v2.6.0
+# Ralph for Claude Code
 
-**14 open issues resolved**, 24 pre-existing test failures fixed, 1,026 total tests passing.
+[![Version](https://img.shields.io/badge/version-2.8.3-blue)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-1117%2B-brightgreen)](TESTING.md)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-- **Token-based rate limiting** (#223) — `MAX_TOKENS_PER_HOUR` tracks cumulative token usage alongside invocation count. `--max-tokens` CLI flag, status line display, hourly reset.
-- **SDK parity** (#226) — Progressive context (`trim_fix_plan` with section targeting), 3-strategy `extract_files_changed()` (Write/Edit + git add + git diff --name-only), stall detection config alignment.
-- **E2E integration tests** (#225) — Mock Claude CLI (`tests/mock_claude.sh`) with 7 scenarios. 28 new E2E tests for completion, circuit breaker, rate limit, and permission denial flows.
-- **Task import tests** (#152) — 28 integration tests for beads JSON/text parsing, GitHub filtering, combined sources, deduplication.
-- **Plan limit exhaustion** (#102) — Parses reset time from Claude output ("resets 9pm"), calculates wait, auto-sleeps with countdown timer.
-- **Monorepo support** (#163) — `--service NAME` flag scopes Ralph to a service directory. Auto-detection in `ralph-enable`. `MONOREPO_SERVICES` / `MONOREPO_ROOT` config.
-- **Windows native** (#156) — `ralph.ps1` PowerShell wrapper (WSL/Git Bash auto-detection), `ralph.cmd` CMD wrapper, `--wt` Windows Terminal split-pane monitoring.
-- **Nix flake** (#157) — `nix shell github:frankbria/ralph-claude-code` for instant usage. Dev shell with all dependencies.
-- **Badge automation** (#138) — GitHub Actions workflow auto-updates version/test count badges on push to main.
-- **Beads integration** (#87) — Enhanced `fetch_beads_tasks()` with priority/assignee extraction, `BEADS_PROJECT` scoping, `--beads` CLI shortcut.
-- **KEEP_MONITOR_AFTER_EXIT** (#213) — Preserves tmux monitor panes after loop exits.
-- **.zshrc loading** (#211) — Sources shell rc files and checks nvm/fnm/volta paths before "CLI not found" error.
-- **Session format consistency** (#123) — `save_claude_session()` now writes JSON format with backward-compatible reading.
-- **README update** (#82) — Features table (24 capabilities), CLI flags (+8), library modules (+11), updated roadmap.
+Ralph is an autonomous development loop for [Claude Code](https://claude.ai/code). It reads your `PROMPT.md`, invokes the Claude Code CLI, evaluates the response, and repeats — with rate limiting, circuit breakers, session continuity, and a strict dual-condition exit gate to stop cleanly when the work is done. Named after [Geoffrey Huntley's Ralph technique](https://ghuntley.com/ralph/).
 
-<details>
-<summary><strong>v2.5.0</strong></summary>
+**Core loop** is bash; the optional embedded mode is [Python SDK v2.1.0](docs/sdk-guide.md) (`sdk/ralph_sdk/`).
 
-- **SDK plan optimizer** — Plan optimization now runs inside `RalphAgent.run()` before the first iteration. TheStudio and all SDK consumers get automatic task reordering for free — no integration changes needed. Disable with `RALPH_NO_OPTIMIZE=true`.
-- **SDK import graph** — Python AST + JS/TS regex dependency graph with JSON caching and staleness detection. Cross-platform path normalization.
-- **SDK complexity classifier** — 5-level task classifier (TRIVIAL→ARCHITECTURAL) ported from bash. Annotation overrides, keyword scoring, file count heuristics, retry escalation. Feeds into `select_model()` for dynamic model routing.
-- **SDK episodic memory** — Cross-session memory with pluggable `MemoryBackend` protocol. Keyword-based retrieval with failure bias and age decay. Project index auto-detection.
-- **Build-time version manifest** — `generate_version_manifest.sh` reads versions from canonical sources, writes `version.json`. SDK exposes `get_versions()`. Dockerfile updated with OCI labels.
-- **Default rate limit bumped to 200/hr** — Better match for current Claude plan tiers.
-- **Upstream sync epic** — Question detection, permission denial CB fast-trip, stuck loop detection, heuristic exit suppression.
-- **SDK v2.1.0** — 5 new modules: `complexity.py`, `memory.py`, `import_graph.py`, `plan_optimizer.py`, `versions.py`.
+## Table of contents
 
-</details>
+- [Why Ralph](#why-ralph)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Features](#features)
+- [Project layout](#project-layout)
+- [Configuration](#configuration)
+- [CLI reference](#cli-reference)
+- [Documentation map](#documentation-map)
+- [System requirements](#system-requirements)
+- [Testing](#testing)
+- [Contributing](#contributing)
+- [License](#license)
 
-<details>
-<summary><strong>v2.4.0</strong></summary>
+## Why Ralph
 
-- **Plan optimization (bash)** — Automatic fix_plan.md task reordering at session start. AST-based import graph (Python/JS/TS) detects real file dependencies, Unix `tsort` for topological ordering, module grouping, phase ordering (create→implement→test→document), size clustering for better batching.
-- **ralph-explorer task resolution** — Vague tasks without file paths automatically resolved to specific files via ralph-explorer (Haiku)
-- **Batch hints** — Session start context includes batch boundary annotations
-- **Progress re-grounding** — Session context includes last completed task (Reflexion pattern)
-- **`/optimize` skill** — Manual plan optimization via slash command
-- **CLAUDE_MODEL / CLAUDE_EFFORT config** — New `.ralphrc` variables
-- **48 new tests** — Import graph (12), plan optimizer (12), session start integration (24)
+Running Claude Code by hand for a long-running project is slow and error-prone: you have to babysit rate limits, catch stalls, decide when to stop, and re-enter context between sessions. Ralph automates that harness. It reads your `fix_plan.md`, asks Claude to do the next thing, and exits only when Claude and the harness both agree the work is complete — so you can leave a backlog running overnight and trust the stop condition.
 
-</details>
-
-<details>
-<summary><strong>v2.3.2</strong></summary>
-
-- **jq bootstrap** — Installer auto-downloads official jq static binary to `~/.local/bin` when jq is missing (Linux/macOS)
-- **ralph-doctor** — Prepends `~/.local/bin` to PATH so bundled jq is detected correctly
-- **RELEASE.md** — Release checklist for version bumps, docs, tests, and deploy
-- **WSL/CRLF** — README notes for `bash install.sh` and line-ending handling on Windows checkouts
-
-</details>
-
-<details>
-<summary><strong>v2.3.1</strong></summary>
-
-- Version bump — Ralph v2.3.1, SDK v2.0.3 (now superseded by SDK v2.1.0)
-
-</details>
-
-<details>
-<summary><strong>v1.9.0</strong></summary>
-
-- **Cost-aware agent routing** — Main ralph agent runs on Sonnet for speed; complex/architectural tasks delegate to ralph-architect (Opus) with mandatory code review
-- **Task batching** — Up to 8 small / 5 medium tasks per invocation with epic-boundary QA deferral
-- **Speed optimizations** — `bypassPermissions` mode, disabled PostToolUse hooks, reduced inter-loop pause (5s → 2s), subprocess batching (~50 → ~10 jq calls per loop), version caching
-- **Epic-boundary deferral** — QA (tester + reviewer), explorer, backups, and log rotation deferred to epic boundaries for faster throughput
-- **Live stream text filtering** — Stream metadata, raw JSON dumps, and UUID patterns suppressed; text collapsed and truncated for readability
-- **Circuit breaker decay** — Sliding window and session reinitialization support
-- **Cross-platform compatibility** — Hook environment detection, version divergence fixes, Python3 WSL alias handling
-
-</details>
-
-<details>
-<summary><strong>Previous releases</strong></summary>
-
-**v1.8.2** — Agent mode prompt fix, live stream JSONL suppression, Windows `.cmd` wrapper, WSL deploy line-ending fixes
-
-**v1.8.1** — Phases 6-11 (SDK integration, observability, GitHub Issues, Docker sandbox, validation testing), version badge correction
-
-**v1.2.0** — Stream Parser v2, RALPH_STATUS auto-unescaping, WSL reliability polish, 42/42 epic stories complete
-
-**v1.1.0** — Agent teams + parallelism, log rotation, dry-run mode, WSL/Windows version divergence detection
-
-**v1.0.0** — Hooks + agent definitions, sub-agents (explorer, tester, reviewer), skills framework, bash reduction (-1,385 lines)
-
-**v0.11.x** — Live streaming, interactive enable wizard, stream resilience, session continuity, circuit breaker auto-recovery
-
-</details>
-
-## Features
-
-| Category | Capability |
-|----------|-----------|
-| **Core Loop** | Autonomous development cycles with structured task execution |
-| **Exit Detection** | Dual-condition gate: completion indicators + explicit `EXIT_SIGNAL` |
-| **Rate Limiting** | Hourly API call + token limits with countdown timers and plan exhaustion auto-sleep |
-| **Circuit Breaker** | Three-state pattern (CLOSED/HALF_OPEN/OPEN) with auto-recovery, fast-trip, stall detection |
-| **Session Continuity** | Context preserved across loops with 24-hour expiration |
-| **Live Streaming** | Real-time Claude Code output with `--live` flag |
-| **Agent Teams** | Parallel task execution with teammate coordination (experimental) |
-| **Sub-agents** | Explorer (read-only), tester (worktree isolation), reviewer, architect, background tester |
-| **Hook System** | 8 hook events for response analysis, file protection, and command validation |
-| **Monitoring** | tmux dashboard with loop count, API usage, and live logs (`KEEP_MONITOR_AFTER_EXIT` option) |
-| **Task Import** | From PRDs, beads, or GitHub Issues via `ralph-enable` wizard |
-| **Configuration** | `.ralphrc` per-project settings with tool permission control |
-| **Log Rotation** | Automatic `ralph.log` rotation at configurable size limit |
-| **Dry-Run Mode** | Preview loop execution without API calls (`--dry-run`) |
-| **Metrics** | Monthly JSONL metrics, `ralph --stats` summary, `--stats-json` for machine-readable |
-| **Notifications** | Terminal, OS native, webhook POST, and terminal bell alerts |
-| **Backup/Rollback** | Auto-snapshots before each loop, `ralph --rollback` to restore state |
-| **GitHub Issues** | `ralph --issue NUM` import, `ralph --batch` processing, lifecycle management |
-| **Docker Sandbox** | `ralph --sandbox` runs loop inside Docker container with signal forwarding |
-| **Cost Dashboard** | `ralph --cost-dashboard` with per-model breakdown and budget tracking |
-| **Plan Optimization** | Automatic fix_plan.md task reordering by dependency graph at session start |
-| **Python SDK** | Full SDK (`sdk/ralph_sdk/`) with async agent loop, Pydantic v2 models, pluggable state |
-
-## Quick Start
-
-```
-INSTALL ONCE              USE EVERYWHERE
-+-----------------+          +----------------------+
-| ./install.sh    |    ->    | ralph-setup project1 |
-|                 |          | ralph-enable         |
-| Adds global     |          | ralph-import prd.md  |
-| commands        |          | ...                  |
-+-----------------+          +----------------------+
-```
-
-### 1. Install Ralph (one time)
+## Install
 
 ```bash
-git clone https://github.com/frankbria/ralph-claude-code.git
+git clone https://github.com/wtthornton/ralph-claude-code.git
 cd ralph-claude-code
 ./install.sh
 ```
 
-This adds `ralph`, `ralph-monitor`, `ralph-setup`, `ralph-import`, `ralph-migrate`, `ralph-enable`, and `ralph-enable-ci` to your PATH.
+Installs `ralph`, `ralph-monitor`, `ralph-setup`, `ralph-import`, `ralph-enable`, `ralph-enable-ci`, `ralph-migrate`, `ralph-doctor`, `ralph-upgrade`, and `ralph-sdk` into `~/.local/bin/`. Put that on your `$PATH`.
 
-**Dependencies:** Node.js, `git`, `jq`, GNU coreutils (`timeout`). **`jq`:** If `jq` is not installed, the installer can download an official static binary into `~/.local/bin/jq` on Linux and macOS (requires `curl` or `wget`). To skip that and require a system package instead, set `RALPH_SKIP_JQ_BOOTSTRAP=1` before running `install.sh`.
+**Dependencies:** Node.js 18+, `git`, `jq`, GNU `timeout` (macOS: `brew install coreutils`). If `jq` is missing, the installer can bootstrap an official static binary into `~/.local/bin/jq` on Linux/macOS. Set `RALPH_SKIP_JQ_BOOTSTRAP=1` to require a system package instead.
 
-**WSL / Windows checkouts:** Run install from WSL. Put `~/.local/bin` on your `PATH` so `ralph` and bundled `jq` are found. Repo shell scripts use LF line endings (see `.gitattributes`); if you still see `$'\r'` errors, run `sed -i 's/\r$//' install.sh` in WSL or use `git config core.autocrlf input` and re-checkout.
+### Alternatives
 
-### Alternative: Install with Nix
+| Platform | Command |
+|---|---|
+| Nix (flakes) | `nix shell github:wtthornton/ralph-claude-code` |
+| Windows | Run through WSL: `wsl ralph --live`. Or copy `ralph.cmd` to `%PATH%`. |
+| WSL/CRLF | If you see `$'\r'` errors: `sed -i 's/\r$//' install.sh` or set `git config core.autocrlf input` |
 
-If you use [Nix](https://nixos.org/) with flakes enabled, you can run Ralph without cloning:
+Upgrade: re-run `./install.sh upgrade`. Uninstall: `./uninstall.sh`.
 
-```bash
-nix shell github:frankbria/ralph-claude-code
-ralph --version
-
-git clone https://github.com/frankbria/ralph-claude-code.git
-cd ralph-claude-code
-nix develop
-```
-
-### 2. Set up a project
+## Quick start
 
 ```bash
 cd my-project
-ralph-enable                    # Interactive wizard
-
-ralph-import requirements.md my-app
-
-ralph-setup my-project
+ralph-enable              # Interactive wizard — detects project type, sets up .ralph/
+ralph --monitor           # Run with live tmux dashboard (recommended)
 ```
 
-### 3. Run
+Three alternative flows:
 
 ```bash
-ralph --monitor                 # Integrated tmux monitoring (recommended)
-ralph --live                    # Real-time streaming output
-ralph                           # Headless mode
+ralph-import requirements.md my-app    # Convert a PRD into Ralph tasks
+ralph-setup my-project                 # Scaffold a new project from scratch
+ralph --live                           # Headless with real-time streaming output
 ```
 
-### Uninstalling
+See the [user guide](docs/user-guide/) for a hands-on tutorial.
 
-```bash
-./uninstall.sh
-```
-
-## How It Works
+## How it works
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Ralph Main Loop                       │
-│                                                         │
-│  1. Read PROMPT.md ──> 2. Execute Claude Code           │
-│         ↑                        │                      │
-│         │                        ▼                      │
-│  5. Repeat ◄──── 4. Evaluate ◄── 3. on-stop.sh hook    │
-│     (or exit)       exit gate       writes status.json  │
-└─────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│                      Ralph loop                        │
+│                                                        │
+│  1. Read PROMPT.md + fix_plan.md                       │
+│         │                                              │
+│         ▼                                              │
+│  2. Invoke Claude Code CLI                             │
+│         │                                              │
+│         ▼                                              │
+│  3. on-stop.sh hook → parses RALPH_STATUS →            │
+│     writes status.json + updates circuit breaker       │
+│         │                                              │
+│         ▼                                              │
+│  4. Loop evaluates exit gate                           │
+│         │                                              │
+│         ├── BOTH conditions met → exit                 │
+│         └── else → back to step 1                      │
+└────────────────────────────────────────────────────────┘
 ```
 
-**Dual-condition exit gate** — Ralph exits only when BOTH conditions are met:
-1. `completion_indicators >= 2` (NLP heuristics)
-2. Claude's explicit `EXIT_SIGNAL: true` in the RALPH_STATUS block
+**Dual-condition exit gate.** Ralph exits only when **both** are true:
 
-This prevents premature exits when Claude says "done" mid-phase but hasn't actually finished.
+1. `completion_indicators >= 2` — the loop's NLP heuristic agrees work is done.
+2. Claude emits `EXIT_SIGNAL: true` in the `RALPH_STATUS` block — the agent explicitly says so.
 
-**Other exit conditions:** all fix_plan.md tasks complete, consecutive done signals, test saturation, permission denied, or API limit reached.
+This prevents premature exits when Claude says "done" mid-phase. See [ADR-0001: Dual-condition exit gate](docs/decisions/0001-dual-condition-exit-gate.md).
 
-## Architecture
+Other exit conditions: all `fix_plan.md` tasks complete, consecutive done signals, test saturation, permission denied after retries, API limit reached.
 
-### Scripts
+## Features
 
-| Script | Purpose |
-|--------|---------|
-| `ralph_loop.sh` | Core autonomous loop (~2,500 lines) |
-| `ralph_monitor.sh` | Live tmux dashboard |
-| `ralph_enable.sh` | Interactive project enablement wizard |
-| `ralph_enable_ci.sh` | Non-interactive enablement for CI |
-| `ralph_import.sh` | PRD/specification document importer |
-| `install.sh` / `uninstall.sh` | Global installation management |
+| Category | Capability |
+|---|---|
+| **Core loop** | Autonomous cycles, dual-condition exit gate, epic-boundary QA deferral |
+| **Rate limiting** | Hourly call + token limits, plan-exhaustion auto-sleep, countdown timers |
+| **Circuit breaker** | Three-state CLOSED/HALF_OPEN/OPEN with auto-recovery, fast-trip, stall detection |
+| **Session continuity** | Session IDs persist 24h; auto-reset on CB open, interrupt, or `is_error: true` |
+| **Live streaming** | `--live` JSONL pipeline with tool names, elapsed time, sub-agent events |
+| **Sub-agents** | explorer (Haiku), tester (worktree), reviewer (read-only), architect (Opus), bg-tester |
+| **Hook system** | 8 events — response analysis, file protection, command validation |
+| **Monitoring** | tmux dashboard with loop count, API usage, live logs, cost breakdown |
+| **Task sources** | `fix_plan.md` (file), Linear API, GitHub Issues, PRD import |
+| **Config** | Per-project `.ralphrc` with tool permission whitelist |
+| **Log rotation** | Automatic rotation on size + retention caps |
+| **Dry-run** | Preview a loop iteration without API calls (`--dry-run`) |
+| **Metrics** | Monthly JSONL, `ralph --stats` summary, `--stats-json` machine-readable |
+| **Notifications** | Terminal, OS native, webhook POST, sound |
+| **Backup/rollback** | Auto-snapshot at epic boundaries, `ralph --rollback` |
+| **GitHub Issues** | `ralph --issue NUM`, `--batch`, lifecycle management |
+| **Docker sandbox** | `ralph --sandbox` with rootless, `--network none`, gVisor support |
+| **Cost dashboard** | `ralph --cost-dashboard` with per-model breakdown |
+| **Plan optimizer** | Automatic `fix_plan.md` reordering by import graph at session start |
+| **Python SDK** | Full async agent loop, Pydantic v2 models, pluggable state backend |
+| **OTel tracing** | GenAI Semantic Conventions, JSONL OTLP format |
+| **MCP integration** | Probes `tapps-mcp`, `tapps-brain`, `docs-mcp`; injects guidance |
 
-### Library Modules (`lib/`)
+## Project layout
 
-| Module | Purpose |
-|--------|---------|
-| `circuit_breaker.sh` | Three-state pattern with cooldown/auto-recovery |
-| `enable_core.sh` | Shared enablement logic |
-| `task_sources.sh` | Task import from beads/GitHub/PRD |
-| `wizard_utils.sh` | Interactive prompt utilities |
-| `date_utils.sh` | Cross-platform date/epoch utilities |
-| `timeout_utils.sh` | Cross-platform timeout detection |
-| `metrics.sh` | Monthly JSONL metrics, `--stats` summary |
-| `notifications.sh` | Terminal, OS native, webhook notifications |
-| `backup.sh` | State backup/rollback, auto-snapshots |
-| `github_issues.sh` | GitHub issue import, assess, filter, batch, lifecycle |
-| `sandbox.sh` | Docker sandbox execution, signal forwarding |
-| `tracing.sh` | OpenTelemetry traces, OTLP export |
-| `complexity.sh` | Task complexity classification, dynamic model routing |
-| `memory.sh` | Cross-session episodic + semantic memory |
-| `import_graph.sh` | AST-based file dependency graph |
-| `plan_optimizer.sh` | Fix plan task reordering via topological sort |
-| `context_management.sh` | Progressive context loading, task decomposition hints |
+```
+ralph-claude-code/
+├── ralph_loop.sh              # Core autonomous loop (~2,500 lines)
+├── ralph_monitor.sh           # Live tmux dashboard
+├── ralph_enable.sh            # Interactive project enablement
+├── ralph_enable_ci.sh         # Non-interactive enablement for CI
+├── ralph_import.sh            # PRD/spec document importer
+├── install.sh / uninstall.sh  # Global installation
+├── lib/                       # Modular library (18 modules)
+├── sdk/ralph_sdk/             # Python SDK v2.1.0 (17 modules)
+├── templates/                 # Project scaffolding
+├── tests/                     # BATS suite (unit/integration/e2e/evals)
+├── docs/                      # This guide set (see docs/README.md)
+└── .claude/                   # Agents, hooks, skills, settings
+```
 
-### Agent Definitions (`.claude/agents/`)
+A project managed by Ralph gets:
 
-| Agent | Model | Purpose |
-|-------|-------|---------|
-| `ralph.md` | Opus | Main development agent (maxTurns 50) |
-| `ralph-explorer.md` | Haiku | Read-only codebase exploration |
-| `ralph-tester.md` | Sonnet | Testing with worktree isolation |
-| `ralph-reviewer.md` | Sonnet | Code review (read-only) |
-| `ralph-bg-tester.md` | Sonnet | Background testing (report-only) |
-
-### Hook System (`.claude/settings.json`)
-
-8 hook events: SessionStart, Stop, PreToolUse (x2), PostToolUse (x2), SubagentStop, StopFailure
-
-Key hooks:
-- **`on-stop.sh`** — Parses RALPH_STATUS, writes `status.json`, updates circuit breaker
-- **`protect-ralph-files.sh`** — Blocks modifications to `.ralph/` configuration
-- **`validate-command.sh`** — Blocks destructive git commands
+```
+my-project/
+├── .ralph/
+│   ├── PROMPT.md              # Development instructions (you customize)
+│   ├── fix_plan.md            # Task list (you + Ralph maintain)
+│   ├── AGENT.md               # Build/run instructions (auto-maintained)
+│   ├── specs/                 # Detailed specs (optional)
+│   ├── hooks/                 # Hook scripts
+│   ├── logs/                  # Execution logs
+│   ├── status.json            # Current loop status
+│   └── .circuit_breaker_state
+├── .claude/
+│   ├── agents/                # Sub-agent definitions
+│   ├── skills/                # Skill definitions
+│   └── settings.json          # Hook declarations
+├── .ralphrc                   # Per-project config
+└── src/                       # Your code
+```
 
 ## Configuration
 
-### Project Configuration (`.ralphrc`)
+`.ralphrc` is sourced as bash at loop startup. Environment variables override file values. The most useful keys:
 
 ```bash
 PROJECT_NAME="my-project"
-PROJECT_TYPE="typescript"
-CLAUDE_CODE_CMD="claude"
+PROJECT_TYPE="typescript"             # python|typescript|generic
+CLAUDE_CODE_CMD="claude"              # fallback: "npx @anthropic-ai/claude-code"
 MAX_CALLS_PER_HOUR=200
-MAX_TOKENS_PER_HOUR=0            # 0 = disabled; set to e.g. 500000 to cap token usage
+MAX_TOKENS_PER_HOUR=0                 # 0 = disabled
 CLAUDE_TIMEOUT_MINUTES=15
-CLAUDE_OUTPUT_FORMAT="json"
 
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),..."
+ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),..."   # See templates/ralphrc.template
 
 SESSION_CONTINUITY=true
 SESSION_EXPIRY_HOURS=24
@@ -282,161 +195,104 @@ CB_NO_PROGRESS_THRESHOLD=3
 CB_COOLDOWN_MINUTES=30
 CB_AUTO_RESET=false
 
-LOG_MAX_SIZE_MB=10               # Rotate ralph.log at this size
-LOG_MAX_FILES=5                  # Rotated log files to keep
-LOG_MAX_OUTPUT_FILES=20          # Max claude_output_*.log files
+RALPH_TASK_SOURCE="file"              # "file" (default) | "linear"
+RALPH_LINEAR_PROJECT=""               # required when task source = linear
 
-DRY_RUN=false                    # Also: ralph --dry-run
-
-KEEP_MONITOR_AFTER_EXIT=false    # Keep tmux panes alive after loop exits
-
-RALPH_ENABLE_TEAMS=false
-RALPH_MAX_TEAMMATES=2
+DRY_RUN=false
+KEEP_MONITOR_AFTER_EXIT=false
 ```
 
-### CLI Options
+Full reference: [docs/cli-reference.md](docs/cli-reference.md).
+
+## CLI reference
 
 ```bash
 ralph [OPTIONS]
   -V, --version           Show version
   -h, --help              Show help
   -c, --calls NUM         Max calls per hour (default: 200)
-  --max-tokens NUM        Max tokens per hour (default: 0 = disabled)
+      --max-tokens NUM    Max tokens per hour (0 = disabled)
   -p, --prompt FILE       Custom prompt file
   -s, --status            Show status and exit
   -m, --monitor           Start with tmux monitoring
   -v, --verbose           Detailed progress output
   -l, --live              Real-time streaming output
   -t, --timeout MIN       Execution timeout (1-120 min)
-  --output-format FORMAT  json (default) or text
-  --allowed-tools TOOLS   Tool permission list
-  --no-continue           Disable session continuity
-  --session-expiry HOURS  Session expiration (default: 24)
-  --dry-run               Preview without API calls
-  --reset-circuit         Reset circuit breaker
-  --auto-reset-circuit    Auto-reset on startup
-  --reset-session         Clear session state
-  --log-max-size MB       Max log size before rotation
-  --log-max-files NUM     Max rotated log files
-  --stats                 Show metrics summary and exit
-  --stats-json            Show metrics as JSON and exit
-  --rollback              Restore state from last backup
-  --sdk                   Run via Python SDK instead of bash
-  --sandbox               Run loop inside Docker container
-  --issue NUM             Import GitHub issue into fix_plan.md
-  --issues                List GitHub issues for selection
-  --batch                 Process multiple issues sequentially
-  --cost-dashboard        Show cost tracking dashboard
+      --output-format     json (default) or text
+      --allowed-tools     Tool permission list
+      --no-continue       Disable session continuity
+      --session-expiry H  Session expiration (default: 24)
+      --dry-run           Preview without API calls
+      --reset-circuit     Reset circuit breaker
+      --reset-session     Clear session state
+      --stats             Metrics summary
+      --stats-json        Metrics as JSON
+      --rollback          Restore state from last backup
+      --sdk               Run via Python SDK instead of bash
+      --sandbox           Run inside Docker container
+      --issue NUM         Import GitHub issue into fix_plan.md
+      --issues            List GitHub issues for selection
+      --batch             Process multiple issues sequentially
+      --cost-dashboard    Show cost tracking dashboard
+      --mcp-status        Show which MCP servers are reachable
 ```
 
-## Understanding Ralph Files
+Full CLI reference: [docs/cli-reference.md](docs/cli-reference.md).
 
-| File | Purpose | Action |
-|------|---------|--------|
-| `.ralph/PROMPT.md` | Development instructions | **Review & customize** |
-| `.ralph/fix_plan.md` | Prioritized task list | **Add/modify tasks** |
-| `.ralph/AGENT.md` | Build/run instructions | Auto-maintained |
-| `.ralph/specs/` | Project specifications | Add when needed |
-| `.ralphrc` | Loop configuration | Rarely edit |
+## Documentation map
 
-Design specs for loop reliability live in [`docs/specs/`](docs/specs/) (50 epics, 148 stories — all complete).
+| I want to... | Start here |
+|---|---|
+| Install and run Ralph on a project | This README + [user guide](docs/user-guide/) |
+| Understand the architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Fix something that's broken | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) |
+| Look up Ralph-specific terminology | [docs/GLOSSARY.md](docs/GLOSSARY.md) |
+| Run Ralph in production | [docs/OPERATIONS.md](docs/OPERATIONS.md) |
+| Embed Ralph in another Python app | [docs/sdk-guide.md](docs/sdk-guide.md) |
+| Drive Ralph from Linear | [docs/LINEAR-WORKFLOW.md](docs/LINEAR-WORKFLOW.md) |
+| Stack Ralph + tapps-mcp + tapps-brain | [docs/RALPH-STACK-GUIDE.md](docs/RALPH-STACK-GUIDE.md) |
+| Understand a design decision | [docs/decisions/](docs/decisions/) |
+| Contribute code | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Report a vulnerability | [SECURITY.md](SECURITY.md) |
+| Add or run tests | [TESTING.md](TESTING.md) |
+| See what's shipped recently | [CHANGELOG.md](CHANGELOG.md) |
+| Review completed epics | [docs/specs/README.md](docs/specs/README.md) |
 
-## Project Structure
+Complete index: [docs/README.md](docs/README.md).
 
-```
-my-project/
-├── .ralph/                 # Ralph configuration and state
-│   ├── PROMPT.md           # Development instructions
-│   ├── fix_plan.md         # Task list
-│   ├── AGENT.md            # Build/run instructions
-│   ├── specs/              # Project specifications
-│   ├── hooks/              # Hook scripts (from settings.json)
-│   ├── logs/               # Execution logs
-│   ├── status.json         # Current loop status
-│   └── .circuit_breaker_state
-├── .claude/                # Claude Code configuration
-│   ├── agents/             # Agent definitions
-│   ├── skills/             # Skill definitions
-│   └── settings.json       # Hook declarations
-├── .ralphrc                # Project configuration
-└── src/                    # Your source code
-```
-
-## System Requirements
+## System requirements
 
 | Requirement | Notes |
-|-------------|-------|
-| **Bash 4.0+** | Script execution |
-| **Claude Code CLI** | `npm install -g @anthropic-ai/claude-code` |
-| **jq** | JSON processing |
-| **Git** | Version control |
-| **tmux** | Monitoring dashboard (recommended) |
-| **GNU coreutils** | `timeout` command (macOS: `brew install coreutils`) |
-
-### Windows Users
-
-Ralph is a bash script and requires a Unix shell. On Windows, run Ralph through **WSL** (Windows Subsystem for Linux):
-
-```powershell
-wsl ralph --version          # Check installed version
-wsl ralph --live             # Run with live streaming
-wsl ralph --monitor          # Run with tmux dashboard
-```
-
-> **Note:** Running `ralph` directly from PowerShell or CMD will trigger a "Select an app to open" dialog because the script has no `.exe`/`.cmd` extension. Always use the `wsl ralph` prefix, or use the provided `ralph.cmd` wrapper (see below).
-
-**Optional: Native wrapper** — Copy `ralph.cmd` from the repo root to a directory on your Windows PATH. This lets you run `ralph --live` directly from PowerShell/CMD without the `wsl` prefix.
+|---|---|
+| Bash 4.0+ | Ralph rejects older versions at startup |
+| Claude Code CLI | `npm install -g @anthropic-ai/claude-code` |
+| `jq` | JSON processing (installer can bootstrap it) |
+| Git | Progress detection via diff baseline |
+| tmux | Recommended for `--monitor` |
+| GNU coreutils | `timeout` command (macOS: `brew install coreutils`) |
+| gawk | mawk lacks `match(s, re, arr)` array capture used by plan optimizer |
 
 ## Testing
 
 ```bash
 npm install          # Install BATS framework
-npm test             # Run all 858+ tests
-npm run test:unit    # Unit tests only
-npm run test:integration  # Integration tests only
+npm test             # Run unit + integration (1117+ tests, 100% pass gate)
+npm run test:unit
+npm run test:integration
+npm run test:evals:deterministic
 ```
 
-- **858+ tests** across 17+ test files
-- **100% pass rate** (quality gate)
-- Framework: BATS (Bash Automated Testing System)
-- Coverage: kcov (informational only due to subprocess limitations)
-
-See [TESTING.md](TESTING.md) for the comprehensive testing guide.
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Ralph exits silently on first loop | Check Claude Code CLI is installed and on PATH. Set `CLAUDE_CODE_CMD` in `.ralphrc` |
-| Premature exit | Verify `EXIT_SIGNAL: false` is set in RALPH_STATUS when work remains |
-| Permission denied | Update `ALLOWED_TOOLS` in `.ralphrc`, then `ralph --reset-session` |
-| 5-hour API limit | Ralph auto-detects and prompts to wait or exit |
-| Stuck loops | Check `.ralph/fix_plan.md` for unclear tasks |
-| timeout not found (macOS) | `brew install coreutils` |
-| MCP servers failed | Check `ralph.log` for details |
-| Session expired | `ralph --reset-session` to start fresh |
+Full testing guide: [TESTING.md](TESTING.md).
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete guide.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Priority areas: test coverage, documentation, real-world testing, feature development. Before opening a PR:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ralph-claude-code.git
+git clone https://github.com/wtthornton/ralph-claude-code.git
 cd ralph-claude-code
-npm install && npm test  # All 858+ tests must pass
+npm install && npm test   # All 1117+ tests must pass
 ```
-
-**Priority areas:** test coverage, documentation, real-world testing, feature development.
-
-## Roadmap
-
-All 148 stories are complete across 50 epics and 17 phases. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for details.
-
-**Open backlog** (14 issues):
-- **P1**: SDK parity with bash CLI (#226)
-- **P2**: E2E integration tests (#225), token-aware rate limiting (#223)
-- **P3**: Monorepo support (#163), Windows native (#156), Nix flake (#157), task import tests (#152)
-- **P4**: Beads integration (#87), README updates (#82)
 
 ## License
 
@@ -445,59 +301,15 @@ MIT License — see [LICENSE](LICENSE).
 ## Acknowledgments
 
 - Inspired by the [Ralph technique](https://ghuntley.com/ralph/) by Geoffrey Huntley
-- Built for [Claude Code](https://claude.ai/code) by Anthropic
+- Built on [Claude Code](https://claude.ai/code) by Anthropic
 - Featured in [Awesome Claude Code](https://github.com/hesreallyhim/awesome-claude-code)
 
 ---
 
 <p align="center">
-  <a href="IMPLEMENTATION_PLAN.md">Roadmap</a> &bull;
-  <a href="CONTRIBUTING.md">Contributing</a> &bull;
-  <a href="TESTING.md">Testing</a> &bull;
-  <a href="docs/specs/EPIC-STORY-INDEX.md">Epic Index</a>
+  <a href="docs/ARCHITECTURE.md">Architecture</a> •
+  <a href="docs/TROUBLESHOOTING.md">Troubleshooting</a> •
+  <a href="CONTRIBUTING.md">Contributing</a> •
+  <a href="TESTING.md">Testing</a> •
+  <a href="docs/specs/EPIC-STORY-INDEX.md">Epic index</a>
 </p>
-
-<!-- docsmcp:start:table-of-contents -->
-## Table of Contents
-
-- [Features](#features)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Development](#development)
-- [License](#license)
-<!-- docsmcp:end:table-of-contents -->
-
-<!-- docsmcp:start:installation -->
-## Installation
-
-```bash
-npm install ralph-claude-code
-```
-<!-- docsmcp:end:installation -->
-
-<!-- docsmcp:start:usage -->
-## Usage
-
-```javascript
-const ralph_claude_code = require("ralph-claude-code");
-```
-<!-- docsmcp:end:usage -->
-
-<!-- docsmcp:start:api-reference -->
-## API Reference
-
-See the [API reference](docs/api-reference.md), [CLI reference](docs/cli-reference.md), [SDK guide](docs/sdk-guide.md), and [operations runbook](docs/OPERATIONS.md) for detailed reference.
-<!-- docsmcp:end:api-reference -->
-
-<!-- docsmcp:start:development -->
-## Development
-
-```bash
-git clone https://github.com/wtthornton/ralph-claude-code.git
-cd ralph-claude-code
-
-npm install
-
-npm test
-```
-<!-- docsmcp:end:development -->

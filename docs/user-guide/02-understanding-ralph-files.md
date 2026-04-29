@@ -1,4 +1,12 @@
-# Understanding Ralph Files
+---
+title: Understanding Ralph files
+description: Reference for every file Ralph creates in a managed project — who writes each, who reads each, and whether to customize.
+audience: [user]
+diataxis: reference
+last_reviewed: 2026-04-23
+---
+
+# Understanding Ralph files
 
 After running `ralph-enable`, `ralph-import`, or `ralph-setup`, you'll have a `.ralph/` directory with several files. This guide explains what each file does and whether you need to edit it.
 

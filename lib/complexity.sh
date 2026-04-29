@@ -28,61 +28,26 @@ RALPH_DEFAULT_MODEL="${RALPH_DEFAULT_MODEL:-sonnet}"
 # Returns: 1 (TRIVIAL), 2 (SIMPLE), 3 (ROUTINE), 4 (COMPLEX), 5 (ARCHITECTURAL)
 #
 # Priority order:
-# 1. Explicit size annotations [TRIVIAL], [SMALL], [MEDIUM], [LARGE], [ARCH]
-# 2. Retry escalation (3+ retries → +2, 1-2 retries → +1)
-# 3. Keyword analysis (architectural terms score higher)
-# 4. File count heuristic (5+ files → COMPLEX)
-# 5. Default: ROUTINE (3)
+# 1. Explicit size annotations [TRIVIAL], [SMALL], [MEDIUM], [LARGE], [ARCH] (honored; TAP-677 warns vs heuristic)
+# 2. Heuristic: keywords, file count, multi-step, retry escalation (default base ROUTINE)
 #
-ralph_classify_task_complexity() {
+# _ralph_complexity_heuristic_score — Score without consulting annotations (TAP-677)
+_ralph_complexity_heuristic_score() {
     local task_text="${1:-}"
     local retry_count="${2:-0}"
-    local score=3  # Default: ROUTINE
-
-    # 1. Explicit size annotations (highest priority)
-    if echo "$task_text" | grep -qiE '\[TRIVIAL\]'; then
-        score=1
-        _complexity_debug "Annotation: TRIVIAL"
-        echo "$score"
-        return "$score"
-    elif echo "$task_text" | grep -qiE '\[SMALL\]'; then
-        score=2
-        _complexity_debug "Annotation: SMALL"
-        echo "$score"
-        return "$score"
-    elif echo "$task_text" | grep -qiE '\[MEDIUM\]'; then
-        score=3
-        _complexity_debug "Annotation: MEDIUM"
-        echo "$score"
-        return "$score"
-    elif echo "$task_text" | grep -qiE '\[LARGE\]'; then
-        score=4
-        _complexity_debug "Annotation: LARGE"
-        echo "$score"
-        return "$score"
-    elif echo "$task_text" | grep -qiE '\[ARCH\]|\[ARCHITECTURAL\]'; then
-        score=5
-        _complexity_debug "Annotation: ARCHITECTURAL"
-        echo "$score"
-        return "$score"
-    fi
-
-    # 2. Keyword analysis
+    local score=3
     local keyword_score=0
 
-    # High-complexity keywords (+2)
     if echo "$task_text" | grep -qiE 'architect|redesign|migrate|rewrite|overhaul|platform'; then
         keyword_score=$((keyword_score + 2))
         _complexity_debug "High-complexity keyword detected"
     fi
 
-    # Medium-complexity keywords (+1)
     if echo "$task_text" | grep -qiE 'refactor|integrate|implement|convert|restructure'; then
         keyword_score=$((keyword_score + 1))
         _complexity_debug "Medium-complexity keyword detected"
     fi
 
-    # Low-complexity keywords (-1)
     if echo "$task_text" | grep -qiE 'typo|comment|rename|bump|version|trivial|simple fix'; then
         keyword_score=$((keyword_score - 1))
         _complexity_debug "Low-complexity keyword detected"
@@ -90,7 +55,6 @@ ralph_classify_task_complexity() {
 
     score=$((score + keyword_score))
 
-    # 3. File count heuristic
     local file_count
     file_count=$(echo "$task_text" | grep -oiE '[a-zA-Z0-9_/.-]+\.(py|js|ts|sh|go|rs|java|rb|c|cpp|h)' | sort -u | wc -l)
     if [[ "$file_count" -ge 10 ]]; then
@@ -101,7 +65,6 @@ ralph_classify_task_complexity() {
         _complexity_debug "File count: $file_count (5+ files → +1)"
     fi
 
-    # 4. Multi-step indicators
     local step_count
     step_count=$(echo "$task_text" | grep -ciE '^\s*[-*]\s*\[.\]|step [0-9]|phase [0-9]|then |after that')
     if [[ "$step_count" -ge 5 ]]; then
@@ -109,7 +72,6 @@ ralph_classify_task_complexity() {
         _complexity_debug "Multi-step: $step_count steps detected"
     fi
 
-    # 5. Retry escalation
     if [[ "$retry_count" -ge 3 ]]; then
         score=$((score + 2))
         _complexity_debug "Retry escalation: $retry_count retries → +2"
@@ -118,13 +80,51 @@ ralph_classify_task_complexity() {
         _complexity_debug "Retry escalation: $retry_count retries → +1"
     fi
 
-    # Clamp to 1-5 range
     [[ "$score" -lt 1 ]] && score=1
     [[ "$score" -gt 5 ]] && score=5
 
-    _complexity_debug "Final score: $score"
     echo "$score"
-    return "$score"
+}
+
+ralph_classify_task_complexity() {
+    local task_text="${1:-}"
+    local retry_count="${2:-0}"
+    local ann_score=""
+    local hscore
+
+    hscore=$(_ralph_complexity_heuristic_score "$task_text" "$retry_count")
+
+    if echo "$task_text" | grep -qiE '\[TRIVIAL\]'; then
+        ann_score=1
+        _complexity_debug "Annotation: TRIVIAL"
+    elif echo "$task_text" | grep -qiE '\[SMALL\]'; then
+        ann_score=2
+        _complexity_debug "Annotation: SMALL"
+    elif echo "$task_text" | grep -qiE '\[MEDIUM\]'; then
+        ann_score=3
+        _complexity_debug "Annotation: MEDIUM"
+    elif echo "$task_text" | grep -qiE '\[LARGE\]'; then
+        ann_score=4
+        _complexity_debug "Annotation: LARGE"
+    elif echo "$task_text" | grep -qiE '\[ARCH\]|\[ARCHITECTURAL\]'; then
+        ann_score=5
+        _complexity_debug "Annotation: ARCHITECTURAL"
+    fi
+
+    if [[ -n "$ann_score" ]]; then
+        local diff=$((ann_score - hscore))
+        [[ "$diff" -lt 0 ]] && diff=$((0 - diff))
+        if [[ "$diff" -gt 1 ]]; then
+            echo "[WARN] complexity: task annotated [$(ralph_complexity_name "$ann_score")] but heuristic suggests [$(ralph_complexity_name "$hscore")]" >&2
+        fi
+        _complexity_debug "Final score (annotation): $ann_score"
+        echo "$ann_score"
+        return "$ann_score"
+    fi
+
+    _complexity_debug "Final score: $hscore"
+    echo "$hscore"
+    return "$hscore"
 }
 
 # ralph_complexity_name — Convert numeric score to name

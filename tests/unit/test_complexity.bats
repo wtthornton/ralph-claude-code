@@ -77,6 +77,17 @@ teardown() {
     [[ "$output" -ge 1 ]] && [[ "$output" -le 5 ]]
 }
 
+@test "TAP-677: annotation vs heuristic mismatch warns on stderr but keeps annotation" {
+    local task="[TRIVIAL] Update auth.py login.py register.py profile.py settings.py middleware.py api.py routes.py models.py views.py"
+    local errf="$BATS_TEST_TMPDIR/stderr.log"
+    # Do not use run — trivial score returns exit code 1 (same as bash return 1 quirk)
+    local stdout
+    stdout=$(ralph_classify_task_complexity "$task" 2>"$errf") || true
+    [[ "${stdout//$'\n'/}" -eq 1 ]]
+    grep -q 'annotated \[TRIVIAL\]' "$errf"
+    grep -q 'heuristic suggests' "$errf"
+}
+
 @test "ralph_complexity_name maps numbers to names" {
     [[ "$(ralph_complexity_name 1)" == "TRIVIAL" ]]
     [[ "$(ralph_complexity_name 2)" == "SIMPLE" ]]

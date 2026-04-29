@@ -1,8 +1,16 @@
-# Ralph Specification Workshop Guide
+---
+title: Specification workshop guide
+description: Three-Amigos collaborative specification workshop template for new Ralph features.
+audience: [contributor, maintainer]
+diataxis: how-to
+last_reviewed: 2026-04-23
+---
 
-**Based on**: Janet Gregory's "Three Amigos" collaborative testing approach
-**Purpose**: Facilitate productive specification conversations for new Ralph features
-**Audience**: Developers, Testers, Product Owners working on Ralph enhancements
+# Ralph specification workshop guide
+
+**Based on:** Janet Gregory's "Three Amigos" collaborative testing approach
+**Purpose:** Facilitate productive specification conversations for new Ralph features
+**Audience:** Developers, testers, product owners working on Ralph enhancements
 
 ---
 
@@ -448,6 +456,8 @@ What needs to happen next?
 
 ---
 
-**Last Updated**: 2025-10-01
-**Status**: Phase 2 Complete
-**Next**: Use this template for all new Ralph features
+## Related
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contribution workflow that workshop output feeds into
+- [docs/decisions/](docs/decisions/) — when a workshop produces a decision worth preserving, write an ADR
+- [docs/specs/README.md](docs/specs/README.md) — historical spec archive (frozen) for reference on past workshops

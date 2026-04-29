@@ -1,6 +1,14 @@
-# Ralph SDK Migration Strategy
+---
+title: Ralph SDK migration strategy
+description: Migration paths between Ralph's bash CLI, standalone SDK, and TheStudio embedded modes. Decision matrix and FAQ.
+audience: [operator, integrator]
+diataxis: how-to
+last_reviewed: 2026-04-23
+---
 
-**Version**: v2.0.0 | **Status**: Active
+# Ralph SDK migration strategy
+
+**Status:** active (neither CLI nor SDK is deprecated — see [ADR-0005](decisions/0005-bash-sdk-duality.md))
 
 ## Overview
 

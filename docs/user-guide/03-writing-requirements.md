@@ -1,4 +1,12 @@
-# Writing Effective Requirements
+---
+title: Writing effective requirements
+description: Good vs bad examples for PROMPT.md and fix_plan.md, plus when to use specs/.
+audience: [user]
+diataxis: how-to
+last_reviewed: 2026-04-23
+---
+
+# Writing effective requirements
 
 Ralph works best when it understands what you want. This guide shows you how to write clear requirements in PROMPT.md, when to use specs/, and how fix_plan.md evolves during development.
 
