@@ -1,632 +1,309 @@
-# Contributing to Ralph for Claude Code
-
-Thank you for your interest in contributing to Ralph! This guide will help you get started and ensure your contributions follow our established patterns and quality standards.
-
-**Every contribution matters** - from fixing typos to implementing major features. We appreciate your help in making Ralph better!
-
-## Table of Contents
-
-1. [Getting Started](#getting-started)
-2. [Development Workflow](#development-workflow)
-3. [Code Style Guidelines](#code-style-guidelines)
-4. [Testing Requirements](#testing-requirements)
-5. [Pull Request Process](#pull-request-process)
-6. [Code Review Guidelines](#code-review-guidelines)
-7. [Quality Standards](#quality-standards)
-8. [Community Guidelines](#community-guidelines)
-
+---
+title: Contributing to Ralph
+description: How to set up a development environment, write changes that pass CI, and get a pull request reviewed.
+audience: [contributor]
+diataxis: how-to
+last_reviewed: 2026-04-23
 ---
 
-## Getting Started
+# Contributing to Ralph
 
-### Prerequisites
+Thank you for considering a contribution. Ralph is a safety-critical piece of infrastructure — it runs autonomous loops against real Anthropic API quota and real project code — so we maintain a high bar on tests and behavior preservation. The guide below is shaped around that.
 
-Before contributing, ensure you have the following installed:
+> **TL;DR.** Fork → branch → write code + tests → `npm test` (1117+ tests must pass) → conventional commit → PR against `main`.
 
-- **Bash 4.0+** - For script execution
-- **jq** - JSON processing (required)
-- **git** - Version control (required)
-- **tmux** - Terminal multiplexer (recommended)
-- **Node.js 18+** - For running tests via npm
+## Table of contents
 
-### Clone the Repository
+- [Prerequisites](#prerequisites)
+- [Environment setup](#environment-setup)
+- [Repository map](#repository-map)
+- [Development workflow](#development-workflow)
+- [Code style](#code-style)
+- [Testing requirements](#testing-requirements)
+- [Commit and PR conventions](#commit-and-pr-conventions)
+- [Documentation requirements](#documentation-requirements)
+- [What NOT to change without discussion](#what-not-to-change-without-discussion)
+- [Code of conduct](#code-of-conduct)
+- [Getting help](#getting-help)
+
+## Prerequisites
+
+| Dependency | Why |
+|---|---|
+| **Bash 4.0+** | Ralph rejects older versions at startup |
+| **Node.js 18+** | Required by the BATS test harness |
+| **`jq`** | JSON parsing; almost every state file uses it |
+| **`git`** | Required — progress detection uses `git diff` |
+| **`tmux`** | Needed for monitor tests and manual validation |
+| **`gawk`** | mawk lacks `match(s, re, arr)` array capture used by the plan optimizer |
+| **GNU coreutils** (macOS) | `brew install coreutils` to get `gtimeout` |
+
+## Environment setup
 
 ```bash
-# Fork the repository on GitHub first, then clone your fork
+# 1. Fork on GitHub, then clone your fork
 git clone https://github.com/YOUR_USERNAME/ralph-claude-code.git
 cd ralph-claude-code
-```
 
-### Install Dependencies
-
-```bash
-# Install BATS testing framework and dependencies
+# 2. Install test tooling (BATS, bats-assert, bats-support)
 npm install
 
-# Verify BATS is available
-./node_modules/.bin/bats --version
-
-# Optional: Install Ralph globally for testing
-./install.sh
-```
-
-### Verify Your Setup
-
-```bash
-# Run the test suite to ensure everything works
+# 3. Run the full suite to confirm your environment works
 npm test
 
-# You should see output like:
-# ✓ N tests passed (100% pass rate) — run `npm test` for current N
+# 4. (Optional) Install Ralph globally for manual end-to-end testing
+./install.sh
+
+# 5. (Optional) Install the Python SDK for dev
+cd sdk
+pip install -e '.[dev]'
+cd ..
 ```
 
-### Project Structure
+Expected: 1117+ tests pass, 0 failures. If you see failures on a clean clone, file an issue before submitting a PR — something's wrong with your environment or the main branch.
+
+## Repository map
 
 ```
 ralph-claude-code/
-├── ralph_loop.sh        # Main loop script
-├── ralph_monitor.sh     # Live monitoring dashboard
-├── setup.sh             # Project initialization
-├── ralph_import.sh      # PRD import tool
-├── install.sh           # Global installation script
-├── lib/                 # Modular library components
-│   ├── circuit_breaker.sh
-│   ├── response_analyzer.sh
-│   └── date_utils.sh
-├── templates/           # Project templates (keep in sync with setup.sh / enable_core.sh defaults)
-├── docs/specs/          # Design epics, stories, RFCs (loop reliability, future Claude Code integration)
-├── tests/               # Test suite
-│   ├── unit/            # Unit tests
-│   ├── integration/     # Integration tests
-│   ├── e2e/             # End-to-end tests
-│   └── helpers/         # Test utilities
-└── docs/                # Documentation
+├── ralph_loop.sh              # Core autonomous loop (~2,500 lines)
+├── ralph_monitor.sh           # Live tmux monitoring dashboard
+├── ralph_enable.sh            # Interactive project enablement wizard
+├── ralph_enable_ci.sh         # Non-interactive enablement (CI/automation)
+├── ralph_import.sh            # PRD → Ralph task conversion
+├── ralph_upgrade_project.sh   # Propagate template updates to managed projects
+├── install.sh / uninstall.sh  # Global installation
+├── lib/                       # 20 library modules (see docs/ARCHITECTURE.md)
+├── sdk/ralph_sdk/             # Python SDK (17 modules, Pydantic v2, async)
+├── templates/                 # Project scaffolding (hooks, PROMPT.md, skills/global/)
+├── tests/
+│   ├── unit/                  # Isolated function tests (BATS)
+│   ├── integration/           # Component interaction tests (BATS)
+│   ├── e2e/                   # End-to-end with mock Claude CLI
+│   ├── evals/deterministic/   # 64 BATS tests pinning loop invariants
+│   ├── evals/stochastic/      # Live-LLM golden-file comparisons (nightly)
+│   └── helpers/               # test_helper.bash, mocks.bash, fixtures.bash
+├── docs/                      # User, operator, contributor docs
+├── .claude/                   # Claude Code agents, hooks, skills, settings
+├── .github/                   # CI, issue templates, CODEOWNERS
+└── CLAUDE.md                  # Invariants for AI agents working in this repo
 ```
 
----
+Full architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Development Workflow
+## Development workflow
 
-### Branch Naming Conventions
-
-Always create a feature branch - never work directly on `main`:
-
-| Branch Type | Format | Example |
-|-------------|--------|---------|
-| New features | `feature/<feature-name>` | `feature/log-rotation` |
-| Bug fixes | `fix/<issue-name>` | `fix/rate-limit-reset` |
-| Documentation | `docs/<doc-update>` | `docs/api-reference` |
-| Tests | `test/<test-area>` | `test/circuit-breaker` |
-| Refactoring | `refactor/<area>` | `refactor/response-analyzer` |
+### 1. Branch
 
 ```bash
-# Create a new feature branch
-git checkout -b feature/my-awesome-feature
+git switch -c <type>/<short-name>
 ```
 
-### Commit Message Format
+| Type | Example |
+|---|---|
+| `feature/` | `feature/token-budget-guardrail` |
+| `fix/` | `fix/circuit-breaker-race` |
+| `docs/` | `docs/glossary-cleanup` |
+| `test/` | `test/session-continuity-edge` |
+| `refactor/` | `refactor/metrics-extract-helper` |
+| `chore/` | `chore/bump-bats-assert` |
 
-We use [Conventional Commits](https://www.conventionalcommits.org/) for clear, structured commit history:
+### 2. Write
 
-```
-<type>(<scope>): <description>
+Follow the [code style](#code-style) below. Prefer editing existing files over creating new ones. If you're touching a module, re-read the module's comment header first — Ralph has a lot of hard-won invariants documented inline.
 
-[optional body]
-
-[optional footer]
-```
-
-**Types:**
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `feat` | New feature | `feat(loop): add dry-run mode` |
-| `fix` | Bug fix | `fix(monitor): correct refresh rate` |
-| `docs` | Documentation only | `docs(readme): update installation steps` |
-| `test` | Adding/updating tests | `test(setup): add template validation tests` |
-| `refactor` | Code change (no features/fixes) | `refactor(analyzer): simplify error detection` |
-| `chore` | Maintenance tasks | `chore(deps): update bats-assert` |
-
-**Examples from Recent Commits:**
+### 3. Test
 
 ```bash
-# Feature addition
-feat(import): add JSON output format support
+# Full suite — must pass before PR
+npm test
 
-# Bug fix with scope
-fix(loop): replace non-existent --prompt-file with -p flag
-
-# Documentation update
-docs(status): update IMPLEMENTATION_STATUS.md with phased structure
-
-# Test addition
-test(cli): add 27 comprehensive CLI parsing tests
+# Narrow to a specific area while iterating
+npm run test:unit
+npm run test:integration
+bats tests/unit/test_rate_limiting.bats
+bats --filter "can_make_call" tests/unit/test_rate_limiting.bats
 ```
 
-**Writing Good Commit Messages:**
+### 4. Commit
 
-- Use imperative mood ("add" not "added")
-- Explain WHAT changed and WHY (not HOW)
-- Keep the subject line under 72 characters
-- Reference issues when applicable (`fixes #123`)
+Use [conventional commits](#commit-and-pr-conventions).
 
-### Workflow Diagram
+### 5. Push and open a PR
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Contribution Workflow                            │
-└─────────────────────────────────────────────────────────────────────┘
+Target `main`. Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md). Fill in:
 
-  ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-  │  1. Fork │────>│ 2. Clone │────>│ 3. Branch│────>│ 4. Code  │
-  └──────────┘     └──────────┘     └──────────┘     └──────────┘
-                                                           │
-                                                           v
-  ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-  │ 8. Merge │<────│  7. PR   │<────│ 6. Push  │<────│ 5. Test  │
-  └──────────┘     │ Approved │     └──────────┘     │ (100%)   │
-                   └──────────┘                      └──────────┘
-                        ^
-                        │
-                   ┌──────────┐
-                   │  CI/CD   │
-                   │  Passes  │
-                   └──────────┘
-```
+- **Summary** — 1-3 bullets describing what changed and why.
+- **Test plan** — exactly how a reviewer should verify it.
+- **Breaking changes** — explicit, even if "none."
+- **Related issues** — `Fixes #123`, `Related to #456`.
 
----
+## Code style
 
-## Code Style Guidelines
-
-### Bash Best Practices
-
-Ralph follows consistent bash conventions across all scripts:
-
-**File Structure:**
+### Bash
 
 ```bash
 #!/bin/bash
-# Script description
-# Purpose and usage notes
+# Purpose: one-line description
+# Invariants: what must not break
 
-# Source dependencies
+set -o pipefail  # always
+
 source "$(dirname "${BASH_SOURCE[0]}")/lib/date_utils.sh"
 
-# Configuration constants (UPPER_CASE)
-MAX_CALLS_PER_HOUR=100
-CB_NO_PROGRESS_THRESHOLD=3
+# UPPER_SNAKE_CASE for constants
+MAX_CALLS_PER_HOUR=200
 STATUS_FILE="status.json"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# Helper functions (snake_case)
-helper_function() {
-    local param1=$1
-    local param2=$2
-    # Implementation
-}
-
-# Main logic
-main() {
-    # Entry point
-}
-
-# Export functions for reuse
-export -f helper_function
-
-# Execute main if run directly
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
-fi
-```
-
-**Naming Conventions:**
-
-| Element | Convention | Example |
-|---------|------------|---------|
-| Functions | snake_case | `get_circuit_state()` |
-| Local variables | snake_case | `local loop_count=0` |
-| Constants | UPPER_SNAKE_CASE | `MAX_CALLS_PER_HOUR` |
-| File names | snake_case.sh | `circuit_breaker.sh` |
-| Control files | snake_case.md | `fix_plan.md`, `AGENT.md` |
-
-**Function Documentation:**
-
-```bash
-# Get current circuit breaker state
-# Returns the state as a string: CLOSED, HALF_OPEN, or OPEN
-# Falls back to CLOSED if state file doesn't exist
+# snake_case for functions and local variables
 get_circuit_state() {
-    if [[ ! -f "$CB_STATE_FILE" ]]; then
-        echo "$CB_STATE_CLOSED"
+    local state_file="${1:?state_file required}"
+    if [[ ! -f "$state_file" ]]; then
+        echo "CLOSED"
         return
     fi
-
-    jq -r '.state' "$CB_STATE_FILE" 2>/dev/null || echo "$CB_STATE_CLOSED"
+    jq -r '.state' "$state_file" 2>/dev/null || echo "CLOSED"
 }
 ```
 
-**Error Handling:**
+Invariants Ralph scripts must uphold:
 
-```bash
-# Always validate inputs
-if [[ -z "$1" ]]; then
-    echo -e "${RED}Error: Missing required argument${NC}" >&2
-    exit 1
-fi
+- **`pipefail`** after library sourcing. Silent pipeline failures are the top source of historical bugs.
+- **`atomic_write`** for every counter or state-file write. Never `>` directly into `.ralph/`.
+- **`tr -cd '0-9'`** on any `grep -c` or `wc -l` output before arithmetic (the `grep -c | echo "0"` pitfall).
+- **`set -u` compatibility** — always `${var:-default}` any variable that may be unset.
+- **Cross-platform** — `gdate`/`date`, `gtimeout`/`timeout`, `PPID==1` orphan detection on Linux vs Windows CIM queries.
+- **Reentrant signal handlers** — cleanup traps must handle being called twice.
 
-# Use proper exit codes
-# 0 = success, 1 = general error, 2 = invalid usage
-```
+### Python (SDK)
 
-**Cross-Platform Compatibility:**
+- **Pydantic v2** for all data models, frozen where semantics allow (e.g. `TaskInput`).
+- **Fully async** agent loop. Sync wrappers via `run_sync()` only.
+- **Protocols over inheritance** — `RalphStateBackend`, `MemoryBackend`, `MetricsCollector` are Protocols.
+- **Type hints everywhere.** Pass `mypy --strict` or equivalent.
+- **Tests** mirror bash test counterparts 1:1 for features that exist in both runtimes.
 
-```bash
-# Use portable date commands
-if command -v gdate &> /dev/null; then
-    DATE_CMD="gdate"  # macOS with coreutils
-else
-    DATE_CMD="date"   # Linux
-fi
-```
+### Hooks (`templates/hooks/*.sh`)
 
-**JSON State Management:**
+- `templates/hooks/` is the source of truth. The repo's own `.ralph/hooks/` is kept byte-identical; a unit test enforces this.
+- Hooks must self-heal corrupt state files (e.g. `.circuit_breaker_state`) with a WARN, never crash the loop.
+- Hooks are advisory for loop correctness — the loop must tolerate a hook returning garbage.
 
-```bash
-# Always validate JSON before parsing
-if ! jq '.' "$STATE_FILE" > /dev/null 2>&1; then
-    echo "Error: Invalid JSON in state file"
-    return 1
-fi
+## Testing requirements
 
-# Use jq for safe parsing
-local state=$(jq -r '.state' "$STATE_FILE" 2>/dev/null || echo "CLOSED")
-```
+| Requirement | Status | Notes |
+|---|---|---|
+| Unit tests pass | **Blocking** | `npm run test:unit` |
+| Integration tests pass | **Blocking** (TAP-537) | `npm run test:integration` — no more `\|\| true` masking |
+| Deterministic evals pass | **Blocking** | `npm run test:evals:deterministic` — 64 cases pinning loop invariants |
+| Stochastic evals pass | Informational | Nightly/manual; live LLM calls; Wilson score CI |
+| kcov coverage | Informational | Subprocess tracing is structurally incomplete in BATS |
+| New feature has tests | **Required** | PR reviewer will ask |
 
----
+See [TESTING.md](TESTING.md) for the hands-on guide, including mock/fixture conventions.
 
-## Testing Requirements
+### Test writing contract
 
-### Mandatory Testing Standards
+- **One behavior per `@test`.** Prefer 5 focused tests over 1 combined test.
+- **Isolate** — each test sets up its own temp dir, restores state in teardown.
+- **Descriptive names** — read as documentation: `@test "can_make_call returns failure when at limit"`.
+- **No external dependencies** — mock Claude CLI, tmux, git where reasonable; use real git only in integration tests.
 
-**All new features must include tests. This is non-negotiable.**
+## Commit and PR conventions
 
-| Requirement | Standard | Enforcement |
-|-------------|----------|-------------|
-| Test Pass Rate | 100% | **Mandatory** - CI blocks merge |
-| Test Coverage | 85% | Aspirational - informational only |
-
-> **Note on Coverage:** Bash code coverage with kcov cannot trace subprocess executions. Test pass rate is the enforced quality gate, not coverage percentage.
-
-### Test Organization
+### Conventional commit format
 
 ```
-tests/
-├── unit/                       # Fast, isolated tests
-│   ├── test_cli_parsing.bats   # CLI argument tests
-│   ├── test_json_parsing.bats  # JSON output parsing
-│   ├── test_exit_detection.bats
-│   ├── test_rate_limiting.bats
-│   ├── test_session_continuity.bats
-│   └── test_cli_modern.bats
-├── integration/                # Multi-component tests
-│   ├── test_loop_execution.bats
-│   ├── test_edge_cases.bats
-│   ├── test_installation.bats
-│   ├── test_project_setup.bats
-│   └── test_prd_import.bats
-├── e2e/                        # End-to-end workflows
-└── helpers/
-    └── test_helper.bash        # Shared test utilities
+<type>(<scope>): <summary>
+
+<body — what changed and why>
+
+<footer — refs, breaking changes>
 ```
 
-### Running Tests
+Types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `perf`, `ci`.
 
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| `npm test` | Run all tests | Before committing, before PR |
-| `npm run test:unit` | Unit tests only | During development |
-| `npm run test:integration` | Integration tests only | Testing interactions |
-| `bats tests/unit/test_file.bats` | Single test file | Debugging specific tests |
+Good commits explain the **why**, not the **what**:
 
-### Writing Tests
+```
+fix(linear): retry In Progress tickets before picking new backlog work
 
-**Test Structure:**
+Root cause of branch pile-up in Linear-backed projects: self-merge blocked
+by CI / branch protection → ticket left In Progress → Ralph picks a fresh
+backlog ticket next loop → repeat until the project has dozens of
+unmerged branches and no commits on main.
 
-```bash
-#!/usr/bin/env bats
-# Unit Tests for Feature X
-
-load '../helpers/test_helper'
-
-# Setup runs before each test
-setup() {
-    source "$(dirname "$BATS_TEST_FILENAME")/../helpers/test_helper.bash"
-
-    # Create isolated test environment
-    export TEST_TEMP_DIR="$(mktemp -d /tmp/ralph-test.XXXXXX)"
-    cd "$TEST_TEMP_DIR"
-
-    # Initialize test state
-    echo "0" > ".call_count"
-}
-
-# Teardown runs after each test
-teardown() {
-    cd /
-    rm -rf "$TEST_TEMP_DIR"
-}
-
-# Test: Descriptive name explaining what's being tested
-@test "can_make_call returns success when under limit" {
-    echo "50" > ".call_count"
-    export MAX_CALLS_PER_HOUR=100
-
-    run can_make_call
-    assert_success
-}
-
-# Test: Failure case
-@test "can_make_call returns failure when at limit" {
-    echo "100" > ".call_count"
-    export MAX_CALLS_PER_HOUR=100
-
-    run can_make_call
-    assert_failure
-}
+Add linear_get_in_progress_task() (queries state.type == "started") and
+inject the highest-priority result into build_loop_context as
+"RESUME IN PROGRESS (do this FIRST)"...
 ```
 
-**Test Best Practices:**
-
-1. **Test both success and failure cases**
-2. **Use descriptive test names** that explain the scenario
-3. **Isolate tests** - each test should be independent
-4. **Mock external dependencies** (Claude CLI, tmux, etc.)
-5. **Test edge cases** (empty files, invalid input, boundary values)
-6. **Add comments** for complex test scenarios
-
-**Available Test Helpers:**
-
-```bash
-# From tests/helpers/test_helper.bash
-
-assert_success      # Check command succeeded (exit 0)
-assert_failure      # Check command failed (exit != 0)
-assert_equal        # Compare two values
-assert_output       # Check command output
-assert_file_exists  # Verify file exists
-assert_dir_exists   # Verify directory exists
-strip_colors        # Remove ANSI color codes
-create_mock_prompt  # Create test PROMPT.md
-create_mock_fix_plan # Create test fix_plan.md
-create_mock_status  # Create test status.json
-```
-
----
-
-## Pull Request Process
-
-### Before Creating a PR
-
-Run through this checklist:
-
-- [ ] All tests pass locally (`npm test`)
-- [ ] New code includes appropriate tests
-- [ ] Commits follow conventional format
-- [ ] Documentation updated if needed
-- [ ] No debug code or console.log statements
-- [ ] No secrets or credentials committed
-
-### Creating the PR
-
-1. **Push your branch:**
-   ```bash
-   git push origin feature/my-feature
-   ```
-
-2. **Open a Pull Request** on GitHub with:
-
-**PR Title:** Follow conventional commit format
-```
-feat(loop): add dry-run mode for testing
-```
-
-**PR Description Template:**
-```markdown
-## Summary
-
-Brief description of what this PR does (1-3 bullet points).
-
-- Adds dry-run mode to preview loop execution
-- Includes new CLI flag `--dry-run`
-- Logs actions without making actual changes
-
-## Test Plan
-
-- [ ] Unit tests added/updated
-- [ ] Integration tests added/updated
-- [ ] Manual testing completed
-
-## Related Issues
-
-Fixes #123
-Related to #456
-
-## Screenshots (if applicable)
-
-[Add screenshots for UI/output changes]
-
-## Breaking Changes
-
-[List any breaking changes, or "None"]
-```
-
-### After PR Creation
-
-1. **Wait for CI/CD** - GitHub Actions will run all tests
-2. **Address review feedback** - Make requested changes promptly
-3. **Keep PR updated** - Rebase if main branch has changed
-
----
-
-## Code Review Guidelines
-
-### For Contributors
-
-**Responding to Feedback:**
-
-- Thank reviewers for their time
-- Ask questions if requirements are unclear
-- Make requested changes promptly
-- Update PR description as changes evolve
-- Don't take feedback personally - it's about the code
-
-**If You Disagree:**
-
-- Explain your reasoning clearly
-- Provide context for your decisions
-- Be open to alternative approaches
-- Defer to maintainer judgment when in doubt
-
-### For Reviewers
-
-**What to Check:**
-
-| Area | Questions to Ask |
-|------|------------------|
-| **Correctness** | Does the code do what it claims? |
-| **Tests** | Are tests comprehensive? Do they pass? |
-| **Style** | Does it follow bash conventions? |
-| **Documentation** | Are comments and docs updated? |
-| **Breaking Changes** | Will this affect existing users? |
-| **Performance** | Any obvious performance issues? |
-
-**Review Best Practices:**
-
-1. **Be constructive** - Focus on improvements, not criticism
-2. **Be specific** - Point to exact lines when possible
-3. **Explain why** - Help contributors learn
-4. **Acknowledge good work** - Note well-written code
-5. **Approve when ready** - Don't hold PRs hostage
-
----
-
-## Quality Standards
-
-### Quality Gates
-
-All PRs must pass these automated checks:
-
-| Gate | Requirement | Enforcement |
-|------|-------------|-------------|
-| Unit Tests | 100% pass | **Blocks merge** |
-| Integration Tests | 100% pass | **Blocks merge** |
-| Coverage | 85% | Informational only |
-| Conventional Commits | Required | Manual review |
-| Documentation | Updated | Manual review |
-
-### Documentation Standards
-
-**When to Update Documentation:**
-
-- Adding new CLI flags → Update README.md, CLAUDE.md
-- Adding new features → Update README.md "Features" section
-- Changing behavior → Update relevant docs
-- Adding new patterns → Update CLAUDE.md
-
-**Keep in Sync:**
-
-1. **CLAUDE.md** - Technical specifications, quality standards
-2. **README.md** - User-facing documentation, installation
-3. **Templates** - Keep template files current
-4. **Inline comments** - Update when code changes
-
-### Feature Completion Checklist
-
-Before marking any feature complete:
-
-- [ ] All tests pass (100% pass rate)
-- [ ] Script functionality manually tested
-- [ ] Commits follow conventional format
-- [ ] All commits pushed to remote
-- [ ] CI/CD pipeline passes
-- [ ] CLAUDE.md updated (if new patterns)
-- [ ] README.md updated (if user-facing)
-- [ ] Breaking changes documented
-- [ ] Installation verified (if applicable)
-
----
-
-## Community Guidelines
-
-### Priority Contribution Areas
-
-**High Priority - Help Needed!**
-
-1. **Test Implementation** - Expand test coverage
-   - See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for specifications
-
-2. **Feature Development**
-   - Log rotation functionality
-   - Dry-run mode
-   - Config file support (.ralphrc)
-   - Metrics tracking
-   - Desktop notifications
-   - Backup/rollback system
-
-3. **Documentation**
-   - Usage tutorials and examples
-   - Troubleshooting guides
-   - Video walkthroughs
-
-4. **Real-World Testing**
-   - Use Ralph on your projects
-   - Report bugs and edge cases
-   - Share your experience
-
-### Communication
-
-**Before Major Changes:**
-
-- Open an issue for discussion
-- Check existing issues for planned work
-- Join discussions on pull requests
-
-**Getting Help:**
-
-- Review documentation first (README.md, CLAUDE.md)
-- Check [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for roadmap
-- Open issues for questions
-- Reference related issues in discussions
-
-### Code of Conduct
-
-- Be respectful and professional
-- Welcome newcomers and help them succeed
-- Focus on constructive feedback
-- Assume good intentions
-- Celebrate diverse perspectives
-
-### Recognition
-
-- All contributors acknowledged in release notes
-- Significant contributions noted in README
-- Active contributors may become maintainers
-
----
-
-## Additional Resources
-
-- [README.md](README.md) - Project overview and quick start
-- [CLAUDE.md](CLAUDE.md) - Technical specifications
-- [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) - Development roadmap
-- [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) - Progress tracking
-- [GitHub Issues](https://github.com/frankbria/ralph-claude-code/issues) - Bug reports and feature requests
-
----
-
-**Thank you for contributing to Ralph!** Your efforts help make autonomous AI development more accessible to everyone.
+### PR checklist
+
+Before requesting review:
+
+- [ ] `npm test` passes locally (all 1117+ tests)
+- [ ] New code has tests (unit + integration if applicable)
+- [ ] Commit messages follow conventional format
+- [ ] No debug prints, commented-out code, or TODO-style cruft
+- [ ] No secrets, credentials, or machine-specific paths
+- [ ] `CHANGELOG.md` updated under `[Unreleased]` for user-visible changes
+- [ ] `CLAUDE.md` updated if you introduced a new pattern or invariant
+- [ ] Version-sync invariant preserved if bumping (`package.json` + `RALPH_VERSION` in `ralph_loop.sh`)
+
+### Responding to review
+
+- Make requested changes promptly.
+- Ask questions when requirements are unclear. Don't guess.
+- Rebase on `main` if conflicts arise (not merge).
+- Explain your reasoning when you disagree — reviewers are human, and "because I said so" PRs waste everyone's time.
+
+## Documentation requirements
+
+Docs are checked into the repo. When you change behavior, update docs in the same PR. The mapping:
+
+| Change type | Update |
+|---|---|
+| New CLI flag | [README.md](README.md) + [docs/cli-reference.md](docs/cli-reference.md) |
+| New config var | [README.md](README.md) + [templates/ralphrc.template](templates/ralphrc.template) + [CLAUDE.md](CLAUDE.md) config section |
+| New module (`lib/` or `sdk/`) | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) + [CLAUDE.md](CLAUDE.md) module table |
+| New failure mode | [FAILURE.md](FAILURE.md) + matrix table |
+| New safe default | [FAILSAFE.md](FAILSAFE.md) + degradation hierarchy |
+| New design decision | [docs/decisions/](docs/decisions/) — add an ADR |
+| User-visible release | [CHANGELOG.md](CHANGELOG.md) |
+| New term worth defining | [docs/GLOSSARY.md](docs/GLOSSARY.md) |
+
+When in doubt: grep the codebase for the thing you're changing, and update every doc that mentions it.
+
+## What NOT to change without discussion
+
+Ralph has a few load-bearing invariants that cost real incidents to arrive at. Don't alter them without a design review:
+
+1. **The dual-condition exit gate.** Not one condition, not three. See [ADR-0001](docs/decisions/0001-dual-condition-exit-gate.md).
+2. **Hook-based response analysis.** Don't move parsing back into the loop. See [ADR-0002](docs/decisions/0002-hook-based-response-analysis.md).
+3. **Fail-loud on Linear API errors.** API failure must **abstain**, never default to "plan complete" (TAP-536).
+4. **Atomic state writes + `pipefail`.** Every counter write goes through `atomic_write` (TAP-535).
+5. **Epic-boundary QA deferral.** QA runs at epic boundaries, not every loop. See [ADR-0004](docs/decisions/0004-epic-boundary-qa-deferral.md).
+6. **`templates/hooks/` is canonical.** The repo's `.ralph/hooks/` must be byte-identical; a unit test enforces this.
+7. **Version sync.** `package.json` and `RALPH_VERSION` in `ralph_loop.sh` must match. A test enforces this.
+
+Opening a design-discussion issue for any of these is fine — changing them without one is not.
+
+## Code of conduct
+
+- Be respectful and professional.
+- Assume good intentions.
+- Welcome newcomers and help them succeed.
+- Focus criticism on the code, not the person.
+- Celebrate diverse perspectives.
+
+## Getting help
+
+- **Architecture questions** → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **Terminology** → [docs/GLOSSARY.md](docs/GLOSSARY.md)
+- **Design decisions** → [docs/decisions/](docs/decisions/)
+- **Runtime issues** → [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- **Ralph-for-AI guidance** → [CLAUDE.md](CLAUDE.md)
+- **Bugs + features** → [GitHub Issues](https://github.com/wtthornton/ralph-claude-code/issues)
+
+Thank you for contributing.

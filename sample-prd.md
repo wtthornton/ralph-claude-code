@@ -1,4 +1,14 @@
-# Task Management Web App - Product Requirements Document
+---
+title: "Sample PRD: Task management web app"
+description: Example PRD format suitable for ralph-import. Demonstrates the expected structure for product requirements that Ralph converts to fix_plan.md tasks.
+audience: [user]
+diataxis: reference
+last_reviewed: 2026-04-23
+---
+
+# Task management web app — product requirements document
+
+> **This is a sample PRD** used to demonstrate the format [ralph-import](README.md#quick-start) expects. Run `ralph-import sample-prd.md my-app` to convert it into a Ralph-managed project with a populated `.ralph/fix_plan.md`.
 
 ## Overview
 Build a modern task management web application similar to Todoist/Asana for small teams and individuals.

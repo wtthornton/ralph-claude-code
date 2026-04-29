@@ -1,6 +1,14 @@
-# Ralph SDK Guide
+---
+title: Ralph Python SDK guide
+description: Embed Ralph's autonomous loop in a Python application via the async SDK — modules, models, state backend, cost tracking.
+audience: [integrator, contributor]
+diataxis: reference
+last_reviewed: 2026-04-23
+---
 
-**Version**: v2.1.0 | **Requirements**: Python 3.12+, pydantic>=2.0, aiofiles>=24.0
+# Ralph Python SDK guide
+
+**Version:** v2.1.0 • **Requirements:** Python 3.12+, `pydantic>=2.0`, `aiofiles>=24.0`
 
 ## Overview
 
@@ -423,6 +431,6 @@ All state files are shared between CLI and SDK modes:
 from ralph_sdk.versions import get_versions
 
 versions = get_versions()
-print(versions.ralph_sdk)  # "2.1.0"
-print(versions.ralph_loop)  # "2.6.0"
+print(versions.ralph_sdk)   # "2.1.0"
+print(versions.ralph_loop)  # "2.8.3"
 ```

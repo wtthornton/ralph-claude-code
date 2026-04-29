@@ -1,223 +1,67 @@
-# Ralph for Claude Code - Implementation Plan
-
-**Version**: v2.0.1 | **Tests**: 736+ passing (100% pass rate) | **CI/CD**: GitHub Actions
-
+---
+title: Implementation plan
+description: Ralph's historical development plan. All 148 stories across 50 epics are complete; current work is tracked in Linear.
+audience: [contributor, maintainer]
+diataxis: reference
+last_reviewed: 2026-04-23
 ---
 
-## Current Phase
+# Implementation plan
 
-### Phase 1: CLI Modernization (In Progress)
+> **Status: historical.** Ralph's original phase-based implementation plan completed in v2.6.0. All **148 stories across 50 epics** (Phases 0-17) shipped. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for the delivery summary. Current development is tracked in the **[TappsCodingAgents](https://linear.app/) Linear workspace** and per-issue via [TAP-XXX](https://linear.app/) tickets referenced in [CHANGELOG.md](CHANGELOG.md).
 
-Phase 1 focuses on modernizing Ralph's CLI integration with Claude Code, including JSON output parsing, session management, and documentation.
+## Current development model
 
-**Status**: Complete. All Phase 1 issues closed including session expiration (#51) and documentation (#24-#27).
+Ralph is in a post-roadmap phase. The historical "phases" structure that appeared in this file (Phase 1: CLI Modernization, Phase 2: SDK Integration, …) is complete. Ongoing work falls into three categories:
 
-| Issue | Title | Priority | Status |
-|-------|-------|----------|--------|
-| #51 | Phase 1.5: Implement session expiration for .claude_session_id | P2 | Closed |
-| #24 | Phase 1.9: Create TESTING.md documentation | P3 | Closed |
-| #25 | Phase 1.10: Create CONTRIBUTING.md guide | P3 | Closed |
-| #26 | Phase 1.11: Update README with testing instructions | P3 | Closed |
-| #27 | Phase 1.12: Add badges to README | P3 | Closed |
+| Category | Where it's tracked |
+|---|---|
+| **Reliability fixes + features** | Linear tickets (`TAP-XXX`) → [CHANGELOG.md](CHANGELOG.md) |
+| **New design decisions** | [docs/decisions/](docs/decisions/) ADRs |
+| **Open backlog in GitHub** | [Issues](https://github.com/wtthornton/ralph-claude-code/issues) |
 
-**Completed Phase 1 Issues**: #28 (CLI commands), #29 (JSON parsing), #30 (session management), #31 (ralph-import), #48 (security), #50 (input validation)
+The full epic/story history lives in [docs/specs/](docs/specs/) — **frozen** as provenance, not rewritten.
 
----
+## Completed phases (high-level)
 
-## Planned Development
+| Phase | Focus | Version delivered |
+|---|---|---|
+| Phase 0 | Core autonomous loop, circuit breaker, rate limiting | v1.0 |
+| Phase 1 | CLI modernization, session continuity, JSON output | v0.9.x |
+| Phase 2 | Agent SDK integration (proof of concept) | v2.0.0 |
+| Phase 3 | Configuration, JSON config, metrics, notifications, backup | v1.8.x |
+| Phase 4 | Validation testing (tmux, monitor, status, E2E) | v1.8.x |
+| Phase 5 | Stream parser v2, WSL reliability polish | v1.2.0 |
+| Phase 6 | SDK Agent integration — hybrid CLI/SDK architecture | v2.0.0 |
+| Phase 7 | JSON config, SDK installation, CLI + SDK docs | v1.8.x |
+| Phase 8 | Metrics, notifications, backup/rollback | v1.8.x |
+| Phase 9 | Validation testing (CLI, SDK, backward compat, E2E) | v1.8.x |
+| Phase 10 | GitHub Issues integration | v1.8.x |
+| Phase 11 | Docker sandbox v1 | v1.8.x |
+| Phase 12 | Hooks, sub-agents, skills, bash reduction | v1.0.0 |
+| Phase 13 | Guard rails, circuit breaker decay, adaptive timeout, stream capture | v2.0.x |
+| Phase 14 | OTel tracing, sandbox v2, cross-session memory, cost routing | v2.3.0 |
+| Phase 15 | Enable wizard hardening | v2.1.0 |
+| Phase 16 | LOGFIX — production bug fixes from log analysis | v2.2.0 |
+| Phase 17 | Upstream sync (USYNC) — question detection, CB permission-denial, stuck loop | v2.5.0 |
 
-### Phase 2: Agent SDK Integration (P2)
+## Architecture decisions
 
-Migrate from CLI-only execution to a hybrid CLI/SDK architecture using Claude's Agent SDK.
+Where a phase produced a decision worth preserving, we wrote it up as an ADR:
 
-| Issue | Title | Priority | Status |
-|-------|-------|----------|--------|
-| #32 | Phase 2.1: Create Agent SDK proof of concept | P2 | Open |
-| #33 | Phase 2.2: Define custom tools for Agent SDK | P2 | Open |
-| #34 | Phase 2.3: Implement hybrid CLI/SDK architecture | P2 | Open |
-| #35 | Phase 2.4: Document SDK migration strategy | P2 | Open |
+- [ADR-0001](docs/decisions/0001-dual-condition-exit-gate.md) — Dual-condition exit gate
+- [ADR-0002](docs/decisions/0002-hook-based-response-analysis.md) — Hook-based response analysis
+- [ADR-0003](docs/decisions/0003-linear-task-backend.md) — Linear task backend with fail-loud abstention
+- [ADR-0004](docs/decisions/0004-epic-boundary-qa-deferral.md) — Epic-boundary QA deferral
+- [ADR-0005](docs/decisions/0005-bash-sdk-duality.md) — Bash + Python SDK duality
 
----
+## Current work
 
-### Phase 3: Configuration & Infrastructure (P2-P3)
+Open Linear tickets drive day-to-day work. See the `[Unreleased]` section of [CHANGELOG.md](CHANGELOG.md) for what's heading into the next release.
 
-Add configuration file support, infrastructure features, and advanced functionality.
+## Related
 
-| Issue | Title | Priority | Status |
-|-------|-------|----------|--------|
-| #36 | Phase 3.1: Add JSON configuration file support | P2 | Open |
-| #37 | Phase 3.2: Update installation for SDK support | P2 | Open |
-| #18 | Phase 3.4: Implement log rotation feature | P2 | Closed |
-| #19 | Phase 3.5: Implement dry-run mode feature | P2 | Closed |
-| #20 | Phase 3.6: Implement config file support (.ralphrc) | P2 | Closed |
-| #38 | Phase 3.3: Create CLI and SDK documentation | P3 | Open |
-| #21 | Phase 3.7: Implement metrics and analytics | P3 | Open |
-| #22 | Phase 3.8: Implement notification system | P3 | Open |
-| #23 | Phase 3.9: Implement backup and rollback system | P3 | Open |
-
----
-
-### Phase 4: Validation Testing (P2-P3)
-
-Comprehensive testing for all new features and integration scenarios.
-
-| Issue | Title | Priority | Status |
-|-------|-------|----------|--------|
-| #14 | Phase 4.4: Implement tmux integration tests | P2 | Open |
-| #15 | Phase 4.5: Implement monitor dashboard tests | P2 | Open |
-| #16 | Phase 4.6: Implement status update tests | P2 | Open |
-| #39 | Phase 4.1: Implement CLI enhancement tests | P3 | Open |
-| #40 | Phase 4.2: Implement SDK integration tests | P3 | Open |
-| #41 | Phase 4.3: Implement backward compatibility tests | P3 | Open |
-| #17 | Phase 4.7: Implement E2E full loop tests | P3 | Open |
-
----
-
-### Phase 5: GitHub Issue Integration (P4)
-
-Enable Ralph to import development plans directly from GitHub issues.
-
-| Issue | Title | Priority | Status |
-|-------|-------|----------|--------|
-| #69 | Phase 5.1: Allow plan import from GitHub Issue | P4 | Open |
-| #70 | Phase 5.2: Assess issue completeness and generate implementation plan | P4 | Open |
-| #71 | Phase 5.3: Filter and select GitHub issues by metadata | P4 | Open |
-| #72 | Phase 5.4: Batch processing and issue queue management | P4 | Open |
-| #73 | Phase 5.5: Issue lifecycle management and completion workflows | P4 | Open |
-
-**Summary**: Import single issues (#69), generate plans for incomplete issues (#70), filter by labels/assignees (#71), process multiple issues (#72), and manage issue lifecycle (#73).
-
----
-
-### Phase 6: Sandbox Execution Environments (P4)
-
-Run Ralph in isolated sandbox environments for security and reproducibility.
-
-| Issue | Title | Priority | Status |
-|-------|-------|----------|--------|
-| #49 | Phase 6.0: Sandbox execution environments (umbrella) | P4 | Open |
-| #74 | Phase 6.1: Local Docker Sandbox Execution | P4 | Open |
-| #75 | Phase 6.2: E2B Cloud Sandbox Integration | P4 | Open |
-| #76 | Phase 6.3: Sandbox File Synchronization | P4 | Open |
-| #77 | Phase 6.4: Sandbox Security and Resource Policies | P4 | Open |
-| #78 | Phase 6.5: Generic Sandbox Interface and Plugin Architecture | P4 | Open |
-| #79 | Phase 6.6: Daytona Sandbox Integration | P4 | Open |
-| #80 | Phase 6.7: Cloudflare Sandbox Integration | P4 | Open |
-
-**First-class providers**: Docker (local), E2B, Daytona, Cloudflare
-**Plugin-based** (via Phase 6.5): Gitpod, Codespaces, Modal, Replit, etc.
-
----
-
-## Priority Legend
-
-| Priority | Description | Target |
-|----------|-------------|--------|
-| **P0** | Critical - Foundation/Blocking | Immediate |
-| **P1** | High - Core features | Near-term |
-| **P2** | Medium - Important enhancements | Mid-term |
-| **P3** | Low - Nice to have | When available |
-| **P4** | Enhancements - New functionality | Future |
-
----
-
-## Implementation Order
-
-**Recommended sequence**:
-
-1. ~~**Phase 1 Completion** (P2-P3): Finish documentation and bug fixes~~ **Done**
-2. ~~**Phase 3 Core** (P2): Log rotation, dry-run, config file support~~ **Done**
-3. **Phase 4 Testing** (P2): tmux, monitor, status tests
-4. **Phase 2 SDK** (P2): Agent SDK integration (can run parallel with Phase 3)
-5. **Phase 3 Advanced** (P3): Metrics, notifications, backup
-6. **Phase 4 Validation** (P3): CLI, SDK, backward compatibility tests
-7. **Phase 5 GitHub** (P4): GitHub issue integration
-8. **Phase 6 Sandbox** (P4): Sandbox execution environments
-
----
-
-## Test Coverage
-
-**Current**: Run `npm test` for the live count (736+ as of v1.2.0); 17 test files under `tests/unit/` and `tests/integration/` (100% pass rate expected in CI)
-
-| Category | Tests | Files |
-|----------|-------|-------|
-| CLI Parsing | 27 | test_cli_parsing.bats |
-| CLI Modern | 29 | test_cli_modern.bats |
-| JSON Parsing | 36 | test_json_parsing.bats |
-| Session Continuity | 26 | test_session_continuity.bats |
-| Exit Detection | 20 | test_exit_detection.bats |
-| Rate Limiting | 15 | test_rate_limiting.bats |
-| Loop Execution | 20 | test_loop_execution.bats |
-| Edge Cases | 20 | test_edge_cases.bats |
-| Installation | 14 | test_installation.bats |
-| Project Setup | 36 | test_project_setup.bats |
-| PRD Import | 33 | test_prd_import.bats |
-
----
-
-## Completed Development
-
-<details>
-<summary>Click to expand completed work</summary>
-
-### Phase 1: CLI Modernization (Completed Issues)
-
-| Issue | Title | Status |
-|-------|-------|--------|
-| #28 | Phase 1.1: Update CLI commands with modern options | Closed |
-| #29 | Phase 1.2: Enhance response parsing for JSON output | Closed |
-| #30 | Phase 1.3: Add session management for continuity | Closed |
-| #31 | Phase 1.4: Update ralph-import with CLI enhancements | Closed |
-| #48 | MAJOR-01: Enhance shell escaping to prevent command injection | Closed |
-| #50 | MAJOR-02: Add input validation for --allowed-tools flag | Closed |
-
-### Testing Issues (Completed)
-
-| Issue | Title | Status |
-|-------|-------|--------|
-| #10 | Implement CLI parsing tests | Closed |
-| #11 | Implement installation tests | Closed |
-| #12 | Implement project setup tests | Closed |
-| #13 | Implement PRD import tests | Closed |
-
-### Bug Fixes (Completed)
-
-| Issue | Title | Status |
-|-------|-------|--------|
-| #1 | Cannot find file ~/.ralph/lib/response_analyzer.sh | Closed |
-| #2 | is_error: false triggers "error" circuit breaker incorrectly | Closed |
-| #5 | Bug: date: illegal option -- d on macOS | Closed |
-| #7 | Review codebase for updated Anthropic CLI | Closed |
-| #42 | Windows: Git Bash windows spawn when running Ralph loop | Closed |
-| #55 | --prompt-file flag does not exist in Claude Code CLI | Closed |
-
-### Other Completed
-
-| Issue | Title | Status |
-|-------|-------|--------|
-| #56 | Project featured in Awesome Claude Code! | Closed |
-| #63 | Fix IMPLEMENTATION_PLAN | Closed |
-
-</details>
-
----
-
-## Version History
-
-| Version | Key Changes |
-|---------|-------------|
-| v0.9.8 | Modern CLI for PRD import with JSON output |
-| v0.9.7 | Session lifecycle management with auto-reset |
-| v0.9.6 | JSON output and session management |
-| v0.9.5 | PRD import tests (22 tests) |
-| v0.9.4 | Project setup tests (36 tests) |
-| v0.9.3 | Installation tests (14 tests) |
-| v0.9.2 | Prompt file fix (-p flag) |
-| v0.9.1 | Modern CLI commands (Phase 1.1) |
-| v0.9.0 | Circuit breaker enhancements |
-
----
-
-**Last Updated**: 2026-03-21
-**Status**: All epic stories complete (66/66). Phases 0-11 delivered. SDK v2.0.0 released. Current: v2.0.1.
+- [CHANGELOG.md](CHANGELOG.md) — release-by-release summary
+- [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) — current state snapshot
+- [docs/specs/EPIC-STORY-INDEX.md](docs/specs/EPIC-STORY-INDEX.md) — index of all 50 epics
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — architectural overview

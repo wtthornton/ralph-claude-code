@@ -1,0 +1,63 @@
+# ralph-claude-code
+
+> > **Autonomous AI development loop with intelligent exit detection and rate limiting**
+
+- Version: 2.8.3
+- License: MIT
+- Homepage: https://github.com/frankbria/ralph-claude-code#readme
+
+## Tech Stack
+
+- Node.js
+- GitHub Actions
+
+## Entry Points
+
+- `sdk/.venv/lib/python3.12/site-packages/pydantic/main.py`
+- `sdk/.venv/lib/python3.12/site-packages/pydantic/v1/main.py`
+- `sdk/ralph_sdk/__main__.py`
+
+## Key Files
+
+- `README.md`
+- `CLAUDE.md`
+- `AGENTS.md`
+- `CONTRIBUTING.md`
+- `CHANGELOG.md`
+- `LICENSE`
+- `package.json`
+- `.tapps-mcp.yaml`
+
+## Documentation Map
+
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `CLAUDE.md`
+- `CONTRIBUTING.md`
+- `FAILSAFE.md`
+- `FAILURE.md`
+- `IMPLEMENTATION_PLAN.md`
+- `IMPLEMENTATION_STATUS.md`
+- `KILLSWITCH.md`
+- `README.md`
+- `RELEASE.md`
+- `SECURITY.md`
+- `SPECIFICATION_WORKSHOP.md`
+- `TESTING.md`
+- `sample-prd.md`
+- `docs/ARCHITECTURE.md`
+- `docs/GITHUB_SETUP_GUIDE.md`
+- `docs/GLOSSARY.md`
+- `docs/LINEAR-WORKFLOW.md`
+- `docs/OPERATIONS.md`
+- `docs/RALPH-STACK-GUIDE.md`
+- `docs/README.md`
+- `docs/TAPPS_MCP_REQUIREMENTS.md`
+- `docs/TROUBLESHOOTING.md`
+- `docs/api-reference.md`
+- `docs/archive/2025-10-milestones/EXPERT_PANEL_REVIEW.md`
+- `docs/archive/2025-10-milestones/PHASE1_COMPLETION.md`
+- `docs/archive/2025-10-milestones/PHASE2_COMPLETION.md`
+- `docs/archive/2025-10-milestones/README.md`
+- `docs/archive/2025-10-milestones/STATUS.md`
+- ... and 275 more

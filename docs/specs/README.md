@@ -1,6 +1,16 @@
+---
+title: Ralph design specifications
+description: Epic-and-story specification archive for the Ralph harness. Historical record — frozen by design.
+audience: [contributor, maintainer]
+diataxis: explanation
+last_reviewed: 2026-04-23
+---
+
 # Ralph design specifications
 
 This folder holds **specifications for the Ralph harness** (the bash loop, parsers, and Claude Code integration). It is **not** where application requirements live—those belong in **`.ralph/specs/`** inside each managed project.
+
+> **These docs are historical.** 148 of 148 stories across 50 epics are complete ([EPIC-STORY-INDEX.md](EPIC-STORY-INDEX.md)). Content is frozen as provenance — do not rewrite individual stories. For current development see [../../CHANGELOG.md](../../CHANGELOG.md) and the TappsCodingAgents Linear workspace.
 
 **Backlog rollup:** [EPIC-STORY-INDEX.md](EPIC-STORY-INDEX.md) is the canonical place for epic/story completion counts. When you close a phase, update that index and the **Stories** table in the matching epic file so they stay aligned.
 
@@ -15,7 +25,7 @@ This folder holds **specifications for the Ralph harness** (the bash loop, parse
 
 | Document | Topic |
 |----------|--------|
-| [claude-code-2026-enhancements.md](claude-code-2026-enhancements.md) | Draft: agents, hooks, skills, thinner bash orchestration (v1.0 direction) |
+| [claude-code-2026-enhancements.md](old/claude-code-2026-enhancements.md) | Draft: agents, hooks, skills, thinner bash orchestration (v1.0 direction) |
 
 ## Archived references
 

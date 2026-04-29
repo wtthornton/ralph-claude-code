@@ -1,8 +1,10 @@
 ---
 schema: killswitch-protocol/v1
 agent: ralph
-version: 2.0.0
-last_reviewed: 2026-03-22
+version: 2.0.1
+last_reviewed: 2026-04-23
+audience: [operator, security-reviewer]
+diataxis: reference
 ---
 
 # Ralph Emergency Stop Protocol

@@ -1,4 +1,12 @@
-# Ralph Stack Guide — Claude Code × tapps-mcp × tapps-brain
+---
+title: Ralph stack guide — Claude Code × tapps-mcp × tapps-brain
+description: Cost-optimization playbook for running Ralph with the full tool stack. Sub-agent routing, brain recall, MCP integration, per-loop templates.
+audience: [operator]
+diataxis: how-to
+last_reviewed: 2026-04-23
+---
+
+# Ralph stack guide — Claude Code × tapps-mcp × tapps-brain
 
 Practical reference for running Ralph with the full tool stack to **maximise work shipped per dollar**. Written after a 26-loop observed session where 4 force-multipliers (named sub-agents, tapps-brain, docs-mcp, context7) produced **zero calls** and the session still cost $52.98 on pure Opus-4-7 main-agent work.
 
@@ -18,7 +26,7 @@ Expected outcome on a 40-ticket backlog like NLTlabsPE: **$15 instead of $85**, 
 
 ### 1.1 Claude Code (me)
 
-**Tools available to the main ralph agent** (per [.claude/agents/ralph.md](.claude/agents/ralph.md)):
+**Tools available to the main ralph agent** (per [.claude/agents/ralph.md](../.claude/agents/ralph.md)):
 - `Read, Write, Edit` — file IO
 - `Glob, Grep` — local search (cheap, should be the first choice over `Bash(find …)` / `Bash(grep …)`)
 - `Bash` — shell with the ALLOWED_TOOLS whitelist

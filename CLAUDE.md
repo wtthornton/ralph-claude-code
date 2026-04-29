@@ -1,6 +1,23 @@
+---
+title: Claude Code guidance for the Ralph repository
+description: Contributor-facing reference that preserves Ralph's hard-won invariants for any AI agent working in this codebase. Do not introduce changes that contradict these without a design discussion.
+audience: [claude-code-agent, contributor]
+diataxis: reference
+last_reviewed: 2026-04-23
+---
+
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to [Claude Code](https://claude.ai/code) when working with code in this repository. Human contributors should read [CONTRIBUTING.md](CONTRIBUTING.md) first; this file documents the **invariants** that must be preserved across any change.
+
+Quick navigation:
+
+- **Architecture overview:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **Design decisions (ADRs):** [docs/decisions/](docs/decisions/)
+- **Terminology:** [docs/GLOSSARY.md](docs/GLOSSARY.md)
+- **Operations + troubleshooting:** [docs/OPERATIONS.md](docs/OPERATIONS.md) • [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- **Testing:** [TESTING.md](TESTING.md)
+- **Release process:** [RELEASE.md](RELEASE.md)
 
 ## Repository Overview
 
@@ -243,3 +260,81 @@ The version string exists in **two** files that **must stay in sync**:
 - **Scripts and libs** (`~/.ralph/`): Main scripts + `lib/` modules
 - **Templates** (`~/.ralph/templates/`): Project scaffolding templates
 - **Global Claude skills** (`~/.claude/skills/`): Tier S baseline synced from `templates/skills/global/` at install/upgrade time via `lib/skills_install.sh`. Ralph-installed skill dirs carry a `.ralph-managed` sidecar; user-authored skills or user-modified files are never touched (TAP-574). The canonical library is maintained in-repo under `templates/skills/global/<name>/` with `SKILL.md` + `examples/` — currently 5 Tier S skills (`search-first`, `tdd-workflow`, `simplify`, `context-audit`, `agentic-engineering`), each enforced by `tests/unit/test_skill_frontmatter.bats` + `test_skill_content.bats` (TAP-575).
+
+<!-- BEGIN: karpathy-guidelines c9a44ae (MIT, forrestchang/andrej-karpathy-skills) -->
+<!--
+  Vendored from https://github.com/forrestchang/andrej-karpathy-skills
+  Pinned commit: c9a44ae835fa2f5765a697216692705761a53f40 (2026-04-15)
+  License: MIT (c) forrestchang
+  Do not edit by hand — update KARPATHY_GUIDELINES_SOURCE_SHA in prompt_loader.py
+  and re-run the vendor script, then bump tapps-mcp version.
+-->
+## Karpathy Behavioral Guidelines
+
+> Source: https://github.com/forrestchang/andrej-karpathy-skills @ c9a44ae835fa2f5765a697216692705761a53f40 (MIT)
+> Derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on LLM coding pitfalls.
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+### 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+<!-- END: karpathy-guidelines -->

@@ -1,4 +1,12 @@
-# Linear Workflow for Ralph-Managed Projects
+---
+title: Linear workflow for Ralph-managed projects
+description: State-machine definitions and hard rules governing how Ralph moves Linear issues between Backlog, Todo, In Progress, In Review, and Done.
+audience: [operator, maintainer]
+diataxis: reference
+last_reviewed: 2026-04-23
+---
+
+# Linear workflow for Ralph-managed projects
 
 This is the source of truth for how Ralph (and the humans working alongside it) use Linear statuses. All Ralph-enabled projects in the `TappsCodingAgents` team follow this. The key enforcement points are the Ralph prompt at [ralph_loop.sh:2043](../ralph_loop.sh#L2043) and the backend query at [lib/linear_backend.sh:168](../lib/linear_backend.sh#L168).
 

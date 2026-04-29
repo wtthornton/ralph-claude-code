@@ -306,6 +306,7 @@ upgrade_agents() {
 
 # =============================================================================
 # Tier 1: Ralph-local skills — sync project-scoped skills into .claude/skills/
+#         and mirror the same SKILL.md into .cursor/skills/ for Cursor IDE.
 # =============================================================================
 # Mirrors upgrade_agents() but for skills that should only load when Claude
 # runs inside this project (vs. tier-S skills installed globally by
@@ -314,6 +315,7 @@ upgrade_agents() {
 upgrade_skills_local() {
     local project="$1"
     local skills_dst="$project/.claude/skills"
+    local cursor_skills_dst="$project/.cursor/skills"
 
     if [[ ! -d "$RALPH_SKILLS_LOCAL_SOURCE" ]]; then
         # No local skills shipped in this Ralph build — nothing to do. Not
@@ -370,12 +372,20 @@ upgrade_skills_local() {
             else
                 log DRY "Would create skill: $name"
             fi
+            log DRY "Would mirror skill to .cursor/skills/$name/SKILL.md"
         else
             create_backup "$project" ".claude/skills/$name/SKILL.md"
             mkdir -p "$dst_dir"
             [[ -f "$dst_skill" ]] && chmod u+w "$dst_skill" 2>/dev/null || true
             tr -d $'\r' < "$src_skill" > "$dst_skill"
             log SUCCESS "Updated skill: $name"
+            local cursor_dir="$cursor_skills_dst/$name"
+            local cursor_skill="$cursor_dir/SKILL.md"
+            create_backup "$project" ".cursor/skills/$name/SKILL.md"
+            mkdir -p "$cursor_dir"
+            [[ -f "$cursor_skill" ]] && chmod u+w "$cursor_skill" 2>/dev/null || true
+            tr -d $'\r' < "$src_skill" > "$cursor_skill"
+            log SUCCESS "Mirrored skill to Cursor: $name"
         fi
         PROJ_UPDATED=$((PROJ_UPDATED + 1))
     done

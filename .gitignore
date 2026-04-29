@@ -88,3 +88,6 @@ sdk/build/
 
 # Python testing cache
 .pytest_cache/
+
+# tapps_upgrade backup artifacts ($file.pre-upgrade.$epoch)
+*.pre-upgrade.*

@@ -1,220 +1,107 @@
-# Testing Guide for Ralph
-
-This guide provides comprehensive documentation for the Ralph test suite, helping contributors understand how to run, write, and maintain tests.
-
-**Current Status**: Run `npm test` for the live count (566+ as of v0.11.6 README) | 100% pass rate expected | CI/CD via GitHub Actions
-
+---
+title: Testing guide
+description: Run, write, debug, and maintain Ralph's BATS + evals test suite.
+audience: [contributor, operator]
+diataxis: how-to
+last_reviewed: 2026-04-23
 ---
 
-## Table of Contents
+# Testing Ralph
 
-1. [Quick Start](#quick-start)
-2. [Test Organization](#test-organization)
-3. [Writing Tests](#writing-tests)
-4. [Test Helpers](#test-helpers)
-5. [Coverage Requirements](#coverage-requirements)
-6. [CI/CD Integration](#cicd-integration)
-7. [Troubleshooting](#troubleshooting)
+Ralph has 1117+ tests across unit, integration, e2e, and evaluation layers. The quality gate is **100% pass rate**; coverage is informational.
 
----
+## Contents
 
-## Quick Start
+- [Quick start](#quick-start)
+- [Test layers](#test-layers)
+- [Writing tests](#writing-tests)
+- [Test helpers](#test-helpers)
+- [Evaluations](#evaluations)
+- [CI pipeline](#ci-pipeline)
+- [Debugging test failures](#debugging-test-failures)
+- [Local vs CI differences](#local-vs-ci-differences)
 
-### Prerequisites
-
-Ensure you have the following installed:
-
-```bash
-# Node.js 18+ and npm
-node --version  # Should show v18+
-npm --version
-
-# jq for JSON processing
-jq --version    # Used by test fixtures
-
-# git for integration tests
-git --version
-```
-
-### Install Test Dependencies
+## Quick start
 
 ```bash
+# Install BATS + bats-assert + bats-support (one time)
 npm install
-```
 
-This installs:
-- **bats** (v1.12.0) - Bash Automated Testing System
-- **bats-assert** - Assertion library
-- **bats-support** - Support functions
-
-### Run All Tests
-
-```bash
-# Run the complete test suite (unit + integration)
+# Run the full suite
 npm test
 
-# Expected output:
-# 1..N   (N increases as tests are added)
-# ok 1 - ...
-# ok 2 - ...
-# ...
-# N tests, 0 failures (see npm test output for N)
-```
-
-### Run Tests by Category
-
-```bash
-# Unit tests only (fast, isolated function tests)
+# Narrower slices while iterating
 npm run test:unit
-
-# Integration tests only (component interaction tests)
 npm run test:integration
-
-# E2E tests only (full workflow tests)
 npm run test:e2e
-```
+npm run test:evals:deterministic
 
-### Run Individual Test Files
-
-```bash
-# Run a specific test file
+# Single file or pattern
 bats tests/unit/test_rate_limiting.bats
+bats --filter "can_make_call" tests/unit/test_rate_limiting.bats
 
-# Run with verbose output for debugging
-bats --verbose-run tests/unit/test_cli_parsing.bats
-
-# Run a single test by pattern (partial match)
-bats tests/unit/test_rate_limiting.bats --filter "can_make_call"
+# Helpful flags
+bats --verbose-run tests/unit/test_X.bats   # show each test as it runs
+bats --tap tests/unit/test_X.bats           # TAP format for parsers
+bats --timing tests/unit/test_X.bats        # per-test duration
 ```
 
----
-
-## Test Organization
-
-### Directory Structure
+## Test layers
 
 ```
 tests/
-├── unit/                           # Isolated function tests
-│   ├── test_rate_limiting.bats     # Rate limiting behavior (15 tests)
-│   ├── test_exit_detection.bats    # Exit signal detection (20 tests)
-│   ├── test_cli_parsing.bats       # CLI argument parsing (27 tests)
-│   ├── test_cli_modern.bats        # Modern CLI features (29 tests)
-│   ├── test_json_parsing.bats      # JSON output parsing (36 tests)
-│   └── test_session_continuity.bats # Session lifecycle (26 tests)
-│
-├── integration/                    # Component interaction tests
-│   ├── test_loop_execution.bats    # Main loop behavior (20 tests)
-│   ├── test_edge_cases.bats        # Edge case handling (20 tests)
-│   ├── test_installation.bats      # Global install workflow (14 tests)
-│   ├── test_project_setup.bats     # Project setup (setup.sh) (36 tests)
-│   └── test_prd_import.bats        # PRD import workflow (33 tests)
-│
-├── e2e/                            # End-to-end tests (planned)
-│
-└── helpers/                        # Shared test utilities
-    ├── test_helper.bash            # Assertions and setup functions
-    ├── mocks.bash                  # Mock functions for external commands
-    └── fixtures.bash               # Sample data generators
+├── unit/                      # Fast (<1s/file), isolated function tests
+│   ├── test_rate_limiting.bats
+│   ├── test_exit_detection.bats
+│   ├── test_cli_parsing.bats
+│   ├── test_json_parsing.bats
+│   ├── test_session_continuity.bats
+│   ├── test_circuit_breaker.bats
+│   ├── test_hooks_on_stop.bats
+│   ├── test_linear_backend.bats
+│   ├── test_skills_install.bats
+│   ├── test_brain_client.bats
+│   └── ... (dozens more)
+├── integration/               # Component interaction tests, real git + FS
+│   ├── test_loop_execution.bats
+│   ├── test_edge_cases.bats
+│   ├── test_installation.bats
+│   ├── test_project_setup.bats
+│   ├── test_prd_import.bats
+│   └── test_upgrade_project.bats
+├── e2e/                       # Mock Claude CLI, full loop scenarios
+│   └── (mock_claude.sh + scenarios)
+├── evals/
+│   ├── deterministic/         # 64 BATS cases pinning loop invariants
+│   └── stochastic/            # Golden-file comparisons (live LLM, nightly)
+└── helpers/
+    ├── test_helper.bash       # Assertions, setup utilities
+    ├── mocks.bash             # Mock external commands (claude, tmux, git)
+    └── fixtures.bash          # Sample PRD, status, and output generators
 ```
 
-### Test Categories
+| Layer | When | Speed | Blocking CI |
+|---|---|---|---|
+| Unit | During development | <1s/file | **Yes** |
+| Integration | Before commit | 1-5s/file | **Yes** (no more `\|\| true` masking — TAP-537) |
+| E2E | Before PR | ~10s/file | Yes |
+| Deterministic evals | Before PR | <5 min total | **Yes** |
+| Stochastic evals | Nightly / manual | Minutes | No — informational |
 
-| Category | Purpose | Execution Speed | Dependencies |
-|----------|---------|-----------------|--------------|
-| **Unit** | Test individual functions in isolation | Fast (<1s per file) | None (uses mocks) |
-| **Integration** | Test component interactions | Medium (1-5s per file) | Real git, filesystem |
-| **E2E** | Test complete workflows | Slow (>5s per file) | Full environment |
+## Writing tests
 
-### Naming Conventions
-
-- **Test files**: `test_<component_name>.bats`
-- **Test functions**: Descriptive sentences: `@test "can_make_call returns success when under limit"`
-- **Location**: Place tests in `unit/` or `integration/` based on scope
-
----
-
-## Writing Tests
-
-### BATS Fundamentals
-
-BATS (Bash Automated Testing System) is our testing framework. Each `.bats` file contains test cases that run in isolated subshells.
-
-#### Basic Test Structure
+### BATS basics
 
 ```bash
 #!/usr/bin/env bats
-# Description of what this file tests
-
-# Load helper functions (required)
-load '../helpers/test_helper'
-
-# Setup runs before EACH test
-setup() {
-    export TEST_TEMP_DIR="$(mktemp -d)"
-    cd "$TEST_TEMP_DIR"
-    # Initialize test environment...
-}
-
-# Teardown runs after EACH test
-teardown() {
-    cd /
-    rm -rf "$TEST_TEMP_DIR"
-}
-
-# Test case syntax: @test "description" { commands }
-@test "descriptive name of what is being tested" {
-    # Arrange: set up test conditions
-    echo "50" > "$CALL_COUNT_FILE"
-
-    # Act: run the command being tested
-    run my_function
-
-    # Assert: verify the results
-    assert_success
-    assert_equal "$output" "expected output"
-}
-```
-
-#### The `run` Command
-
-The `run` command captures output and exit status:
-
-```bash
-@test "example using run command" {
-    run ls /nonexistent
-
-    # $status contains exit code (0 = success)
-    echo "Exit code was: $status"
-
-    # $output contains stdout + stderr
-    echo "Output was: $output"
-
-    # Assert on these values
-    assert_failure                    # Expect non-zero exit
-    [[ "$output" == *"No such"* ]]   # Check output contains text
-}
-```
-
-### Example: Unit Test
-
-From `tests/unit/test_rate_limiting.bats`:
-
-```bash
-#!/usr/bin/env bats
-# Unit Tests for Rate Limiting Logic
+# Unit tests for <module>
 
 load '../helpers/test_helper'
 
 setup() {
-    source "$(dirname "$BATS_TEST_FILENAME")/../helpers/test_helper.bash"
-
-    export MAX_CALLS_PER_HOUR=100
-    export CALL_COUNT_FILE=".call_count"
     export TEST_TEMP_DIR="$(mktemp -d /tmp/ralph-test.XXXXXX)"
     cd "$TEST_TEMP_DIR"
-
-    echo "0" > "$CALL_COUNT_FILE"
+    # Arrange initial state
 }
 
 teardown() {
@@ -222,480 +109,177 @@ teardown() {
     rm -rf "$TEST_TEMP_DIR"
 }
 
-# Define the function being tested (extracted from production code)
-can_make_call() {
-    local calls_made=0
-    [[ -f "$CALL_COUNT_FILE" ]] && calls_made=$(cat "$CALL_COUNT_FILE")
-    [[ $calls_made -ge $MAX_CALLS_PER_HOUR ]] && return 1
-    return 0
-}
-
-@test "can_make_call returns success when under limit" {
+@test "descriptive name — one behavior per test" {
+    # Arrange
     echo "50" > "$CALL_COUNT_FILE"
+    export MAX_CALLS_PER_HOUR=100
+
+    # Act
     run can_make_call
-    assert_success
-}
 
-@test "can_make_call returns failure when at limit" {
-    echo "100" > "$CALL_COUNT_FILE"
-    run can_make_call
-    assert_failure
+    # Assert
+    assert_success
 }
 ```
 
-### Example: Integration Test
+### Conventions
 
-From `tests/integration/test_project_setup.bats`:
+- **One behavior per `@test`.** `"can_make_call returns success when under limit"` — not `"rate limiting works"`.
+- **Isolate.** Each test owns its temp dir.
+- **Use helpers.** Don't duplicate setup.
+- **Mock external commands** in unit tests. Use real ones sparingly in integration tests.
+
+### Common assertion patterns
 
 ```bash
-#!/usr/bin/env bats
-# Integration tests for setup.sh project initialization
+# Exit status
+run some_command
+assert_success
+assert_failure
+[[ $status -eq 2 ]]
 
-load '../helpers/test_helper'
-load '../helpers/fixtures'
+# Output content
+assert_output "exact match"
+[[ "$output" == *"substring"* ]]
+[[ "$output" =~ ^[0-9]+$ ]]
 
-SETUP_SCRIPT="${BATS_TEST_DIRNAME}/../../setup.sh"
+# Files
+assert_file_exists "status.json"
+assert_file_not_exists "should_not_exist"
+assert_dir_exists "logs/"
 
-setup() {
-    export TEST_TEMP_DIR="$(mktemp -d)"
-    export HOME="$TEST_TEMP_DIR/home"
-    mkdir -p "$HOME/.ralph/templates"
-
-    # Copy real templates for integration testing
-    cp -r "${BATS_TEST_DIRNAME}/../../templates/"* "$HOME/.ralph/templates/"
-
-    cd "$TEST_TEMP_DIR"
-}
-
-teardown() {
-    cd /
-    rm -rf "$TEST_TEMP_DIR"
-}
-
-@test "setup.sh creates project directory with correct structure" {
-    run bash "$SETUP_SCRIPT" "test-project"
-
-    assert_success
-    assert_dir_exists "$TEST_TEMP_DIR/test-project"
-    assert_dir_exists "$TEST_TEMP_DIR/test-project/specs"
-    assert_dir_exists "$TEST_TEMP_DIR/test-project/src"
-    assert_dir_exists "$TEST_TEMP_DIR/test-project/logs"
-}
-
-@test "setup.sh initializes git repository" {
-    bash "$SETUP_SCRIPT" "test-project"
-
-    cd "$TEST_TEMP_DIR/test-project"
-    [[ -d ".git" ]]
-
-    run git log --oneline -1
-    assert_success
-    [[ "$output" == *"Initial commit"* ]]
-}
+# JSON
+assert_valid_json "status.json"
+local val=$(get_json_field "status.json" ".state")
+[[ "$val" == "CLOSED" ]]
 ```
 
-### Example: Testing with Mocks
+## Test helpers
 
-When testing functions that call external commands:
+### `tests/helpers/test_helper.bash`
 
-```bash
-#!/usr/bin/env bats
-
-load '../helpers/test_helper'
-load '../helpers/mocks'
-
-setup() {
-    source "$(dirname "$BATS_TEST_FILENAME")/../helpers/mocks.bash"
-    setup_mocks  # Replace git, tmux, etc. with mocks
-
-    export TEST_TEMP_DIR="$(mktemp -d)"
-    cd "$TEST_TEMP_DIR"
-}
-
-teardown() {
-    teardown_mocks  # Restore original commands
-    cd /
-    rm -rf "$TEST_TEMP_DIR"
-}
-
-@test "function handles git unavailable gracefully" {
-    # Configure mock to simulate git not installed
-    export MOCK_GIT_AVAILABLE=false
-
-    run function_that_uses_git
-
-    assert_failure
-    [[ "$output" == *"git: command not found"* ]]
-}
-
-@test "function uses Claude Code successfully" {
-    # Configure successful mock response
-    export MOCK_CLAUDE_SUCCESS=true
-    export MOCK_CLAUDE_OUTPUT="Task completed"
-
-    run function_that_calls_claude
-
-    assert_success
-    [[ "$output" == *"Task completed"* ]]
-}
-```
-
-### Best Practices
-
-1. **Test One Thing**: Each test should verify a single behavior
-   ```bash
-   # Good: focused test
-   @test "increment counter increases value by 1" { ... }
-
-   # Bad: multiple behaviors
-   @test "counter increments and respects limit and resets hourly" { ... }
-   ```
-
-2. **Descriptive Names**: Tests should read as documentation
-   ```bash
-   # Good: clear intent
-   @test "can_make_call returns failure when at limit"
-
-   # Bad: unclear
-   @test "test limit"
-   ```
-
-3. **Isolate Tests**: Each test should set up its own state
-   ```bash
-   setup() {
-       export TEST_TEMP_DIR="$(mktemp -d)"  # Fresh directory each test
-       cd "$TEST_TEMP_DIR"
-   }
-   ```
-
-4. **Clean Up**: Always restore state in teardown
-   ```bash
-   teardown() {
-       teardown_mocks  # Restore mocked commands
-       cd /
-       rm -rf "$TEST_TEMP_DIR"  # Clean up files
-   }
-   ```
-
-5. **Use Helpers**: Don't duplicate setup/assertion code
-   ```bash
-   # Good: use provided helpers
-   assert_file_exists "output.txt"
-   assert_valid_json "data.json"
-
-   # Bad: inline checks
-   [[ -f "output.txt" ]] || fail "File missing"
-   ```
-
----
-
-## Test Helpers
-
-### test_helper.bash
-
-Located at `tests/helpers/test_helper.bash`, provides core utilities:
-
-#### Assertion Functions
+Provides assertions and test-env utilities.
 
 ```bash
-# Exit status assertions
-assert_success              # Assert $status == 0
-assert_failure              # Assert $status != 0
+# Assertions
+assert_success                     # $status == 0
+assert_failure                     # $status != 0
+assert_equal "$actual" "$expected"
+assert_output "expected"
+assert_file_exists "path"
+assert_dir_exists "path"
+assert_valid_json "path.json"
 
-# Value assertions
-assert_equal "$actual" "$expected"    # Compare two values
-assert_output "expected text"         # Compare $output exactly
-
-# File assertions
-assert_file_exists "path/to/file"     # File must exist
-assert_file_not_exists "path/to/file" # File must NOT exist
-assert_dir_exists "path/to/dir"       # Directory must exist
-
-# JSON assertions
-assert_valid_json "file.json"         # Validate JSON syntax
-get_json_field "file.json" "field"    # Extract field value
-```
-
-#### Setup Utilities
-
-```bash
-# Provided environment variables (set in setup)
-$TEST_TEMP_DIR      # Unique temp directory for this test
-$PROMPT_FILE        # "PROMPT.md"
-$LOG_DIR            # "logs"
-$STATUS_FILE        # "status.json"
-$CALL_COUNT_FILE    # ".call_count"
-$EXIT_SIGNALS_FILE  # ".exit_signals"
+# Pre-set environment vars (available after setup)
+$TEST_TEMP_DIR       # unique temp dir for this test
+$PROMPT_FILE         # "PROMPT.md"
+$STATUS_FILE         # "status.json"
+$CALL_COUNT_FILE     # ".call_count"
+$EXIT_SIGNALS_FILE   # ".exit_signals"
 
 # Mock data creation
-create_mock_prompt          # Create sample PROMPT.md
-create_mock_fix_plan 5 2    # Create fix_plan.md (5 total, 2 completed)
-create_mock_status 1 42 100 # Create status.json (loop 1, 42 calls, 100 max)
-create_mock_exit_signals 0 2 0  # Create exit signals (0 test, 2 done, 0 complete)
+create_mock_prompt
+create_mock_fix_plan 5 2          # total=5, completed=2
+create_mock_status 1 42 100       # loop=1, calls=42, max=100
+create_mock_exit_signals 0 2 0    # test=0, done=2, complete=0
 ```
 
-#### Date Mocking
+### `tests/helpers/mocks.bash`
+
+Replaces external commands with configurable mocks.
 
 ```bash
-# Mock date for deterministic tests
-mock_date "2025093012"      # Set fixed date
-# ... run tests ...
-restore_date                # Restore system date
-```
+setup_mocks                # call from setup()
+teardown_mocks             # call from teardown()
 
-### mocks.bash
-
-Located at `tests/helpers/mocks.bash`, provides mock implementations:
-
-#### Available Mocks
-
-```bash
-# Claude Code CLI mock
-mock_claude_code()     # Configurable via MOCK_CLAUDE_* vars
-  MOCK_CLAUDE_SUCCESS=true|false
-  MOCK_CLAUDE_OUTPUT="response text"
-  MOCK_CLAUDE_EXIT_CODE=0
-
-# tmux mock (terminal multiplexer)
-mock_tmux()            # Configurable via MOCK_TMUX_* vars
-  MOCK_TMUX_AVAILABLE=true|false
+# Claude CLI mock
+MOCK_CLAUDE_SUCCESS=true|false
+MOCK_CLAUDE_OUTPUT="..."
+MOCK_CLAUDE_EXIT_CODE=0
 
 # git mock
-mock_git()             # Configurable via MOCK_GIT_* vars
-  MOCK_GIT_AVAILABLE=true|false
-  MOCK_GIT_REPO=true|false
+MOCK_GIT_AVAILABLE=true|false
+MOCK_GIT_REPO=true|false
 
-# Other mocks
-mock_notify_send()     # Desktop notifications
-mock_osascript()       # macOS notifications
-mock_stat()            # File statistics
-mock_timeout()         # Command timeout
+# tmux mock
+MOCK_TMUX_AVAILABLE=true|false
+
+# Others: mock_notify_send, mock_osascript, mock_stat, mock_timeout
 ```
 
-#### Using Mocks
+### `tests/helpers/fixtures.bash`
+
+Sample data generators for PRDs, status files, and Claude output.
 
 ```bash
-setup() {
-    source ".../helpers/mocks.bash"
-    setup_mocks  # Install all mocks
-}
+# PRD fixtures
+create_sample_prd_md "out.md"
+create_sample_prd_txt "out.txt"
+create_sample_prd_json "out.json"
 
-teardown() {
-    teardown_mocks  # Remove all mocks
-}
-
-@test "example with mock configuration" {
-    # Configure mock behavior
-    export MOCK_CLAUDE_SUCCESS=true
-    export MOCK_CLAUDE_OUTPUT='{"status": "complete"}'
-
-    run my_function_that_calls_claude
-
-    assert_success
-}
-```
-
-### fixtures.bash
-
-Located at `tests/helpers/fixtures.bash`, provides sample data:
-
-#### PRD Fixtures
-
-```bash
-# Create sample PRD documents
-create_sample_prd_md "output.md"    # Markdown PRD
-create_sample_prd_txt "output.txt"  # Plain text PRD
-create_sample_prd_json "output.json" # JSON PRD
-```
-
-#### Project Fixtures
-
-```bash
-# Create sample Ralph project files
+# Project fixtures
 create_sample_prompt "PROMPT.md"
-create_sample_fix_plan "fix_plan.md" 10 3  # 10 tasks, 3 completed
-create_sample_agent_md "AGENT.md"
+create_sample_fix_plan "fix_plan.md" 10 3  # 10 tasks, 3 done
+create_test_project "my-project"            # full scaffold
 
-# Create complete project structure
-create_test_project "project-name"
-# Creates: PROMPT.md, fix_plan.md, AGENT.md, specs/, src/, logs/, etc.
-```
-
-#### Output Fixtures
-
-```bash
-# Create sample Claude outputs
-create_sample_claude_output_success "output.log"  # Successful run
-create_sample_claude_output_error "output.log"    # Error response
-create_sample_claude_output_limit "output.log"    # Rate limit hit
-
-# Create sample status files
+# Output fixtures
+create_sample_claude_output_success "out.log"
+create_sample_claude_output_error "out.log"
+create_sample_claude_output_limit "out.log"
 create_sample_status_running "status.json"
 create_sample_status_completed "status.json"
-create_sample_progress_executing "progress.json"
 ```
 
----
+## Evaluations
 
-## Coverage Requirements
+Ralph has two eval suites in addition to unit/integration tests.
 
-### Quality Gates
+### Deterministic evals (`tests/evals/deterministic/`)
 
-| Metric | Requirement | Enforcement |
-|--------|-------------|-------------|
-| **Test Pass Rate** | 100% | **Blocking** - CI fails on any test failure |
-| **Coverage Target** | 85%+ | Informational only |
+64 BATS tests that pin loop-correctness invariants:
 
-### Why Coverage Is Informational
+- Dual-condition exit gate
+- Circuit breaker state transitions
+- Tool restriction enforcement
+- Hook contract (RALPH_STATUS → status.json)
+- Linear backend fail-loud behavior (TAP-536)
+- Push-mode count handling (TAP-741)
+- `EXIT-CLEAN` branch
+- `atomic_write` correctness
 
-Bash code coverage with kcov has fundamental limitations:
+No LLM calls. Blocking CI. Run with `npm run test:evals:deterministic`.
 
-> **Technical Limitation**: kcov uses LD_PRELOAD to trace execution, but cannot instrument subprocesses spawned by bats. Each test runs in a subprocess that kcov cannot follow.
->
-> Reference: [bats-core/bats-core#15](https://github.com/bats-core/bats-core/issues/15)
+### Stochastic evals (`tests/evals/stochastic/`)
 
-**Result**: Reported coverage percentages are lower than actual coverage. **Test pass rate (100%) is the enforced quality gate.**
+Golden-file comparisons against a live LLM with three-valued outcomes (Pass / Fail / Inconclusive) and Wilson score confidence intervals. Designed for nightly CI jobs, not PR gating — API calls cost real money and outputs are non-deterministic.
 
-### Running Coverage Locally
+Run with `npm run test:evals:stochastic`. Set `RALPH_EVAL_N` to control sample count (default 10).
 
-```bash
-# Install kcov (Ubuntu/Debian)
-sudo apt-get install kcov
+## CI pipeline
 
-# Or build from source
-git clone https://github.com/SimonKagstrom/kcov.git
-cd kcov && mkdir build && cd build
-cmake .. && make && sudo make install
+Defined in [`.github/workflows/test.yml`](.github/workflows/test.yml).
 
-# Run tests with coverage
-mkdir -p coverage
-kcov --include-path="$(pwd)/ralph_loop.sh,$(pwd)/lib" \
-     coverage/ \
-     bats tests/unit/
+| Step | Blocking | Notes |
+|---|---|---|
+| `npm run test:unit` | **Yes** | Core invariants |
+| `npm run test:integration` | **Yes** | TAP-537 removed `\|\| true` masking |
+| `npm run test:evals:deterministic` | **Yes** | 64 loop-correctness cases |
+| `kcov` coverage | No (informational) | Subprocess tracing is structurally incomplete in BATS; stderr logged to `coverage/*.stderr.log` and surfaced as `::warning::` |
+| `npm run test:evals:stochastic` | No (nightly/manual) | Live LLM calls |
 
-# View report
-open coverage/index.html  # macOS
-xdg-open coverage/index.html  # Linux
-```
+When adding a new CI step, decide category up front. Informational steps must surface failure signal (`::warning::` annotation + artifact), not hide it with `|| true`. Silent masking is what TAP-537 rolled back.
 
-### Coverage Best Practices
+### Triggers
 
-1. **Prioritize Critical Paths**: Test the main loop, exit detection, circuit breaker
-2. **Test Error Conditions**: Verify graceful handling of failures
-3. **Don't Chase 100%**: Quality over quantity
-4. **New Features Need Tests**: All PRs introducing features must include tests
+Push to `main`, `develop`. PRs targeting `main`.
 
----
+### Environment
 
-## CI/CD Integration
+Ubuntu latest. Node.js 18. `jq` installed via apt.
 
-### GitHub Actions Pipeline
+## Debugging test failures
 
-The test workflow is defined in `.github/workflows/test.yml`:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    GitHub Actions Pipeline                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Triggers: push (main, develop), PR (main)                      │
-│                                                                  │
-│  ┌─────────────────┐     ┌─────────────────┐                    │
-│  │    test job     │────▶│  coverage job   │                    │
-│  └────────┬────────┘     └────────┬────────┘                    │
-│           │                       │                              │
-│  • Checkout repo         • Build kcov from source               │
-│  • Setup Node.js 18      • Run tests with coverage              │
-│  • Install deps (jq)     • Parse coverage results               │
-│  • Run unit tests        • Check threshold (disabled)           │
-│  • Run integration       • Upload artifacts                     │
-│  • Generate summary      • Upload to Codecov (optional)         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Workflow Stages
-
-#### 1. Test Job (Required)
-
-```yaml
-test:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-    - run: npm install && sudo apt-get install -y jq
-    - run: npm run test:unit          # Must pass
-    - run: npm run test:integration   # Allowed to fail (|| true)
-    - run: npm run test:e2e          # Allowed to fail (|| true)
-```
-
-#### 2. Coverage Job (Informational)
-
-```yaml
-coverage:
-  runs-on: ubuntu-latest
-  needs: test  # Only runs after test passes
-  env:
-    COVERAGE_THRESHOLD: 0  # Disabled
-```
-
-### Viewing CI Results
-
-1. **GitHub Actions tab**: See workflow runs and logs
-2. **Step Summary**: Test results appear in PR summary
-3. **Coverage Artifacts**: Downloadable for 7 days
-4. **Codecov** (optional): Interactive coverage reports
-
-### Local vs CI Differences
-
-| Aspect | Local | CI |
-|--------|-------|-----|
-| Environment | Your machine | ubuntu-latest container |
-| Node version | Your installed version | v18 (specified) |
-| Dependencies | Cached | Fresh install |
-| Coverage | Optional | Automatic |
-| Artifacts | Manual | Auto-uploaded |
-
-### Reproducing CI Failures
-
-```bash
-# Match CI environment
-nvm use 18
-npm ci  # Clean install (not npm install)
-
-# Run tests in CI order
-npm run test:unit
-npm run test:integration
-npm run test:e2e
-
-# Check for environment-specific issues
-uname -a  # OS differences
-bash --version  # Bash version
-```
-
----
-
-## Troubleshooting
-
-### Test Failures
-
-#### Reading BATS Output
-
-```bash
-# Verbose output shows each test
-bats --verbose-run tests/unit/test_rate_limiting.bats
-
-# TAP format for parsing
-bats --tap tests/unit/test_rate_limiting.bats
-
-# Timing information
-bats --timing tests/unit/test_rate_limiting.bats
-```
-
-#### Understanding Failure Messages
+### Read BATS output carefully
 
 ```
 not ok 3 - can_make_call returns success when under limit
@@ -705,312 +289,95 @@ not ok 3 - can_make_call returns success when under limit
 # Output: Error: file not found
 ```
 
-- **Line 58**: Where the assertion failed
-- **assert_success failed**: Exit code wasn't 0
-- **status 1**: Actual exit code
-- **Output**: What the command printed
+- **Line 58** — where the assertion failed
+- **`assert_success` failed** — exit code was non-zero
+- **status 1** — actual exit code
+- **Output** — what the command printed
 
-#### Debugging Steps
-
-1. **Run single test**:
-   ```bash
-   bats tests/unit/test_rate_limiting.bats --filter "can_make_call"
-   ```
-
-2. **Add debug output**:
-   ```bash
-   @test "debugging example" {
-       echo "Before command" >&3  # Print to stdout during test
-
-       run my_function
-
-       echo "Status: $status" >&3
-       echo "Output: $output" >&3
-
-       assert_success
-   }
-   ```
-
-3. **Use set -x for tracing**:
-   ```bash
-   @test "trace example" {
-       set -x  # Enable bash tracing
-       run my_function
-       set +x  # Disable tracing
-   }
-   ```
-
-4. **Preserve temp directory**:
-   ```bash
-   teardown() {
-       echo "Temp dir: $TEST_TEMP_DIR" >&3
-       # Comment out cleanup to inspect:
-       # rm -rf "$TEST_TEMP_DIR"
-   }
-   ```
-
-### Mock Issues
-
-#### Mock Not Being Called
+### Debug techniques
 
 ```bash
-# Verify setup_mocks was called
-setup() {
-    source "$(dirname "$BATS_TEST_FILENAME")/../helpers/mocks.bash"
-    setup_mocks  # Must call this!
+# 1. Narrow to the failing test
+bats --filter "can_make_call" tests/unit/test_rate_limiting.bats
+
+# 2. Add debug output (fd 3 writes during BATS runs)
+@test "debugging example" {
+    echo "Setup state:" >&3
+    cat "$CALL_COUNT_FILE" >&3
+
+    run can_make_call
+
+    echo "Status: $status" >&3
+    echo "Output: $output" >&3
+
+    assert_success
 }
 
-# Verify function is exported
-type git  # Should show "git is a function"
-```
-
-#### Wrong Mock Response
-
-```bash
-# Check environment variables
-@test "debug mock" {
-    echo "MOCK_CLAUDE_SUCCESS: $MOCK_CLAUDE_SUCCESS" >&3
-    echo "MOCK_CLAUDE_OUTPUT: $MOCK_CLAUDE_OUTPUT" >&3
-
-    # Set explicitly if needed
-    export MOCK_CLAUDE_SUCCESS=true
-    export MOCK_CLAUDE_OUTPUT="expected response"
+# 3. Trace with set -x
+@test "trace example" {
+    set -x
+    run my_function
+    set +x
 }
-```
 
-#### Mock Cleanup Issues
-
-```bash
-# Always clean up in teardown
+# 4. Keep the temp dir after a failure
 teardown() {
-    teardown_mocks  # Restore original commands
-    unset MOCK_CLAUDE_SUCCESS
-    unset MOCK_CLAUDE_OUTPUT
+    echo "Temp dir: $TEST_TEMP_DIR" >&3
+    # Comment out cleanup temporarily:
+    # rm -rf "$TEST_TEMP_DIR"
 }
 ```
 
-### JSON Parsing Errors
+### Common pitfalls
 
-#### Invalid JSON in Fixtures
+- **Mock not applied.** Confirm `setup_mocks` ran in `setup()`. `type git` should show `git is a function`.
+- **Environment leak.** A previous test's `export` is still set. Always `unset` in `teardown()`.
+- **jq not installed.** Install with your system package manager or let the Ralph installer bootstrap it.
+- **Read-only temp dir.** Some CI runners restrict `/tmp`; override via `BATS_TEST_TMPDIR`.
+- **Hard-coded paths.** Use `"$(dirname "$BATS_TEST_FILENAME")"`, never absolute paths.
+
+## Local vs CI differences
+
+| Aspect | Local | CI |
+|---|---|---|
+| Environment | your machine | ubuntu-latest container |
+| Node | your version | v18 pinned |
+| Dependencies | cached | fresh `npm ci` |
+| Coverage | opt-in | automatic |
+| Artifacts | manual | auto-uploaded |
+
+To match CI exactly:
 
 ```bash
-# Validate fixture output
-@test "debug json" {
-    create_sample_status_running "status.json"
-
-    # Validate JSON is valid
-    run jq empty "status.json"
-    assert_success
-
-    # Show content if invalid
-    if [[ $status -ne 0 ]]; then
-        cat "status.json" >&3
-    fi
-}
+nvm use 18
+npm ci              # not npm install
+npm run test:unit
+npm run test:integration
+npm run test:evals:deterministic
 ```
 
-#### Missing jq
+## Coverage
+
+Bash coverage with `kcov` has structural limits — it can't instrument BATS-spawned subprocesses. Reported coverage is always **lower than actual** coverage. The enforced quality gate is **100% test pass rate**, not coverage percentage.
+
+If you want a local report anyway:
 
 ```bash
-# Check jq is available
-which jq || echo "jq not installed"
-
-# Install if missing
 # Ubuntu/Debian
-sudo apt-get install jq
+sudo apt install kcov
 
-# macOS
-brew install jq
+# Run unit tests with coverage
+mkdir -p coverage
+kcov --include-path="$(pwd)/ralph_loop.sh,$(pwd)/lib" coverage/ bats tests/unit/
+
+# View
+xdg-open coverage/index.html    # Linux
+open coverage/index.html        # macOS
 ```
 
-### File Permission Errors
+## Where to ask for help
 
-#### Temp Directory Issues
-
-```bash
-# Ensure temp dir is writable
-setup() {
-    export TEST_TEMP_DIR="$(mktemp -d)"
-    [[ -w "$TEST_TEMP_DIR" ]] || fail "Cannot write to temp dir"
-}
-```
-
-#### Read-Only Filesystem
-
-```bash
-# Use system temp location
-export BATS_TEST_TMPDIR="${TMPDIR:-/tmp}/bats-ralph-$$"
-```
-
-### CI/CD Failures
-
-#### Tests Pass Locally, Fail in CI
-
-1. **Check environment differences**:
-   ```bash
-   # CI uses ubuntu-latest
-   uname -a
-   bash --version
-   ```
-
-2. **Check for hardcoded paths**:
-   ```bash
-   # Bad: hardcoded path
-   source "/home/user/ralph/lib/utils.sh"
-
-   # Good: relative path
-   source "$(dirname "$BATS_TEST_FILENAME")/../../lib/utils.sh"
-   ```
-
-3. **Check for timing issues**:
-   ```bash
-   # Add explicit waits if needed
-   sleep 1
-   ```
-
-#### Coverage Threshold Failures
-
-```bash
-# Check current threshold
-grep COVERAGE_THRESHOLD .github/workflows/test.yml
-
-# Threshold is set to 0 (disabled)
-# If enabled, review coverage report
-```
-
-### Getting Help
-
-1. **Check existing tests**: Look at similar tests in the suite for patterns
-2. **BATS documentation**: https://bats-core.readthedocs.io/
-3. **GitHub Issues**: Report test infrastructure issues at https://github.com/frankbria/ralph-claude-code/issues
-
----
-
-## Appendices
-
-### Appendix A: BATS Quick Reference
-
-```bash
-# Test file header
-#!/usr/bin/env bats
-load '../helpers/test_helper'
-
-# Lifecycle hooks
-setup() { }      # Before each test
-teardown() { }   # After each test
-setup_file() { } # Before all tests in file
-teardown_file() { } # After all tests in file
-
-# Test definition
-@test "description" {
-    # Arrange, Act, Assert
-}
-
-# The run command
-run command arg1 arg2
-# Sets: $status (exit code), $output (stdout+stderr)
-
-# Skip tests
-@test "skipped test" {
-    skip "reason for skipping"
-}
-
-# Conditional skip
-@test "conditional skip" {
-    [[ -z "$CI" ]] || skip "Only runs locally"
-}
-```
-
-### Appendix B: Common Patterns
-
-#### Testing Exit Codes
-
-```bash
-@test "command succeeds" {
-    run my_command
-    assert_success
-}
-
-@test "command fails with specific code" {
-    run my_command --invalid
-    [[ $status -eq 2 ]]  # Specific exit code
-}
-```
-
-#### Testing Output Content
-
-```bash
-@test "output contains expected text" {
-    run my_command
-    [[ "$output" == *"expected"* ]]
-}
-
-@test "output matches regex" {
-    run my_command
-    [[ "$output" =~ ^[0-9]+$ ]]  # Matches digits
-}
-```
-
-#### Testing File Creation
-
-```bash
-@test "command creates file" {
-    run my_command
-    assert_file_exists "output.txt"
-}
-
-@test "file contains expected content" {
-    run my_command
-    [[ "$(cat output.txt)" == "expected content" ]]
-}
-```
-
-#### Testing JSON Output
-
-```bash
-@test "produces valid JSON" {
-    run my_command
-    echo "$output" | jq empty  # Validates JSON
-}
-
-@test "JSON has expected field" {
-    run my_command
-    value=$(echo "$output" | jq -r '.status')
-    [[ "$value" == "success" ]]
-}
-```
-
-### Appendix C: Contributing Tests
-
-#### Adding New Test Files
-
-1. Create file in appropriate directory:
-   ```bash
-   touch tests/unit/test_my_feature.bats
-   chmod +x tests/unit/test_my_feature.bats
-   ```
-
-2. Use standard header:
-   ```bash
-   #!/usr/bin/env bats
-   # Unit tests for my feature
-
-   load '../helpers/test_helper'
-   ```
-
-3. Verify tests run:
-   ```bash
-   bats tests/unit/test_my_feature.bats
-   ```
-
-4. Update documentation if needed
-
-#### Test Review Checklist
-
-- [ ] Tests have descriptive names
-- [ ] Each test verifies one behavior
-- [ ] Tests clean up after themselves
-- [ ] Mocks are properly set up and torn down
-- [ ] No hardcoded paths
-- [ ] Tests pass in isolation
-- [ ] Tests pass in CI environment
+- Check existing tests in the same area for patterns.
+- [BATS documentation](https://bats-core.readthedocs.io/)
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#tests-and-ci) for test-specific problems
+- [GitHub Issues](https://github.com/wtthornton/ralph-claude-code/issues) for infrastructure bugs

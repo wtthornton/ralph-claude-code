@@ -1,6 +1,14 @@
-# Ralph CLI Reference
+---
+title: Ralph CLI reference
+description: Every command, flag, environment variable, exit code, and configuration precedence rule.
+audience: [user, operator]
+diataxis: reference
+last_reviewed: 2026-04-23
+---
 
-**Version**: v2.8.2 | **Platform**: Linux, macOS, WSL, Git Bash (Windows)
+# Ralph CLI reference
+
+**Version:** v2.8.3 • **Platforms:** Linux, macOS, WSL, Windows (via WSL or ralph.cmd), Nix
 
 ## Commands
 

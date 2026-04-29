@@ -1,4 +1,12 @@
-# Quick Start: Your First Ralph Project
+---
+title: "Quick start: Your first Ralph project"
+description: Hands-on tutorial that walks through enabling Ralph on a new project and running the first autonomous loop.
+audience: [user]
+diataxis: tutorial
+last_reviewed: 2026-04-23
+---
+
+# Quick start: Your first Ralph project
 
 This tutorial walks you through enabling Ralph on an existing project and running your first autonomous development loop. By the end, you'll have Ralph building a simple CLI todo app.
 
@@ -179,8 +187,8 @@ Check `.ralph/logs/` for the latest log. Common reasons:
 - Rate limit reached (waits for reset)
 - Circuit breaker opened (detected stuck loop)
 - All tasks marked complete
-- Permission denied for a tool (v0.11.6+ logs denied commands before analysis—update `ALLOWED_TOOLS` in `.ralphrc`)
-- With **`ralph --live`**, upgrade to **v0.11.6+** if you hit silent exits on stream-json output; see [epic-jsonl-stream-resilience.md](../specs/epic-jsonl-stream-resilience.md)
+- Permission denied for a tool — update `ALLOWED_TOOLS` in `.ralphrc` and then `ralph --reset-session`
+- For more symptoms and fixes, see [../TROUBLESHOOTING.md](../TROUBLESHOOTING.md)
 
 ### Ralph keeps running tests without implementing anything
 
