@@ -229,11 +229,11 @@ Ralph reads its work queue from one of two sources, selected by `RALPH_TASK_SOUR
 
 ### Linear backend
 
-`RALPH_TASK_SOURCE=linear`. Replaces `fix_plan.md` with Linear GraphQL. Requires `LINEAR_API_KEY` and `RALPH_LINEAR_PROJECT`. Five integration points branch on this variable (exit check, dry-run display, `build_loop_context`, `ralph_continue_as_new`, startup pre-seeding).
+`RALPH_TASK_SOURCE=linear`. Replaces `fix_plan.md` with Linear via the Linear MCP plugin (OAuth — no harness-side API key). Requires `RALPH_LINEAR_PROJECT`. Five integration points branch on this variable (exit check, dry-run display, `build_loop_context`, `ralph_continue_as_new`, startup pre-seeding). Claude lists, picks, and updates issues via `mcp__plugin_linear_linear__*`.
 
-**Fail-loud on errors.** API failures return non-zero with a structured stderr line and no stdout — callers must distinguish "exit non-zero" (unknown) from "exit 0 + value" (real result). Exit checks **abstain** on failure rather than treating unknown as zero (TAP-536). See [LINEAR-WORKFLOW.md](LINEAR-WORKFLOW.md) and [ADR-0003](decisions/0003-linear-task-backend.md).
+**Counts via on-stop hook (TAP-741).** Claude reports `LINEAR_OPEN_COUNT` and `LINEAR_DONE_COUNT` in its `RALPH_STATUS` block. The on-stop hook writes these to `.ralph/status.json`. `linear_get_open_count` / `linear_get_done_count` read from there. Entries older than `RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS` (default 900) abstain.
 
-**Push-mode (TAP-741).** When `LINEAR_API_KEY` is unset (OAuth-via-MCP deployments), the count functions fall back to `linear_open_count` / `linear_done_count` in `status.json` written by the stop hook. Entries older than `RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS` (default 900) abstain.
+**Fail-loud on stale counts.** When the count is unknown (no hook write yet on iteration 1, or stale beyond the max-age window), the count functions return non-zero with a structured stderr line and no stdout — callers must distinguish "exit non-zero" (unknown) from "exit 0 + value" (real result). Exit checks **abstain** on failure rather than treating unknown as zero (TAP-536). See [LINEAR-WORKFLOW.md](LINEAR-WORKFLOW.md) and [ADR-0003](decisions/0003-linear-task-backend.md).
 
 ## Bash ↔ SDK parity
 

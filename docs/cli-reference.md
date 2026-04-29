@@ -145,9 +145,8 @@ Bash file sourced at startup. See `templates/ralphrc.template` for all options.
 | `LOG_MAX_FILES` | Number of rotated logs to keep | 5 |
 | `LOG_MAX_OUTPUT_FILES` | Max claude_output_*.log files | 20 |
 | `DRY_RUN` | Simulate loop without API calls | false |
-| `RALPH_TASK_SOURCE` | Task backend: `"file"` or `"linear"` | `"file"` |
+| `RALPH_TASK_SOURCE` | Task backend: `"file"` or `"linear"` (Linear via MCP plugin OAuth) | `"file"` |
 | `RALPH_LINEAR_PROJECT` | Linear project name (exact match) | — |
-| `LINEAR_API_KEY` | Linear personal API key | — |
 | `RALPH_NO_OPTIMIZE` | Disable fix_plan.md auto-reordering | false |
 | `RALPH_NO_EXPLORER_RESOLVE` | Disable explorer file resolution for vague tasks | false |
 | `RALPH_MAX_EXPLORER_RESOLVE` | Max vague tasks to resolve per run | 5 |

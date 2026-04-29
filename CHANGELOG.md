@@ -39,7 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [2.8.3] — 2026-04-20
 
 ### Added
-- **TAP-741**: Push-mode Linear counts via `RALPH_STATUS` — when `LINEAR_API_KEY` is unset (OAuth-via-MCP deployments), `linear_get_open_count` / `linear_get_done_count` fall back to reading `linear_open_count` / `linear_done_count` from `.ralph/status.json`, written by the on-stop hook from Claude's RALPH_STATUS block; entries older than `RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS` (default 900) abstain via the TAP-536 fail-loud path; `linear_check_configured` now requires only `RALPH_LINEAR_PROJECT`
+- **TAP-741**: Push-mode Linear counts via `RALPH_STATUS` — `linear_get_open_count` / `linear_get_done_count` read `linear_open_count` / `linear_done_count` from `.ralph/status.json`, written by the on-stop hook from Claude's RALPH_STATUS block; entries older than `RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS` (default 900) abstain via the TAP-536 fail-loud path; `linear_check_configured` requires only `RALPH_LINEAR_PROJECT`. (OAuth-via-MCP is the only supported Linear-mode integration.)
 
 ### Fixed
 - Monitor: repair zero-token / zero-cost display, staleness detection, and silent-UNKNOWN fallback
@@ -138,7 +138,7 @@ Hardening release. 14 fix commits on top of 2.7.0 — no new features, all secur
 ## [2.6.0] — 2026-04
 
 ### Added
-- **Linear task backend** (`RALPH_TASK_SOURCE=linear`) — replaces `fix_plan.md` reads with Linear GraphQL API; requires `LINEAR_API_KEY` and `RALPH_LINEAR_PROJECT`; fail-loud on API errors (TAP-536 pattern)
+- **Linear task backend** (`RALPH_TASK_SOURCE=linear`) — replaces `fix_plan.md` reads with Linear via the Linear MCP plugin (OAuth); requires `RALPH_LINEAR_PROJECT`; fail-loud on stale counts (TAP-536 pattern)
 - **`ralph-upgrade-project`** — propagate runtime files (hooks, templates) to existing managed projects without re-running full setup
 
 ### Changed

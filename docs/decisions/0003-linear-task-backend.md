@@ -51,16 +51,19 @@ Concretely:
 
 We call this pattern **fail-loud abstention**: the system loudly says "I don't know" instead of defaulting to a value that could be wrong.
 
-### Push-mode (TAP-741)
+### OAuth-via-MCP (TAP-741)
 
-A follow-up decision: some deployments use OAuth-via-MCP with no `LINEAR_API_KEY` on the harness. For those, `linear_get_open_count` / `linear_get_done_count` fall back to reading `linear_open_count` / `linear_done_count` from `.ralph/status.json`, written by the Stop hook from Claude's `RALPH_STATUS` block.
+**Update 2026-04-29: OAuth-via-MCP is now the only supported mode. The harness-side API-key path described in earlier revisions of this ADR is deprecated and the documentation references have been removed.** Linear access is via the Linear MCP plugin's OAuth flow; Claude lists, picks, and updates issues using `mcp__plugin_linear_linear__*` tools. The harness reads counts from `.ralph/status.json`, written by the Stop hook from Claude's `RALPH_STATUS` block.
 
-Push-mode precedence:
+Count read precedence:
 
 ```
-API key set? → try GraphQL; on failure, abstain (original TAP-536 path)
-API key unset? → read from status.json; if stale (> RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS, default 900) or missing, abstain
+status.json has linear_open_count / linear_done_count + linear_counts_at within max-age?
+  yes → return value
+  no  → abstain (TAP-536 fail-loud) — exit checks abstain rather than treating "unknown" as zero
 ```
+
+Stale window controlled by `RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS` (default 900). Iteration 1 of a fresh session has no prior hook write, so it abstains (logged INFO, not WARN); iteration 2+ reads fresh counts.
 
 `linear_check_configured` now requires only `RALPH_LINEAR_PROJECT` (API key is optional). Iteration 1 has no hook write yet and abstains (logged INFO, not WARN).
 

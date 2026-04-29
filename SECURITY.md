@@ -123,7 +123,7 @@ The `Stop` hook is the single sanitization point for Claude's output. The loop n
 
 ### 4. Secret handling
 
-- `LINEAR_API_KEY`, `TAPPS_BRAIN_AUTH_TOKEN`, and similar credentials are loaded from `~/.ralph/secrets.env` (gitignored) or environment variables.
+- `TAPPS_BRAIN_AUTH_TOKEN` and similar credentials are loaded from `~/.ralph/secrets.env` (gitignored) or environment variables. Linear access is via the Linear MCP plugin's OAuth flow — no harness-side API key.
 - Never written to `.ralph/status.json`, metrics files, or traces.
 - Webhooks are built with `jq --arg` — sed-based escape was replaced in TAP-659 after an injection finding.
 

@@ -134,7 +134,7 @@ File inside `.ralph/` that holds development instructions Claude reads at the st
 
 ## Push-mode (Linear)
 
-Fallback when `LINEAR_API_KEY` is unset (OAuth-via-MCP deployments): `linear_get_open_count` / `linear_get_done_count` read from `status.json` written by the stop hook from Claude's RALPH_STATUS block. Entries older than `RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS` (default 900) abstain. TAP-741.
+The only supported Linear-mode integration. Claude picks tasks via the Linear MCP plugin (OAuth) and reports counts in its `RALPH_STATUS` block; the on-stop hook writes them to `.ralph/status.json`. `linear_get_open_count` / `linear_get_done_count` read from that file. Entries older than `RALPH_LINEAR_COUNTS_MAX_AGE_SECONDS` (default 900) abstain via the TAP-536 fail-loud path so a stale count cannot trip a false `plan_complete`. TAP-741.
 
 ## RALPH_STATUS
 

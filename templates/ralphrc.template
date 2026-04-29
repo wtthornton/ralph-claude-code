@@ -68,8 +68,9 @@ SESSION_EXPIRY_HOURS=24
 # =============================================================================
 
 # Task backend: "file" (default) reads from .ralph/fix_plan.md
-#               "linear" reads from a Linear project via the Linear API
-# Switching to "linear" requires LINEAR_API_KEY and RALPH_LINEAR_PROJECT below.
+#               "linear" — Claude picks tasks via the Linear MCP plugin (OAuth)
+# Switching to "linear" requires RALPH_LINEAR_PROJECT below and the Linear MCP
+# plugin enabled in your Claude Code session.
 RALPH_TASK_SOURCE="file"
 
 # Linear project name (required when RALPH_TASK_SOURCE=linear)
@@ -78,10 +79,6 @@ RALPH_TASK_SOURCE="file"
 
 # Linear team name (optional — used in log messages only)
 # RALPH_LINEAR_TEAM="TappsCodingAgents"
-
-# Linear personal API key (can also be set as environment variable)
-# Generate at: https://linear.app/settings/api
-# LINEAR_API_KEY=""
 
 # =============================================================================
 # TASK SOURCES (legacy import — separate from RALPH_TASK_SOURCE)
@@ -220,7 +217,7 @@ RALPH_NO_EXPLORER_RESOLVE=false
 # =============================================================================
 # Linear cache-locality optimizer (TAP-589 LINOPT epic)
 # =============================================================================
-# Only active when RALPH_TASK_SOURCE=linear AND LINEAR_API_KEY is set. Fires at
+# Only active when RALPH_TASK_SOURCE=linear. Fires at
 # session start as a background job: scores open issues by Jaccard overlap
 # with the last-completed file set + import-graph dependency demotion, writes
 # the best candidate ID to .ralph/.linear_next_issue. The runtime build_loop_context()

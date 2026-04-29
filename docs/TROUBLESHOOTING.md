@@ -288,13 +288,9 @@ grep -n powershell .claude/settings.json
 
 ### `linear_api_error: op=... reason=no_api_key`
 
-```bash
-# Set the API key
-export LINEAR_API_KEY="lin_api_..."
-# Or add to ~/.ralph/secrets.env for persistent sessions
-```
+This message is expected on iteration 1 of a Linear-mode session — the harness reads counts from `.ralph/status.json`, which Claude populates via the on-stop hook from its `RALPH_STATUS` block. Iteration 2 onwards reads fresh counts and the message goes silent.
 
-If you use OAuth via MCP (no API key), Ralph runs in push-mode (TAP-741). The error is expected on iteration 1; should go silent from iteration 2 onward.
+If the message persists past iteration 1, confirm the Linear MCP plugin is enabled in your Claude Code session (OAuth-via-MCP is the only supported mode) and that Claude is including `LINEAR_OPEN_COUNT` / `LINEAR_DONE_COUNT` in its `RALPH_STATUS` block.
 
 ### Linear exit gate never fires
 

@@ -92,17 +92,16 @@ Ralph can pull its task list from a Linear project instead of `fix_plan.md`.
 
 ### One-time setup
 
-1. Generate a Linear personal API key at <https://linear.app/settings/api>.
+1. Enable the Linear MCP plugin in your Claude Code session (OAuth flow — no API key needed).
 2. Identify the **exact** Linear project name (case-sensitive, must match the workspace).
 3. Add to the project's `.ralphrc`:
 
    ```bash
    export RALPH_TASK_SOURCE="linear"
    export RALPH_LINEAR_PROJECT="Tapps Brain"   # exact match
-   export LINEAR_API_KEY="lin_api_..."         # or set as env var
    ```
 
-   Prefer putting `LINEAR_API_KEY` in an env var (systemd `Environment=`, shell profile, or secrets manager) rather than checking it into `.ralphrc`. `.ralphrc` is readable by anyone on the host.
+   Claude lists, picks, and updates Linear issues via the MCP plugin's `mcp__plugin_linear_linear__*` tools. The harness reads counts from `.ralph/status.json` (written by the on-stop hook from Claude's `RALPH_STATUS` block).
 
 4. Verify: `ralph --dry-run` should log `task source: linear` and print the current open-issue count.
 
@@ -178,11 +177,10 @@ Always run with `--dry-run` first to preview.
 
 ## Secrets Management
 
-Ralph handles three kinds of secrets: the Anthropic auth the Claude CLI manages itself, optional `LINEAR_API_KEY`, and whatever secrets your project's code references (`.env` files, etc.).
+Ralph handles two kinds of secrets: the Anthropic auth the Claude CLI manages itself, and whatever secrets your project's code references (`.env` files, etc.). Linear access is via the Linear MCP plugin's OAuth flow — no harness-side credentials.
 
 **Rules of thumb:**
 
-- Never put `LINEAR_API_KEY` directly in `.ralphrc` if the host is shared — use env vars.
 - `templates/hooks/protect-ralph-files.sh` blocks Claude from editing `.ralphrc` and `.env` files through PreToolUse hooks.
 - `ralph.log` does not redact secrets — if you log failed CLI invocations with `--live`, API error bodies may contain partial keys. Review before sharing logs.
 - On rotation, delete `.ralph/.claude_session_id` to force a fresh session with the new credential.
