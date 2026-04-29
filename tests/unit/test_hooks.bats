@@ -467,16 +467,15 @@ _tap624_run() {
     grep -q '"--agent"' "$RALPH_LOOP"
 }
 
-@test "HOOKS-6: RALPH_USE_AGENT in ralphrc template" {
-    grep -q "RALPH_USE_AGENT" "$PROJECT_ROOT/templates/ralphrc.template"
-}
-
 @test "HOOKS-6: RALPH_AGENT_NAME in ralphrc template" {
     grep -q "RALPH_AGENT_NAME" "$PROJECT_ROOT/templates/ralphrc.template"
 }
 
-@test "HOOKS-6: legacy fallback when agent mode unavailable" {
-    grep -q "Falling back to legacy mode" "$RALPH_LOOP"
+@test "HOOKS-6: build_claude_command hard-fails when --agent unsupported" {
+    # After legacy-mode deletion (2026-04 ADR 0006) there is no fallback —
+    # an old CLI must surface a clear error rather than silently bypass
+    # the agent's model/permissions.
+    grep -q "Claude CLI does not support --agent" "$RALPH_LOOP"
 }
 
 # =============================================================================

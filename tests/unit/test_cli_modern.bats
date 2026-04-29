@@ -207,34 +207,26 @@ teardown() {
 }
 
 # =============================================================================
-# CONFIGURATION VARIABLE TESTS
+# AGENT FILE TOOL CONFIGURATION
+# (Replaces the deleted CLAUDE_ALLOWED_TOOLS / RALPH_DEFAULT_ALLOWED_TOOLS
+#  defaults — tool restrictions now live in .claude/agents/ralph.md.)
 # =============================================================================
 
-@test "CLAUDE_ALLOWED_TOOLS has sensible defaults" {
-    # Defaults are now in RALPH_DEFAULT_ALLOWED_TOOLS (Issue #154 refactor)
-    run grep 'RALPH_DEFAULT_ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
-
-    # Should include Write, Bash, Read at minimum
-    [[ "$output" == *"Write"* ]]
+@test "agent file ships with Bash, Read, Write, Edit in tools: allowlist" {
+    local agent_file="${BATS_TEST_DIRNAME}/../../.claude/agents/ralph.md"
+    [[ -f "$agent_file" ]] || skip "agent file not present in this build"
+    run grep -E '^\s*-\s*(Read|Write|Edit|Bash)\s*$' "$agent_file"
     [[ "$output" == *"Read"* ]]
-}
-
-@test "CLAUDE_ALLOWED_TOOLS default includes Edit tool (issue #136)" {
-    # Defaults are now in RALPH_DEFAULT_ALLOWED_TOOLS (Issue #154 refactor)
-    run grep 'RALPH_DEFAULT_ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
-
-    # The default should include Edit
+    [[ "$output" == *"Write"* ]]
     [[ "$output" == *"Edit"* ]]
+    [[ "$output" == *"Bash"* ]]
 }
 
-@test "CLAUDE_ALLOWED_TOOLS default includes test execution tools (issue #136)" {
-    # Defaults are now in RALPH_DEFAULT_ALLOWED_TOOLS (Issue #154 refactor)
-    run grep 'RALPH_DEFAULT_ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
-
-    # Should include Bash(npm *) for npm test
-    [[ "$output" == *'Bash(npm *)'* ]]
-    # Should include Bash(pytest) for Python tests
-    [[ "$output" == *'Bash(pytest)'* ]]
+@test "agent file has disallowedTools blocklist for destructive bash" {
+    local agent_file="${BATS_TEST_DIRNAME}/../../.claude/agents/ralph.md"
+    [[ -f "$agent_file" ]] || skip "agent file not present in this build"
+    run grep -E 'Bash\(rm -rf|Bash\(git reset --hard|Bash\(git clean|Bash\(git rm' "$agent_file"
+    [[ "$status" -eq 0 ]] || fail "agent file should disallow destructive bash patterns"
 }
 
 # =============================================================================

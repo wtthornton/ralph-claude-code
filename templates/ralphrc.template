@@ -38,38 +38,20 @@ CLAUDE_OUTPUT_FORMAT="json"
 # =============================================================================
 # TOOL PERMISSIONS
 # =============================================================================
-
-# Comma-separated list of allowed tools for Claude
-# Common tools: Write, Read, Edit, Grep, Glob
-# Bash patterns: Bash(git add *), Bash(git commit *), Bash(npm *), Bash(pytest)
-# NOTE: Default uses specific git subcommands for safety. To allow ALL git commands: Bash(git *)
-# Dangerous commands excluded by default: git clean, git rm, git reset (can delete .ralph/)
-# Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
-# Granular git patterns (not Bash(git *)) limit destructive commands; Bash(git -C *) covers repo-root flags.
 #
-# AGENT MODE INTERACTION (Issue #154):
-# When RALPH_USE_AGENT=true (default since v1.8.4), agent mode uses a BLOCKLIST
-# (disallowedTools in .claude/agents/ralph.md) instead of this ALLOWLIST.
-# Customizing ALLOWED_TOOLS below will automatically disable agent mode and fall
-# back to legacy mode where --allowedTools is honored. To control permissions in
-# agent mode, edit disallowedTools in .claude/agents/ralph.md instead.
+# Tool permissions are owned by the agent file, not .ralphrc.
 #
-# MCP TOOLS (TAP-583):
-# mcp__tapps-mcp__*, mcp__docs-mcp__*, and a narrow five-tool slice of
-# mcp__tapps-brain__* are permitted by default so prompt guidance from
-# build_loop_context() (TAP-585) doesn't hit permission denials. Each MCP
-# server is probed at startup — if it is not registered in the project's own
-# Claude MCP config (e.g. `.mcp.json` or `claude mcp add`), Ralph skips the
-# guidance block for it.
+#   - Tool-type allowlist: `tools:` block in .claude/agents/ralph.md
+#   - Bash sub-command blocklist: `disallowedTools:` block in
+#     .claude/agents/ralph.md
+#   - Hard-coded destructive bash patterns (rm -rf, git reset --hard,
+#     git clean, etc.): blocked by .claude/hooks/validate-command.sh
+#   - .ralph/ + .claude/ + .ralphrc write protection: enforced by
+#     .claude/hooks/protect-ralph-files.sh
 #
-# BRAIN-PHASE-B0: tapps-brain exposes ~55 tools (agent_*, diagnostics_*,
-# feedback_*, flywheel_*, hive_*, memory_* (26), profile_*, etc.). Whitelisting
-# the whole namespace drowns out the five that matter for Ralph's loop. We
-# narrow to: brain_recall (task-start lookup), brain_remember (non-obvious
-# fixes), brain_forget (pruning), brain_learn_success/failure (outcome
-# signals). This is a Ralph-side proxy for tapps-brain's STORY-070.9
-# operator/agent split until that ships.
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest),Bash(xargs *),Bash(sort *),Bash(tee *),Bash(rm *),Bash(touch *),Bash(sed *),Bash(awk *),Bash(tr *),Bash(cut *),Bash(dirname *),Bash(basename *),Bash(realpath *),Bash(test *),Bash(true),Bash(false),Bash(sleep *),Bash(ls *),Bash(cat *),Bash(wc *),Bash(head *),Bash(tail *),Bash(mkdir *),Bash(cp *),Bash(mv *),mcp__tapps-mcp__*,mcp__docs-mcp__*,mcp__tapps-brain__brain_recall,mcp__tapps-brain__brain_remember,mcp__tapps-brain__brain_forget,mcp__tapps-brain__brain_learn_success,mcp__tapps-brain__brain_learn_failure"
+# Edit those files to change permissions. The historical ALLOWED_TOOLS
+# variable here is no longer honored (see MIGRATING.md and ADR
+# docs/decisions/0006-delete-legacy-mode.md).
 
 # =============================================================================
 # SESSION MANAGEMENT
@@ -180,18 +162,14 @@ CLAUDE_EFFORT="low"
 CLAUDE_AUTO_UPDATE=true
 
 # Minimum Claude CLI version required
-CLAUDE_MIN_VERSION="2.0.76"
+# Ralph always invokes `claude --agent <name>`, which requires CLI v2.1+.
+CLAUDE_MIN_VERSION="2.1.0"
 
 # Enable verbose logging
 RALPH_VERBOSE=false
 
-# Agent mode (v1.0+): use --agent ralph instead of -p with --allowedTools
-# When true, uses .claude/agents/ralph.md agent definition (requires CLI v2.1+)
-# Falls back to legacy -p mode if CLI does not support --agent
-# NOTE (Issue #154): Agent mode is also auto-disabled when ALLOWED_TOOLS is
-# customized above, because agent mode uses a blocklist (disallowedTools) which
-# is incompatible with the allowlist approach. See TOOL PERMISSIONS section.
-RALPH_USE_AGENT=true
+# Agent name (matches a definition file under .claude/agents/<name>.md).
+# Ralph always uses agent mode — there is no legacy `-p` fallback.
 RALPH_AGENT_NAME="ralph"
 
 # Custom prompt file (relative to .ralph/)

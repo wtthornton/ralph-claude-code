@@ -103,7 +103,6 @@ teardown() {
     [[ "$output" == *"--reset-circuit"* ]]
     [[ "$output" == *"--circuit-status"* ]]
     [[ "$output" == *"--output-format"* ]]
-    [[ "$output" == *"--allowed-tools"* ]]
     [[ "$output" == *"--no-continue"* ]]
 }
 
@@ -266,13 +265,6 @@ EOF
     [[ "$output" == *"must be 'json' or 'text'"* ]]
 }
 
-@test "--allowed-tools flag accepts valid tool list" {
-    run bash "$RALPH_SCRIPT" --allowed-tools "Write,Read,Bash" --help
-
-    assert_success
-    [[ "$output" == *"Usage:"* ]]
-}
-
 # =============================================================================
 # MULTIPLE FLAGS TESTS (3 tests)
 # =============================================================================
@@ -392,9 +384,8 @@ build_ralph_cmd_for_test() {
     local CLAUDE_OUTPUT_FORMAT="${3:-json}"
     local VERBOSE_PROGRESS="${4:-false}"
     local CLAUDE_TIMEOUT_MINUTES="${5:-15}"
-    local CLAUDE_ALLOWED_TOOLS="${6:-Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)}"
-    local CLAUDE_USE_CONTINUE="${7:-true}"
-    local CLAUDE_SESSION_EXPIRY_HOURS="${8:-24}"
+    local CLAUDE_USE_CONTINUE="${6:-true}"
+    local CLAUDE_SESSION_EXPIRY_HOURS="${7:-24}"
     local RALPH_DIR=".ralph"
 
     # Forward --calls if non-default
@@ -416,10 +407,6 @@ build_ralph_cmd_for_test() {
     # Forward --timeout if non-default (default is 15)
     if [[ "$CLAUDE_TIMEOUT_MINUTES" != "15" ]]; then
         ralph_cmd="$ralph_cmd --timeout $CLAUDE_TIMEOUT_MINUTES"
-    fi
-    # Forward --allowed-tools if non-default
-    if [[ "$CLAUDE_ALLOWED_TOOLS" != "Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)" ]]; then
-        ralph_cmd="$ralph_cmd --allowed-tools '$CLAUDE_ALLOWED_TOOLS'"
     fi
     # Forward --no-continue if session continuity disabled
     if [[ "$CLAUDE_USE_CONTINUE" == "false" ]]; then
@@ -448,80 +435,28 @@ build_ralph_cmd_for_test() {
     [[ "$result" == *"--timeout 30"* ]]
 }
 
-@test "monitor forwards --allowed-tools parameter" {
-    local result=$(build_ralph_cmd_for_test 100 ".ralph/PROMPT.md" "json" "false" "15" "Read,Write")
-    [[ "$result" == *"--allowed-tools 'Read,Write'"* ]]
-}
-
 @test "monitor forwards --no-continue parameter" {
-    local result=$(build_ralph_cmd_for_test 100 ".ralph/PROMPT.md" "json" "false" "15" "Write,Bash(git *),Read" "false")
+    local result=$(build_ralph_cmd_for_test 100 ".ralph/PROMPT.md" "json" "false" "15" "false")
     [[ "$result" == *"--no-continue"* ]]
 }
 
 @test "monitor forwards --session-expiry parameter" {
-    local result=$(build_ralph_cmd_for_test 100 ".ralph/PROMPT.md" "json" "false" "15" "Write,Bash(git *),Read" "true" "48")
+    local result=$(build_ralph_cmd_for_test 100 ".ralph/PROMPT.md" "json" "false" "15" "true" "48")
     [[ "$result" == *"--session-expiry 48"* ]]
 }
 
 @test "monitor forwards multiple parameters together" {
-    local result=$(build_ralph_cmd_for_test 50 ".ralph/PROMPT.md" "text" "true" "30" "Read,Write" "false" "12")
+    local result=$(build_ralph_cmd_for_test 50 ".ralph/PROMPT.md" "text" "true" "30" "false" "12")
     [[ "$result" == *"--calls 50"* ]]
     [[ "$result" == *"--output-format text"* ]]
     [[ "$result" == *"--verbose"* ]]
     [[ "$result" == *"--timeout 30"* ]]
-    [[ "$result" == *"--allowed-tools 'Read,Write'"* ]]
     [[ "$result" == *"--no-continue"* ]]
     [[ "$result" == *"--session-expiry 12"* ]]
 }
 
 @test "monitor does not forward default parameters" {
-    local result=$(build_ralph_cmd_for_test 100 ".ralph/PROMPT.md" "json" "false" "15" "Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(git -C *),Bash(grep *),Bash(find *),Bash(npm *),Bash(pytest)" "true" "24")
+    local result=$(build_ralph_cmd_for_test 100 ".ralph/PROMPT.md" "json" "false" "15" "true" "24")
     # Should only be "ralph" with no extra flags
     [[ "$result" == "ralph" ]]
-}
-
-# =============================================================================
-# WILDCARD PATTERN PRESERVATION TESTS (Issue #154)
-# =============================================================================
-
-@test "build_claude_command preserves wildcard patterns in ALLOWED_TOOLS" {
-    # Source ralph_loop.sh functions in a subshell to test build_claude_command
-    # We need to test that * in tool patterns like Bash(git add *) survives
-    # IFS splitting and variable expansion without glob expansion
-    CLAUDE_ALLOWED_TOOLS="Write,Bash(git add *),Bash(grep *)"
-
-    # Simulate what build_claude_command does with noglob protection
-    local CLAUDE_CMD_ARGS=()
-    CLAUDE_CMD_ARGS+=("--allowedTools")
-    local _old_glob
-    _old_glob=$(set +o | grep noglob)
-    set -o noglob
-    local IFS=','
-    read -ra tools_array <<< "$CLAUDE_ALLOWED_TOOLS"
-    for tool in "${tools_array[@]}"; do
-        tool=$(echo "$tool" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        if [[ -n "$tool" ]]; then
-            CLAUDE_CMD_ARGS+=("$tool")
-        fi
-    done
-    eval "$_old_glob"
-
-    # Check that the wildcard patterns are preserved (not glob-expanded)
-    local found_git=false
-    local found_grep=false
-    for arg in "${CLAUDE_CMD_ARGS[@]}"; do
-        [[ "$arg" == "Bash(git add *)" ]] && found_git=true
-        [[ "$arg" == "Bash(grep *)" ]] && found_grep=true
-    done
-    [[ "$found_git" == "true" ]]
-    [[ "$found_grep" == "true" ]]
-}
-
-@test "validate_allowed_tools accepts wildcard patterns without glob expansion" {
-    # Test that validation works correctly with wildcard-containing tool names
-    # by running the actual script's validation with --allowed-tools
-    run bash "$RALPH_SCRIPT" --allowed-tools "Write,Bash(git add *),Bash(grep *)" --help
-
-    assert_success
-    [[ "$output" == *"Usage:"* ]]
 }

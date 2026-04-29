@@ -119,34 +119,10 @@ EOF
 }
 
 # =============================================================================
-# LOOP-3: ALLOWED_TOOLS includes common utility patterns
+# LOOP-3: PROMPT.md guidance for Bash compound commands
+# (The historical ALLOWED_TOOLS allowlist tests were removed when legacy
+#  -p mode was deleted — tool restrictions now live in the agent file.)
 # =============================================================================
-
-@test "LOOP-3: default ALLOWED_TOOLS includes xargs pattern" {
-    grep -q 'Bash(xargs \*)' "$RALPH_LOOP"
-}
-
-@test "LOOP-3: default ALLOWED_TOOLS includes sort pattern" {
-    grep -q 'Bash(sort \*)' "$RALPH_LOOP"
-}
-
-@test "LOOP-3: default ALLOWED_TOOLS includes ls pattern" {
-    grep -q 'Bash(ls \*)' "$RALPH_LOOP"
-}
-
-@test "LOOP-3: default ALLOWED_TOOLS includes sed pattern" {
-    grep -q 'Bash(sed \*)' "$RALPH_LOOP"
-}
-
-@test "LOOP-3: ralphrc template includes utility patterns" {
-    grep -q 'Bash(xargs \*)' "$PROJECT_ROOT/templates/ralphrc.template"
-    grep -q 'Bash(sort \*)' "$PROJECT_ROOT/templates/ralphrc.template"
-    grep -q 'Bash(ls \*)' "$PROJECT_ROOT/templates/ralphrc.template"
-}
-
-@test "LOOP-3: enable_core.sh includes utility patterns" {
-    grep -q 'Bash(xargs \*)' "$PROJECT_ROOT/lib/enable_core.sh"
-}
 
 @test "LOOP-3: PROMPT.md warns about cd-chained Bash compound commands" {
     # The harness's Bash permission matcher trips on `cd /path && <cmd>`

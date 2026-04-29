@@ -1700,29 +1700,23 @@ EOF
     [[ $len -le 1500 ]] || fail "Context exceeded 1500-char cap: $len chars"
 }
 
-@test "RALPH_DEFAULT_ALLOWED_TOOLS permits the 5 brain_* agent tools" {
-    # BRAIN-PHASE-B0: narrowed from the `mcp__tapps-brain__*` wildcard (which
-    # exposed ~55 operator tools) to the 5 tools Ralph actually wants Claude
-    # reaching for. If this list shrinks, a reachable brain server + prompt
-    # guidance from TAP-585 would still hit permission denials on the agent
-    # tools. Protect against accidental regression.
-    run grep 'RALPH_DEFAULT_ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../ralph_loop.sh"
+@test "agent file permits the 5 brain_* agent tools (BRAIN-PHASE-B0)" {
+    # BRAIN-PHASE-B0: tapps-brain exposes ~55 tools but Ralph only wants
+    # Claude reaching for the 5 agent-facing brain_* tools. After legacy
+    # mode deletion, this allowlist lives in the agent file's `tools:`
+    # block instead of .ralphrc ALLOWED_TOOLS. If any of the 5 disappear,
+    # prompt guidance from TAP-585 hits permission denials.
+    local agent_file="${BATS_TEST_DIRNAME}/../../.claude/agents/ralph.md"
+    [[ -f "$agent_file" ]] || skip "agent file not present in this build"
     for tool in brain_recall brain_remember brain_forget brain_learn_success brain_learn_failure; do
-        [[ "$output" == *"mcp__tapps-brain__${tool}"* ]] || fail "Missing mcp__tapps-brain__${tool} in defaults"
+        grep -q "mcp__tapps-brain__${tool}" "$agent_file" || \
+            fail "Missing mcp__tapps-brain__${tool} in agent file tools: list"
     done
-    # And assert the broad wildcard is NOT present — that's the drowning-in-noise
-    # failure mode we just removed.
-    [[ "$output" == *"mcp__tapps-brain__*"* ]] && fail "Broad wildcard mcp__tapps-brain__* re-introduced (defeats B0)"
-    return 0
-}
-
-@test "templates/ralphrc.template permits the 5 brain_* agent tools" {
-    run grep 'ALLOWED_TOOLS=' "${BATS_TEST_DIRNAME}/../../templates/ralphrc.template"
-    for tool in brain_recall brain_remember brain_forget brain_learn_success brain_learn_failure; do
-        [[ "$output" == *"mcp__tapps-brain__${tool}"* ]] || fail "Missing mcp__tapps-brain__${tool} in template"
-    done
-    [[ "$output" == *"mcp__tapps-brain__*"* ]] && fail "Broad wildcard mcp__tapps-brain__* re-introduced in template"
-    return 0
+    # Broad-wildcard regression guard — re-introducing it would drown out
+    # the 5 agent tools with the ~50 operator tools.
+    if grep -q "mcp__tapps-brain__\*" "$agent_file"; then
+        fail "Broad wildcard mcp__tapps-brain__* re-introduced (defeats B0)"
+    fi
 }
 
 @test "ralph_print_mcp_status reports tapps-brain" {

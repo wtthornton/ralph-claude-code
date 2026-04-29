@@ -30,8 +30,11 @@ PROJECT_ROOT="${BATS_TEST_DIRNAME}/../.."
 }
 
 @test "TAP-646: every tool entry resolves to a known Claude Code tool name" {
-    # The canonical tool set as of the CLAUDE.md contract.
-    local allowed='^(Read|Write|Edit|Glob|Grep|Bash|Task|TodoWrite|WebFetch|WebSearch|NotebookEdit|ExitPlanMode|mcp__docs-mcp__\*|Bash\([^)]*\))$'
+    # The canonical tool set as of the CLAUDE.md contract. After the
+    # legacy-mode deletion (ADR 0006), MCP tool allowlists moved out of
+    # .ralphrc ALLOWED_TOOLS into the agent file's tools: block, so this
+    # regex now also accepts the MCP namespaces Ralph relies on.
+    local allowed='^(Read|Write|Edit|Glob|Grep|Bash|Task|TodoWrite|WebFetch|WebSearch|NotebookEdit|ExitPlanMode|mcp__docs-mcp__\*|mcp__tapps-mcp__\*|mcp__tapps-brain__brain_(recall|remember|forget|learn_success|learn_failure)|Bash\([^)]*\))$'
     local unknown=0
     for f in "$PROJECT_ROOT/.claude/agents/"*.md; do
         # Parse tools: block — lines "  - <name>" between "^tools:$" and next unindented key
