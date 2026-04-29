@@ -16,6 +16,10 @@
 .ralph/.ralph_run_id
 .ralph/.import_graph.json
 .ralph/.plan_section_hashes
+.ralph/.last_completed_files
+.ralph/.linear_next_issue
+.ralph/.linear_optimizer_cache.json
+.claude/scheduled_tasks.lock
 
 # tapps-mcp runtime probe output (timestamped, host-specific)
 .tapps-mcp/
