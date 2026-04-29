@@ -131,6 +131,7 @@ Other exit conditions: all `fix_plan.md` tasks complete, consecutive done signal
 | **Docker sandbox** | `ralph --sandbox` with rootless, `--network none`, gVisor support |
 | **Cost dashboard** | `ralph --cost-dashboard` with per-model breakdown |
 | **Plan optimizer** | Automatic `fix_plan.md` reordering by import graph at session start |
+| **Linear optimizer** | Cache-locality scoring + dependency demotion of open Linear issues, writes hint to `.linear_next_issue` (TAP-589 LINOPT epic) |
 | **Python SDK** | Full async agent loop, Pydantic v2 models, pluggable state backend |
 | **OTel tracing** | GenAI Semantic Conventions, JSONL OTLP format |
 | **MCP integration** | Probes `tapps-mcp`, `tapps-brain`, `docs-mcp`; injects guidance |

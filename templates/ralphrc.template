@@ -217,6 +217,35 @@ RALPH_NO_OPTIMIZE=false
 # When true, tasks without explicit file references are left as-is
 RALPH_NO_EXPLORER_RESOLVE=false
 
+# =============================================================================
+# Linear cache-locality optimizer (TAP-589 LINOPT epic)
+# =============================================================================
+# Only active when RALPH_TASK_SOURCE=linear AND LINEAR_API_KEY is set. Fires at
+# session start as a background job: scores open issues by Jaccard overlap
+# with the last-completed file set + import-graph dependency demotion, writes
+# the best candidate ID to .ralph/.linear_next_issue. The runtime build_loop_context()
+# reads this and injects "LOCALITY HINT: <ID>" into Claude's system prompt.
+
+# Disable the entire optimizer (no API calls, no hint file written)
+RALPH_NO_LINEAR_OPTIMIZE=false
+
+# Skip phase 2 dependency demotion (still does locality scoring)
+# When true, candidates that import another open issue's files are NOT demoted
+RALPH_NO_DEP_DEMOTE=false
+
+# Max issues fetched and scored per optimizer run
+RALPH_OPTIMIZER_FETCH_LIMIT=20
+
+# Max ralph-explorer (Haiku) fallback calls per optimizer session
+# Used only for top-3 priority issues with no body paths
+RALPH_OPTIMIZER_EXPLORER_MAX=3
+
+# Per-session telemetry is written to .ralph/metrics/linear_optimizer_YYYY-MM.jsonl
+# (one JSONL line per session, monthly rotation). Inspect via:
+#   jq -s 'group_by(.fallback_reason) | map({reason:.[0].fallback_reason,count:length})' \
+#     .ralph/metrics/linear_optimizer_*.jsonl
+# Run optimizer manually: `ralph --optimize-linear`
+
 # Maximum vague tasks to resolve per optimization run
 # Caps explorer calls to stay within the ContextManager visible window
 RALPH_MAX_EXPLORER_RESOLVE=5
