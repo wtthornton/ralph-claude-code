@@ -148,6 +148,20 @@ RALPH_MODEL_ARCH=opus
 RALPH_DEFAULT_MODEL=sonnet
 
 # =============================================================================
+# COST CAP (DEFENSE-IN-DEPTH)
+# =============================================================================
+#
+# Per-iteration USD cap. When a single Claude invocation exceeds this value,
+# the harness trips the circuit breaker with reason `cost_cap_exceeded`.
+#
+# Motivation: the April 2026 routing-default regression had each loop cost
+# ~$57 on Opus while producing 0 tracked tasks. The cap catches the next
+# silent regression before thousands of dollars are bled.
+#
+# Default: 10 (USD). Set to 0 to disable.
+RALPH_COST_CAP_USD=10
+
+# =============================================================================
 # LOG ROTATION
 # =============================================================================
 

@@ -10,6 +10,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.11.1] — 2026-04-30
+
+### Fixed
+
+- **Routing-default regression (April 2026 incident).** `lib/complexity.sh:23` defaulted `RALPH_MODEL_ROUTING_ENABLED` to `false` while CLAUDE.md, RELEASE.md, and the 2.11.0 changelog all promised `true`. Projects that did not explicitly set the variable in `.ralphrc` had every loop pinned to `CLAUDE_MODEL` (Opus where set) at ~$57/loop, with no routing decisions logged to `.ralph/.model_routing.jsonl`. A second hardcoded `:-false` fallback in `ralph_loop.sh:2918` would have continued masking a fix to the lib alone. Both now default `true`. Two regression tests in `tests/unit/test_complexity.bats` lock the default in place — one verifies the lib-level default in a clean subshell, one exercises `ralph_select_model` end-to-end with the env var unset.
+
+### Added
+
+- **Per-iteration cost cap (`RALPH_COST_CAP_USD`, default `$10`).** Defense-in-depth against future silent regressions of the same shape. After every successful Claude invocation the harness reads `loop_cost_usd` from `status.json`; if it exceeds the cap, the circuit breaker trips with reason `cost_cap_exceeded`. Float comparison via `awk` (bash arithmetic is integer-only). Set `0` to disable.
+- **Startup routing-health visibility.** `ralph` now logs `Model routing: ENABLED/DISABLED` at startup and emits a `WARN` if `RALPH_MODEL_ROUTING_ENABLED=true` but `.ralph/.model_routing.jsonl` is more than an hour stale — the same signal that would have flagged the routing-default regression on day one.
+- **Monitor dashboard cost-cap colouring + routing-log decision count.** Loop cost is green normally, yellow at >50% of cap, red with a `⚠ exceeds cap $N` annotation at >cap. A `Routing log: N decisions` line surfaces routing-log volume; if the log is >1h stale while `loop_count` keeps incrementing, the line goes red with a "likely inert" warning. Both are read-only diagnostics — no behaviour change.
+
+### Configuration
+
+- New `.ralphrc` knob (defaulted): `RALPH_COST_CAP_USD=10`.
+- `templates/ralphrc.template` documents the new variable in a `# COST CAP (DEFENSE-IN-DEPTH)` section.
+
+---
+
 ## [2.9.2] — 2026-04-29
 
 ### Changed

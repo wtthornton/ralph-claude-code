@@ -398,3 +398,31 @@ teardown() {
     # So this test verifies that the function param takes precedence
     [[ "$model" == "haiku" ]]  # tools type at count=2 is still haiku
 }
+
+@test "RALPH_MODEL_ROUTING_ENABLED defaults to true when unset" {
+    # Regression: lib/complexity.sh used to default this to "false" while
+    # CLAUDE.md and the 2.11.0 changelog promised "true". The mismatch made
+    # routing silently inert, pinning the loop to CLAUDE_MODEL=opus and
+    # bleeding ~$57/loop. Source the lib in a clean subshell with the env
+    # var unset and verify the in-process default.
+    local default_val
+    default_val=$(env -i bash -c "
+        unset RALPH_MODEL_ROUTING_ENABLED
+        source '$BATS_TEST_DIRNAME/../../lib/complexity.sh' >/dev/null 2>&1
+        echo \"\$RALPH_MODEL_ROUTING_ENABLED\"
+    ")
+    [[ "$default_val" == "true" ]]
+}
+
+@test "ralph_select_model uses routing when RALPH_MODEL_ROUTING_ENABLED is unset (default-true)" {
+    # Companion to the default-value test: confirm the routing branch
+    # actually executes when the env var is unset, not just that the
+    # variable string equals "true".
+    unset RALPH_MODEL_ROUTING_ENABLED
+    # Re-source so the default takes effect
+    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
+    local model
+    model=$(ralph_select_model "Update README documentation" 0)
+    # docs task → haiku when routing is on; → empty/passthrough when off
+    [[ "$model" == "haiku" ]]
+}

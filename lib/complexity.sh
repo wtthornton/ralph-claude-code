@@ -13,14 +13,14 @@
 #   - arch: architecture, design, research, migration, refactoring
 #
 # Configuration:
-#   RALPH_MODEL_ROUTING_ENABLED=false  — Enable dynamic model selection (default: false)
+#   RALPH_MODEL_ROUTING_ENABLED=true   — Enable dynamic model selection (default: true)
 #   RALPH_MODEL_TRIVIAL=haiku          — Model for trivial/simple tasks (deprecated; type-based preferred)
 #   RALPH_MODEL_ROUTINE=sonnet         — Model for routine tasks (default)
 #   RALPH_MODEL_COMPLEX=sonnet         — Model for complex tasks
 #   RALPH_MODEL_ARCH=opus              — Model for architectural tasks
 #   RALPH_DEFAULT_MODEL=sonnet         — Fallback model
 
-RALPH_MODEL_ROUTING_ENABLED="${RALPH_MODEL_ROUTING_ENABLED:-false}"
+RALPH_MODEL_ROUTING_ENABLED="${RALPH_MODEL_ROUTING_ENABLED:-true}"
 RALPH_MODEL_TRIVIAL="${RALPH_MODEL_TRIVIAL:-haiku}"
 RALPH_MODEL_ROUTINE="${RALPH_MODEL_ROUTINE:-sonnet}"
 RALPH_MODEL_COMPLEX="${RALPH_MODEL_COMPLEX:-sonnet}"

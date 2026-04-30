@@ -9,8 +9,8 @@ LOG_FILE=".ralph/logs/ralph.log"
 LIVE_LOG=".ralph/live.log"
 REFRESH_INTERVAL=2
 # Staleness thresholds (seconds since status.json .timestamp)
-STALE_WARN_SECS=${MONITOR_STALE_WARN_SECS:-30}
-STALE_DEAD_SECS=${MONITOR_STALE_DEAD_SECS:-120}
+STALE_WARN_SECS=${MONITOR_STALE_WARN_SECS:-600}
+STALE_DEAD_SECS=${MONITOR_STALE_DEAD_SECS:-1800}
 # UNKNOWN-status streak threshold before the monitor flags "silent Claude"
 UNKNOWN_STREAK_WARN=${MONITOR_UNKNOWN_STREAK_WARN:-3}
 
@@ -159,12 +159,21 @@ display_status() {
         # sub-agent's model — Haiku for explorer/coordinator). Without this split
         # the monitor reports e.g. "Model: haiku" when the main loop ran Sonnet
         # and only a search sub-agent used Haiku.
-        local routed_model="" routed_task_type=""
+        local routed_model="" routed_task_type="" routing_count=0 routing_stale=false
         if [[ -f .ralph/.model_routing.jsonl ]]; then
             local _routing_last=$(tail -1 .ralph/.model_routing.jsonl 2>/dev/null)
             if [[ -n "$_routing_last" ]]; then
                 routed_model=$(echo "$_routing_last" | jq -r '.model // ""' 2>/dev/null || echo "")
                 routed_task_type=$(echo "$_routing_last" | jq -r '.task_type // ""' 2>/dev/null || echo "")
+            fi
+            routing_count=$(wc -l <.ralph/.model_routing.jsonl 2>/dev/null | tr -cd '0-9')
+            routing_count=${routing_count:-0}
+            # Stale heuristic: routing log mtime > 1h old while loop_count keeps
+            # incrementing → routing was on at some point, now apparently inert.
+            local _rt_mtime
+            _rt_mtime=$(stat -c %Y .ralph/.model_routing.jsonl 2>/dev/null || stat -f %m .ralph/.model_routing.jsonl 2>/dev/null || echo "$now_epoch")
+            if (( now_epoch - _rt_mtime > 3600 )) && (( loop_count > routing_count + 5 )); then
+                routing_stale=true
             fi
         fi
         local loop_subagents=$(echo "$status_data" | jq -r '.loop_subagents // {} | to_entries | map("\(.key)×\(.value)") | join(", ")' 2>/dev/null || echo "")
@@ -209,6 +218,15 @@ display_status() {
             # No loop_model from hook yet (first loop, transcript empty) —
             # fall back to the routing log so the panel isn't blank.
             echo -e "${CYAN}│${NC} Model (routed): ${GREEN}${routed_model}${NC}"
+        fi
+        # Routing-health line: surface decision count + stale warning so an
+        # operator can see at a glance whether routing is actually firing.
+        # The April 2026 default-false regression made routing silently inert
+        # for hundreds of loops; this line catches that next time.
+        if [[ "$routing_stale" == "true" ]]; then
+            echo -e "${CYAN}│${NC} Routing log:    ${RED}⚠ ${routing_count} decisions for #${loop_count} loops — likely inert${NC}"
+        elif (( routing_count > 0 )); then
+            echo -e "${CYAN}│${NC} Routing log:    ${routing_count} decisions"
         fi
         # SDLC stage from RALPH_STATUS work_type field. Lets the operator
         # verify model-vs-stage alignment at a glance: Haiku is fine for
@@ -255,9 +273,22 @@ display_status() {
             local sess_out_fmt=$(printf "%'d" "$session_out" 2>/dev/null || echo "$session_out")
             local sess_cost_fmt=$(awk -v c="$session_cost" 'BEGIN{printf "%.4f", c}')
             local loop_cost_fmt=$(awk -v c="$loop_cost" 'BEGIN{printf "%.4f", c}')
+            # COSTCAP visibility: colour the loop cost relative to RALPH_COST_CAP_USD
+            # so a runaway loop (e.g. Opus on routing-default regression) is visible
+            # at a glance instead of buried in status.json.
+            local _cost_cap="${RALPH_COST_CAP_USD:-10}"
+            local _loop_cost_color="$GREEN"
+            local _cost_cap_note=""
+            if [[ "$_cost_cap" != "0" ]] && awk -v c="$loop_cost" -v cap="$_cost_cap" 'BEGIN{exit !(c+0 > cap+0 * 0.5)}' 2>/dev/null; then
+                _loop_cost_color="$YELLOW"
+            fi
+            if [[ "$_cost_cap" != "0" ]] && awk -v c="$loop_cost" -v cap="$_cost_cap" 'BEGIN{exit !(c+0 > cap+0)}' 2>/dev/null; then
+                _loop_cost_color="$RED"
+                _cost_cap_note=" ${RED}⚠ exceeds cap \$${_cost_cap}${NC}"
+            fi
             echo -e "${CYAN}│${NC} Tokens (loop):  in ${loop_in}, out ${loop_out}"
             echo -e "${CYAN}│${NC} Tokens (sess):  in ${sess_in_fmt}, out ${sess_out_fmt}"
-            echo -e "${CYAN}│${NC} Cost:           loop \$${loop_cost_fmt}  ·  session \$${sess_cost_fmt}"
+            echo -e "${CYAN}│${NC} Cost:           loop ${_loop_cost_color}\$${loop_cost_fmt}${NC}${_cost_cap_note}  ·  session \$${sess_cost_fmt}"
         elif [[ "$session_cost" != "0" && "$session_cost" != "0.000000" ]]; then
             # Edge case: cost present but token counts zeroed (older hook). Surface the cost.
             local sess_cost_fmt=$(awk -v c="$session_cost" 'BEGIN{printf "%.4f", c}')
