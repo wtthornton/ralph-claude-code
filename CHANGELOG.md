@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.9.2] — 2026-04-29
+
+### Changed
+
+- **MCP probe default timeout** raised again from 15s to 30s. Cold-start cases where stdio MCP servers spawn child processes plus HTTP MCPs do auth round-trips can occasionally exceed 15s on the very first invocation; warm runs return in 1–2s so the higher default has no visible cost. Override via `RALPH_MCP_PROBE_TIMEOUT_SECONDS`.
+
+---
+
 ## [2.9.1] — 2026-04-29
 
 ### Changed
