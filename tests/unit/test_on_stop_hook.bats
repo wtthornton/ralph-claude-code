@@ -172,9 +172,11 @@ RECOMMENDATION: Test payload.
     assert_output "OPEN"
 }
 
-@test "EXIT-CLEAN guard: EXIT_SIGNAL=true but STATUS!=COMPLETE does NOT bypass no-progress" {
+@test "EXIT-CLEAN guard: EXIT_SIGNAL=true but STATUS!=COMPLETE/BLOCKED does NOT bypass no-progress" {
     # Defensive: only honor exit-clean when BOTH signals agree. EXIT_SIGNAL=true
-    # without STATUS=COMPLETE is ambiguous — fall through to normal classification.
+    # paired with STATUS=COMPLETE (Grounds 1: plan done) or STATUS=BLOCKED
+    # (Grounds 2: queue fully blocked) is honored. Any other status (PARTIAL,
+    # IN_PROGRESS, etc.) is ambiguous — fall through to normal classification.
     printf '%s\n' \
         '{"state":"CLOSED","consecutive_no_progress":2,"consecutive_permission_denials":0,"total_opens":0}' \
         > "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
@@ -185,6 +187,45 @@ RECOMMENDATION: Test payload.
     # Should be treated as no-progress and trip.
     run jq -r '.consecutive_no_progress' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
     assert_output "3"
+}
+
+@test "EXIT-CLEAN: EXIT_SIGNAL=true + STATUS=BLOCKED + 0/0 RESETS no-progress (Grounds 2: queue fully blocked)" {
+    # The "whole queue blocked — clean exit" scenario from the ralph-workflow
+    # skill. When every open issue is blocked on external action and Claude
+    # signals EXIT_SIGNAL=true + STATUS=BLOCKED, the harness should exit
+    # cleanly the same way it does for STATUS=COMPLETE — not trip the CB on
+    # consecutive blocked-queue loops.
+    printf '%s\n' \
+        '{"state":"CLOSED","consecutive_no_progress":2,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_status_block_input true BLOCKED 0 0)"
+    assert_success
+
+    # Counter must be reset to 0, state must remain CLOSED.
+    run jq -r '.consecutive_no_progress' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "0"
+    run jq -r '.state' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "CLOSED"
+}
+
+@test "EXIT-CLEAN guard: EXIT_SIGNAL=false + STATUS=BLOCKED STILL increments (single-task block, not queue-wide)" {
+    # The "single task blocked" scenario — Claude reports STATUS=BLOCKED on
+    # one task but EXIT_SIGNAL=false because other tasks may still be
+    # actionable. The hook must NOT bypass no-progress in this case;
+    # consecutive single-task blocks should still trip the CB so the operator
+    # gets surfaced visibility.
+    printf '%s\n' \
+        '{"state":"CLOSED","consecutive_no_progress":2,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_status_block_input false BLOCKED 0 0)"
+    assert_success
+
+    run jq -r '.consecutive_no_progress' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "3"
+    run jq -r '.state' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "OPEN"
 }
 
 @test "EXIT-CLEAN: status.json after EXIT_SIGNAL=true is valid JSON (Bug 1 regression guard)" {

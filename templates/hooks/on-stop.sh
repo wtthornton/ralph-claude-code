@@ -604,12 +604,13 @@ if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
     if [[ "$new_pd" -ge "${pd_threshold}" ]]; then
       echo "Circuit breaker OPEN: permission denied $new_pd consecutive times" >&2
     fi
-  elif [[ "$exit_signal" == "true" && "$status" == "COMPLETE" ]]; then
-    # EXIT-CLEAN: Claude reported clean completion (EXIT_SIGNAL: true + STATUS: COMPLETE)
-    # but with 0 files modified and 0 tasks completed — this is the legitimate
-    # "plan is empty / nothing to do" path, not stagnation. Reset the no-progress
-    # counter so consecutive empty-plan loops don't trip the breaker on the
-    # SAME signal Claude is already using to ask for clean shutdown.
+  elif [[ "$exit_signal" == "true" && ( "$status" == "COMPLETE" || "$status" == "BLOCKED" ) ]]; then
+    # EXIT-CLEAN: Claude reported clean exit with EXIT_SIGNAL: true and either:
+    #   - STATUS: COMPLETE — plan is empty / nothing to do (Grounds 1 in skill)
+    #   - STATUS: BLOCKED — entire queue blocked on external action (Grounds 2)
+    # Both are legitimate "stop looping" signals, not stagnation. Reset the
+    # no-progress counter so consecutive clean-exit loops don't trip the
+    # breaker on the SAME signal Claude is already using to ask for shutdown.
     # Also reset permission denials (none happened) and ensure state stays CLOSED.
     jq '.consecutive_no_progress = 0 | .consecutive_permission_denials = 0 | .state = "CLOSED"' \
       "$RALPH_DIR/.circuit_breaker_state" > "$local_tmp" 2>/dev/null \
