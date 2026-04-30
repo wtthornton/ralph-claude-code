@@ -64,6 +64,7 @@ if [[ -n "$_status_block" ]]; then
   # exit-gate and preflight checks without LINEAR_API_KEY.
   linear_open_count=$(echo "$_status_block" | grep "LINEAR_OPEN_COUNT:" | tail -1 | sed 's/.*LINEAR_OPEN_COUNT:[[:space:]]*//' | tr -d '[:space:]' || echo "")
   linear_done_count=$(echo "$_status_block" | grep "LINEAR_DONE_COUNT:" | tail -1 | sed 's/.*LINEAR_DONE_COUNT:[[:space:]]*//' | tr -d '[:space:]' || echo "")
+  tests_status=$(echo "$_status_block" | grep "TESTS_STATUS:" | tail -1 | sed 's/.*TESTS_STATUS:[[:space:]]*//' | tr -d '[:space:]' || echo "")
 else
   # No structured status block found — extract from full text
   exit_signal="false"
@@ -79,6 +80,7 @@ else
   linear_epic_total=""
   linear_open_count=""
   linear_done_count=""
+  tests_status=""
 fi
 
 # LINEAR-DASH: sanitize Linear fields; empty strings become JSON null
@@ -89,6 +91,9 @@ fi
 # TAP-741: enforce non-negative integer shape; anything else → null (abstain).
 [[ "$linear_open_count" =~ ^[0-9]+$ ]] || linear_open_count=""
 [[ "$linear_done_count" =~ ^[0-9]+$ ]] || linear_done_count=""
+
+# Normalize TESTS_STATUS to upper-case for comparison
+tests_status="${tests_status^^}"
 
 # Defaults for empty values
 exit_signal="${exit_signal:-false}"
@@ -669,6 +674,39 @@ if [[ -f "$_ralph_log" ]]; then
   # Log import graph staleness
   if [[ -f "$RALPH_DIR/.import_graph.json.stale" ]]; then
     echo "[$_ts] [INFO] on-stop: Import graph marked stale (new source files created)" >> "$_ralph_log"
+  fi
+fi
+
+# =============================================================================
+# QA failure tracking — feeds the type-aware router's Opus escalation path.
+#
+# When TESTS_STATUS is FAILING for a Linear issue, increment the per-issue
+# counter in .ralph/.qa_failures.json. When TESTS_STATUS is PASSING, clear
+# the counter. The router (build_claude_command) reads this counter for the
+# current issue on the next loop and forces Opus when count >= 3.
+#
+# DEFERRED / NOT_RUN are explicitly ignored — they're not failure signals
+# and resetting on DEFERRED would mask consecutive-failure patterns when
+# QA is mid-epic-skipped between two failures.
+# =============================================================================
+if [[ -n "$linear_issue" ]]; then
+  _qa_lib=""
+  for _p in "$HOME/.ralph/lib/qa_failures.sh" \
+            "${RALPH_INSTALL_DIR:-/nonexistent}/lib/qa_failures.sh" \
+            "$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/../../lib/qa_failures.sh"; do
+    [[ -f "$_p" ]] && { _qa_lib="$_p"; break; }
+  done
+  if [[ -n "$_qa_lib" ]]; then
+    # shellcheck source=/dev/null
+    source "$_qa_lib"
+    case "$tests_status" in
+      FAILING)
+        qa_failures_increment "$linear_issue" >/dev/null 2>&1 || true
+        ;;
+      PASSING)
+        qa_failures_reset "$linear_issue" >/dev/null 2>&1 || true
+        ;;
+    esac
   fi
 fi
 

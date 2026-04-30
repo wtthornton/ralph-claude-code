@@ -529,3 +529,97 @@ _assistant_tool_use() {
     [[ -f "$TEST_TEMP_DIR/.ralph/.last_completed_files" ]] || fail "file missing"
     [[ ! -s "$TEST_TEMP_DIR/.ralph/.last_completed_files" ]] || fail "expected empty"
 }
+
+# =============================================================================
+# QA failure tracking — TESTS_STATUS=FAILING increments .qa_failures.json,
+# PASSING resets it. Feeds the type-aware router's Opus escalation path.
+# =============================================================================
+
+# Helper: Claude payload with LINEAR_ISSUE + TESTS_STATUS in the RALPH_STATUS block.
+_qa_input() {
+    local linear_issue="$1" tests_status="$2"
+    local body="Did some work.
+
+---RALPH_STATUS---
+STATUS: IN_PROGRESS
+TASKS_COMPLETED_THIS_LOOP: 0
+FILES_MODIFIED: 0
+TESTS_STATUS: ${tests_status}
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: false
+LINEAR_ISSUE: ${linear_issue}
+RECOMMENDATION: Test payload.
+---END_RALPH_STATUS---"
+    jq -Rs '{result: .}' <<<"$body"
+}
+
+@test "QA-FAIL: TESTS_STATUS=FAILING with LINEAR_ISSUE increments .qa_failures.json" {
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)"
+    assert_success
+
+    [[ -f "$TEST_TEMP_DIR/.ralph/.qa_failures.json" ]] || fail ".qa_failures.json missing"
+    run jq -r '."TAP-123"' "$TEST_TEMP_DIR/.ralph/.qa_failures.json"
+    assert_output "1"
+}
+
+@test "QA-FAIL: consecutive FAILING loops accumulate per-issue count" {
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+
+    run jq -r '."TAP-123"' "$TEST_TEMP_DIR/.ralph/.qa_failures.json"
+    assert_output "3"
+}
+
+@test "QA-PASS: TESTS_STATUS=PASSING clears the count for that issue" {
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 PASSING)" >/dev/null 2>&1
+
+    # Issue should be removed from the map (qa_failures_get returns 0 for missing).
+    run jq -r '."TAP-123" // 0' "$TEST_TEMP_DIR/.ralph/.qa_failures.json"
+    assert_output "0"
+}
+
+@test "QA-FAIL: PASSING for one issue does not reset another" {
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-456 FAILING)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 PASSING)" >/dev/null 2>&1
+
+    run jq -r '."TAP-456"' "$TEST_TEMP_DIR/.ralph/.qa_failures.json"
+    assert_output "1"
+}
+
+@test "QA-FAIL: TESTS_STATUS=DEFERRED is ignored (does not increment)" {
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 DEFERRED)" >/dev/null 2>&1
+
+    run jq -r '."TAP-123"' "$TEST_TEMP_DIR/.ralph/.qa_failures.json"
+    assert_output "1"
+}
+
+@test "QA-FAIL: TESTS_STATUS=DEFERRED does not reset accumulated failures" {
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 DEFERRED)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+
+    run jq -r '."TAP-123"' "$TEST_TEMP_DIR/.ralph/.qa_failures.json"
+    assert_output "3"
+}
+
+@test "QA-FAIL: TESTS_STATUS=NOT_RUN is ignored" {
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 FAILING)" >/dev/null 2>&1
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input TAP-123 NOT_RUN)" >/dev/null 2>&1
+
+    run jq -r '."TAP-123"' "$TEST_TEMP_DIR/.ralph/.qa_failures.json"
+    assert_output "1"
+}
+
+@test "QA-FAIL: missing LINEAR_ISSUE → no qa_failures write (file-mode projects)" {
+    bash "$TEMPLATE_HOOK" <<<"$(_qa_input '' FAILING)" >/dev/null 2>&1
+
+    # Hook should not have created the file when there's no issue to key on.
+    [[ ! -f "$TEST_TEMP_DIR/.ralph/.qa_failures.json" ]] || \
+        fail ".qa_failures.json should not exist for file-mode (no LINEAR_ISSUE)"
+}
