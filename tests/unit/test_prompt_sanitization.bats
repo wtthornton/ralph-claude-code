@@ -187,3 +187,58 @@ EOF
     out=$(build_loop_context 1)
     [[ "$out" != *"### System:"* ]]
 }
+
+# =============================================================================
+# COUNT-GUARD: When `linear_get_open_count` returns "unknown" (push-mode
+# iteration 1, or hook hasn't written counts yet), the prompt must:
+#   1. Forbid FALSE-POSITIVE plan-complete exits — Claude cannot emit
+#      `STATUS: COMPLETE + EXIT_SIGNAL: true` based on a null count, since
+#      "unknown" is not "zero".
+#   2. EXPLICITLY ALLOW the genuinely-blocked exit — Claude MAY emit
+#      `STATUS: BLOCKED + EXIT_SIGNAL: true` when every visible Linear
+#      issue is `blocked:*` labeled. The previous wording forbade ALL
+#      EXIT_SIGNAL when counts were null, which trapped Claude on a fully-
+#      blocked queue forever (NLTlabsPE 2026-04-30 incident: 7+ loops, ~$0.86
+#      burned, Claude wrote a hallucinated "parser broken" memory in
+#      response).
+# =============================================================================
+
+@test "COUNT-GUARD: blocks STATUS=COMPLETE+EXIT_SIGNAL=true when counts unknown" {
+    source_ralph
+    export RALPH_TASK_SOURCE="linear"
+    export RALPH_LINEAR_PROJECT="TestProject"
+    # Make linear_get_open_count abstain (return non-zero) by ensuring no
+    # status.json with linear_open_count exists.
+    rm -f "$STATUS_FILE"
+    local out
+    out=$(build_loop_context 1)
+    # Must explicitly block plan-complete-on-unknown
+    [[ "$out" == *"do NOT emit STATUS: COMPLETE + EXIT_SIGNAL: true"* ]] || \
+        fail "prompt must forbid false-positive plan-complete on null count"
+}
+
+@test "COUNT-GUARD: allows STATUS=BLOCKED+EXIT_SIGNAL=true on fully-blocked queue" {
+    source_ralph
+    export RALPH_TASK_SOURCE="linear"
+    export RALPH_LINEAR_PROJECT="TestProject"
+    rm -f "$STATUS_FILE"
+    local out
+    out=$(build_loop_context 1)
+    # Must explicitly allow the legitimate Grounds 2 exit
+    [[ "$out" == *"MAY emit STATUS: BLOCKED + EXIT_SIGNAL: true"* ]] || \
+        fail "prompt must allow Grounds 2 BLOCKED exit when every open issue is blocked:* labeled"
+}
+
+@test "COUNT-GUARD: regression — does NOT carry the old over-strict 'do NOT emit EXIT_SIGNAL' wording" {
+    source_ralph
+    export RALPH_TASK_SOURCE="linear"
+    export RALPH_LINEAR_PROJECT="TestProject"
+    rm -f "$STATUS_FILE"
+    local out
+    out=$(build_loop_context 1)
+    # The old wording "do NOT emit EXIT_SIGNAL" (without qualifier) is what
+    # caused the NLTlabsPE deadlock. The new wording must qualify which
+    # EXIT_SIGNAL pairing is forbidden, leaving Grounds 2 as a legitimate exit.
+    [[ "$out" != *"do NOT emit EXIT_SIGNAL)"* ]] || \
+        fail "prompt regressed to over-strict 'do NOT emit EXIT_SIGNAL' wording — NLTlabsPE deadlock will recur"
+}

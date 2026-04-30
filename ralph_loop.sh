@@ -2108,7 +2108,18 @@ build_loop_context() {
             context+="Remaining tasks (Linear): ${incomplete_tasks}. "
         else
             log_status "$_ctx_lvl" "Linear count (open_count) unavailable — context will mark counts as unknown" >&2
-            context+="Remaining tasks (Linear): unknown (counts not yet reported — do NOT emit EXIT_SIGNAL). "
+            # Count is unknown (push-mode iteration 1, or hook hasn't written
+            # counts yet). Block FALSE-POSITIVE plan-complete exits — Claude
+            # must NOT emit `STATUS: COMPLETE + EXIT_SIGNAL: true` based on a
+            # null count, since "unknown" is not "zero". But explicitly ALLOW
+            # the genuinely-blocked exit (Grounds 2: STATUS: BLOCKED +
+            # EXIT_SIGNAL: true) — assess every visible Linear issue this
+            # loop, count blocked:* labeled ones as zero per the prompt's own
+            # definition, and emit BLOCKED+true if every open issue is
+            # blocked. The previous wording forbade ALL EXIT_SIGNAL when
+            # counts were null, which trapped Claude on a fully-blocked queue
+            # forever (loop ran 7+ iterations on 2026-04-30 burning ~$0.86).
+            context+="Remaining tasks (Linear): unknown (counts not yet reported — do NOT emit STATUS: COMPLETE + EXIT_SIGNAL: true based on the unknown count, but you MAY emit STATUS: BLOCKED + EXIT_SIGNAL: true if every visible open issue is blocked:* labeled — list them via Linear MCP and verify before emitting). "
         fi
         # Check for in-progress (started) tickets from previous loops — these must
         # be retried before picking new backlog work to prevent branch pile-up.
