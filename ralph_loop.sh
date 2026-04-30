@@ -31,6 +31,9 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 # BRAIN-PHASE-B1: memory writes from on-stop hook. Sourced here so the main
 # loop also has access if we later want to write outside hook context.
 [[ -f "$SCRIPT_DIR/lib/brain_client.sh" ]] && source "$SCRIPT_DIR/lib/brain_client.sh"
+# TAP-914 / TAP-915: brief.json read/write/validate helpers used by the
+# coordinator spawn point and by build_loop_context.
+[[ -f "$SCRIPT_DIR/lib/brief.sh" ]] && source "$SCRIPT_DIR/lib/brief.sh"
 
 # TAP-535: Bash 4+ required for `${BASH_VERSINFO[@]}`, mapfile/readarray, named
 # refs, and the rest of the modern bash features used throughout this script.
@@ -2226,11 +2229,101 @@ build_loop_context() {
         context+="tapps-brain available: call mcp__tapps-brain__brain_recall at task start to surface prior learnings, brain_remember when a fix was non-obvious and worth preserving, and brain_learn_success / brain_learn_failure at epic boundaries to feed the quality loop. "
     fi
 
+    # TAP-915: When the coordinator wrote a brief at the top of this loop,
+    # nudge the main agent to read it. Validation already happened in
+    # ralph_spawn_coordinator — a present file here is a valid brief.
+    if [[ -s "$RALPH_DIR/brief.json" ]]; then
+        context+=".ralph/brief.json available — read it at task start for prior learnings, risk level, and affected modules. "
+    fi
+
     # Limit total length to ~1500 chars (raised from 800→1200→1500 as MCP
     # blocks were added — docs-mcp + tapps-mcp + tapps-brain run ~770 chars
     # combined, and that is before any loop-state / previous-summary prefix).
     # Truncation was silently dropping MCP guidance at the old caps.
     echo "${context:0:1500}"
+}
+
+# TAP-915: ralph_spawn_coordinator — invoke ralph-coordinator (Haiku) at
+# the top of each loop to populate .ralph/brief.json with prior learnings,
+# affected modules, and risk level. Stateless per loop; best-effort.
+# Coordinator failure NEVER blocks the main agent — we log and continue.
+#
+# Honors RALPH_COORDINATOR_DISABLED=true (opt-out), DRY_RUN (skip), and
+# CLAUDE_CODE_CMD missing (skip). Timeout 60s — coordinator is Haiku; longer
+# hangs likely mean a real outage we should not wait on.
+#
+# Test seam: _coordinator_invoke_claude is split out so tests can override
+# it without a real Claude CLI. Same pattern as _optimizer_invoke_explorer
+# in lib/linear_optimizer.sh.
+_coordinator_invoke_claude() {
+    local input="$1"
+    local claude_cmd="${CLAUDE_CODE_CMD:-claude}"
+    timeout 60 "$claude_cmd" \
+        --agent ralph-coordinator \
+        --permission-mode bypassPermissions \
+        -p "$input" \
+        >/dev/null 2>&1
+}
+
+ralph_spawn_coordinator() {
+    local loop_count="${1:-0}"
+    local brief_target
+    brief_target=$(brief_path)
+
+    if [[ "${RALPH_COORDINATOR_DISABLED:-false}" == "true" ]]; then
+        log_status "INFO" "coordinator: disabled via RALPH_COORDINATOR_DISABLED"
+        return 0
+    fi
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        return 0
+    fi
+
+    local claude_cmd="${CLAUDE_CODE_CMD:-claude}"
+    if ! command -v "$claude_cmd" >/dev/null 2>&1; then
+        log_status "WARN" "coordinator: claude CLI not on PATH — continuing without brief"
+        return 0
+    fi
+
+    # Build task input from current source. linear_get_next_task is
+    # tolerated to fail silently — the coordinator can still work with an
+    # empty TASK_INPUT (it'll write a brief flagged with low confidence).
+    local task_source="${RALPH_TASK_SOURCE:-file}"
+    local task_input=""
+    if [[ "$task_source" == "linear" ]]; then
+        if declare -F linear_get_next_task >/dev/null 2>&1; then
+            task_input=$(linear_get_next_task 2>/dev/null) || task_input=""
+        fi
+    else
+        task_input=$(grep -m1 '^[[:space:]]*- \[ \]' "${RALPH_DIR}/fix_plan.md" 2>/dev/null) || task_input=""
+    fi
+
+    # Drop any stale brief from a previous loop so a coordinator failure
+    # leaves the consumer reading "no brief" rather than yesterday's
+    # recommendation.
+    brief_clear
+
+    local coord_input
+    coord_input="MODE=brief
+TASK_SOURCE=${task_source}
+LOOP=${loop_count}
+TASK_INPUT: ${task_input}
+
+Write ${brief_target} per the schema in lib/brief.sh, then return a one-line summary."
+
+    if ! _coordinator_invoke_claude "$coord_input"; then
+        log_status "WARN" "coordinator: spawn failed or timed out — continuing without brief"
+        return 0
+    fi
+
+    if [[ -s "$brief_target" ]] && brief_validate "$brief_target" 2>/dev/null; then
+        local _risk
+        _risk=$(brief_read_field risk_level 2>/dev/null) || _risk="unknown"
+        log_status "INFO" "coordinator: brief written (risk=${_risk})"
+    else
+        log_status "WARN" "coordinator: brief missing or invalid — clearing"
+        rm -f "$brief_target" 2>/dev/null || true
+    fi
 }
 
 # Get session file age in hours (cross-platform)
@@ -4767,6 +4860,10 @@ main() {
             log_status "INFO" "[DRY-RUN] Loop #$loop_count complete. Exiting after single dry-run iteration."
             break
         fi
+
+        # TAP-915: spawn coordinator to populate .ralph/brief.json before the
+        # main agent runs. Best-effort — failure does not block the loop.
+        ralph_spawn_coordinator "$loop_count"
 
         # Execute Claude Code
         execute_claude_code "$loop_count"
