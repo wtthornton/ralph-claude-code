@@ -150,8 +150,23 @@ display_status() {
 
         # PHASE1: model + cache + sub-agent fields
         local loop_model=$(echo "$status_data" | jq -r '.loop_model // ""' 2>/dev/null || echo "")
+        local work_type=$(echo "$status_data" | jq -r '.work_type // ""' 2>/dev/null || echo "")
         local cache_read=$(echo "$status_data" | jq -r '.session_cache_read_tokens // 0' 2>/dev/null || echo "0")
         local cache_create=$(echo "$status_data" | jq -r '.session_cache_create_tokens // 0' 2>/dev/null || echo "0")
+        # Routed/configured model: read the most recent .model_routing.jsonl entry
+        # so we can show what the router PICKED for this loop, separate from the
+        # last-assistant-message model the hook captured (which is often a
+        # sub-agent's model — Haiku for explorer/coordinator). Without this split
+        # the monitor reports e.g. "Model: haiku" when the main loop ran Sonnet
+        # and only a search sub-agent used Haiku.
+        local routed_model="" routed_task_type=""
+        if [[ -f .ralph/.model_routing.jsonl ]]; then
+            local _routing_last=$(tail -1 .ralph/.model_routing.jsonl 2>/dev/null)
+            if [[ -n "$_routing_last" ]]; then
+                routed_model=$(echo "$_routing_last" | jq -r '.model // ""' 2>/dev/null || echo "")
+                routed_task_type=$(echo "$_routing_last" | jq -r '.task_type // ""' 2>/dev/null || echo "")
+            fi
+        fi
         local loop_subagents=$(echo "$status_data" | jq -r '.loop_subagents // {} | to_entries | map("\(.key)×\(.value)") | join(", ")' 2>/dev/null || echo "")
         local session_subagents=$(echo "$status_data" | jq -r '.session_subagents // {} | to_entries | map("\(.key) \(.value)") | join(", ")' 2>/dev/null || echo "")
 
@@ -178,7 +193,51 @@ display_status() {
         echo -e "${CYAN}│${NC} Status:         ${status_color}$status${NC}"
         echo -e "${CYAN}│${NC} Last update:    ${age_str}"
         if [[ -n "$loop_model" && "$loop_model" != "null" ]]; then
-            echo -e "${CYAN}│${NC} Model:          ${GREEN}${loop_model}${NC}"
+            # If the router picked a different model than the hook saw last,
+            # that means a sub-agent (Haiku explorer, coordinator, etc.) ran
+            # AFTER the main loop's call, and the hook captured its model.
+            # Show both so the operator can verify the main loop is on the
+            # right tier without being misled by sub-agent dispatches.
+            if [[ -n "$routed_model" && "$routed_model" != "$loop_model" ]]; then
+                # Map short routed name (haiku/sonnet/opus) to human-readable
+                # tier marker, since loop_model is a long versioned ID.
+                echo -e "${CYAN}│${NC} Model (loop):   ${GREEN}${routed_model}${NC} (main) · ${loop_model} (last sub-agent)"
+            else
+                echo -e "${CYAN}│${NC} Model:          ${GREEN}${loop_model}${NC}"
+            fi
+        elif [[ -n "$routed_model" ]]; then
+            # No loop_model from hook yet (first loop, transcript empty) —
+            # fall back to the routing log so the panel isn't blank.
+            echo -e "${CYAN}│${NC} Model (routed): ${GREEN}${routed_model}${NC}"
+        fi
+        # SDLC stage from RALPH_STATUS work_type field. Lets the operator
+        # verify model-vs-stage alignment at a glance: Haiku is fine for
+        # DOCUMENTATION/VERIFICATION, Sonnet is the floor for IMPLEMENTATION
+        # /TESTING/REFACTORING, Opus is for architectural / QA-escalated
+        # work. A Haiku × IMPLEMENTATION row is a routing red flag.
+        if [[ -n "$work_type" && "$work_type" != "null" && "$work_type" != "UNKNOWN" ]]; then
+            local _stage_color="$GREEN"
+            # Highlight model-stage mismatches in yellow. The router maps:
+            #   docs/tools (DOCUMENTATION/VERIFICATION-flavored) → haiku
+            #   code (IMPLEMENTATION/TESTING/REFACTORING)        → sonnet floor
+            #   arch                                              → opus
+            # If routed_model is haiku but work_type is IMPLEMENTATION/
+            # TESTING/REFACTORING, the classifier under-spent.
+            if [[ "$routed_model" == "haiku" ]] \
+               && [[ "$work_type" == "IMPLEMENTATION" || "$work_type" == "TESTING" || "$work_type" == "REFACTORING" ]]; then
+                _stage_color="$YELLOW"
+            fi
+            # Display routed task type alongside SDLC stage when available, so the
+            # operator can audit the classifier's decision (docs/tools/code/arch)
+            # against the actual work Claude reported (work_type). A mismatch like
+            # task_type=tools × work_type=IMPLEMENTATION points at a regex-keyword
+            # false-positive in the classifier (e.g. issue title "List the broken
+            # imports and fix them" → tools by 'list', but the actual work is code).
+            if [[ -n "$routed_task_type" ]]; then
+                echo -e "${CYAN}│${NC} Stage (SDLC):   ${_stage_color}${work_type}${NC} · routed as ${routed_task_type}"
+            else
+                echo -e "${CYAN}│${NC} Stage (SDLC):   ${_stage_color}${work_type}${NC}"
+            fi
         fi
         echo -e "${CYAN}│${NC} API Calls:      $calls_made/$max_calls (this hour)"
         # Silent-Claude detection: N consecutive UNKNOWN loops means on-stop.sh

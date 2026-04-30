@@ -87,3 +87,48 @@ teardown() {
     wt=$(jq -r '.WORK_TYPE' "$RALPH_DIR/status.json")
     [ "$wt" = "IMPLEMENTATION" ]
 }
+
+# SDLC-MONITOR: Stage row + dual-model display let the operator verify the
+# router's choice against what Claude actually did each loop. The hook writes
+# work_type lowercase; the routing log carries the routed model and task type.
+# A Haiku × IMPLEMENTATION pairing should color yellow as a routing red flag.
+
+@test "SDLC-MONITOR: status.json work_type field is lowercase (matches hook write)" {
+    # The on-stop hook writes lowercase 'work_type' (templates/hooks/on-stop.sh).
+    # The monitor must read the same casing or it will silently show no stage.
+    grep -qE "jq -r '\.work_type" "$RALPH_MONITOR_SCRIPT" || \
+        fail "ralph_monitor.sh must read .work_type (lowercase) to match hook output"
+}
+
+@test "SDLC-MONITOR: monitor reads routed model from .model_routing.jsonl" {
+    # The router writes JSONL entries; the monitor surfaces the most recent
+    # routed model so operators see what was PICKED, not just what the hook
+    # captured from the last assistant message (often a sub-agent).
+    grep -q "\.model_routing\.jsonl" "$RALPH_MONITOR_SCRIPT" || \
+        fail "ralph_monitor.sh must read .ralph/.model_routing.jsonl to surface routing"
+}
+
+@test "SDLC-MONITOR: monitor displays Stage row with work_type" {
+    grep -q "Stage (SDLC)" "$RALPH_MONITOR_SCRIPT" || \
+        fail "ralph_monitor.sh must display 'Stage (SDLC)' row when work_type is set"
+}
+
+@test "SDLC-MONITOR: monitor flags Haiku × IMPLEMENTATION as yellow (routing red flag)" {
+    # The router maps code work to Sonnet (floor). If the routed model is Haiku
+    # and the work is IMPLEMENTATION/TESTING/REFACTORING, the classifier
+    # under-spent — should be visible at a glance.
+    grep -A 3 'routed_model" == "haiku"' "$RALPH_MONITOR_SCRIPT" \
+        | grep -q 'IMPLEMENTATION\|TESTING\|REFACTORING' \
+        || fail "monitor must flag Haiku × code-work pairings as routing mismatches"
+}
+
+@test "SDLC-MONITOR: monitor handles missing .model_routing.jsonl gracefully" {
+    # When routing is disabled or no decisions logged yet, the monitor should
+    # fall back to loop_model only — not crash or show a stale stage.
+    [ ! -f "$RALPH_DIR/.model_routing.jsonl" ]
+    echo '{"loop_count": 1, "status": "IN_PROGRESS", "loop_model": "claude-sonnet-4-6"}' \
+        > "$RALPH_DIR/status.json"
+    # Just check that the relevant code path uses a guard
+    grep -q 'if \[\[ -f .ralph/.model_routing.jsonl \]\]' "$RALPH_MONITOR_SCRIPT" || \
+        fail "monitor must guard .model_routing.jsonl reads with file-exists check"
+}
