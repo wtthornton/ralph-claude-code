@@ -10,6 +10,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.11.3] — 2026-04-30
+
+### Fixed
+
+- **on-stop.sh status-block parser hardening (NLTlabsPE 2026-04-30 incident).** Two simultaneous parser bugs caused exit-gate bypass when Claude correctly reported `STATUS: BLOCKED + EXIT_SIGNAL: true` on a fully-blocked Linear backlog (10 wasted loops + CB trip):
+  - **Field-name case drift.** Projects whose `PROMPT.md` uses lowercase `linear_open_count: 0` had the value silently dropped because the original grep was case-sensitive against `LINEAR_OPEN_COUNT:`. The hook now runs an `awk` pre-pass that uppercases the field-identifier portion of every `<ident>: <value>` line before extraction, so downstream parsing is case-insensitive without requiring every project to migrate its prompt.
+  - **Unanchored greps + prose colon.** A `RECOMMENDATION:` line containing `STATUS:BLOCKED` in free-text prose poisoned `grep "STATUS:"` — `tail -1` picked the recommendation, `sed` stripped up to the *last* `STATUS:` occurrence, and the captured value was `BLOCKED)` (closing paren of the parenthetical). The EXIT-CLEAN equality check at `on-stop.sh:607` then failed and the hook fell through to the no-progress branch, incrementing `consecutive_no_progress` instead of recognising clean exit. Every field-extraction grep is now anchored to `^[[:space:]]*` so prose mid-line cannot be selected. The brittle `grep -v "TESTS_STATUS\|END_RALPH"` and `grep -v "LINEAR_EPIC_DONE\|LINEAR_EPIC_TOTAL"` workarounds are removed — the line anchor makes them redundant.
+
+### Tests
+
+- 3 new regression tests in `tests/unit/test_on_stop_hook.bats`:
+  - `PARSER-HARDENING: RECOMMENDATION prose containing 'STATUS:BLOCKED' does NOT poison the STATUS field` — replays the exact NLTlabsPE Loop-12 payload and asserts `status=BLOCKED` (not `BLOCKED)`) and that EXIT-CLEAN Grounds 2 fires (counter resets, state stays CLOSED).
+  - `PARSER-HARDENING: lowercase linear_open_count / linear_done_count (PROMPT.md drift) parses correctly` — asserts `linear_open_count=0` and `linear_done_count=142` with all-lowercase field names in the input.
+  - `PARSER-HARDENING: TESTS_STATUS does NOT bleed into STATUS field via unanchored grep` — defense regression after removing the legacy `grep -v` filter.
+
+---
+
 ## [2.11.2] — 2026-04-30
 
 ### Removed

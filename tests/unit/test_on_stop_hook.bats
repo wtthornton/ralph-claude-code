@@ -406,6 +406,105 @@ RECOMMENDATION: No Linear fields.
     assert_output "null"
 }
 
+@test "PARSER-HARDENING: RECOMMENDATION prose containing 'STATUS:BLOCKED' does NOT poison the STATUS field" {
+    # Reproduces the NLTlabsPE 2026-04-30 incident. Claude correctly emitted
+    # STATUS: BLOCKED + EXIT_SIGNAL: true after detecting every Linear issue
+    # carried a blocked:* label, but added a parenthetical to RECOMMENDATION
+    # that mentioned "STATUS:BLOCKED" in prose. The unanchored grep "STATUS:"
+    # picked the recommendation line via tail -1, sed stripped up to the LAST
+    # "STATUS:" occurrence, and the captured value was "BLOCKED)" — failing
+    # the EXIT-CLEAN equality check at on-stop.sh:607 and forcing the hook to
+    # increment consecutive_no_progress instead of recognising clean exit.
+    # 10 wasted loops + CB trip ensued before the operator killed the run.
+    printf '%s\n' \
+        '{"state":"CLOSED","consecutive_no_progress":2,"consecutive_permission_denials":0,"total_opens":0}' \
+        > "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+
+    local body="Walked the queue.
+
+---RALPH_STATUS---
+STATUS: BLOCKED
+TASKS_COMPLETED_THIS_LOOP: 0
+FILES_MODIFIED: 0
+TESTS_STATUS: NOT_RUN
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: true
+RECOMMENDATION: Every NLT Engine issue is blocked:agentforge or blocked:nltweb — run \`ralph stop\` (exit-gate bug doesn't halt on STATUS:BLOCKED)
+---END_RALPH_STATUS---"
+    local input; input=$(jq -Rs '{result: .}' <<<"$body")
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$input"
+    assert_success
+
+    # status.json must show parsed STATUS=BLOCKED, NOT "BLOCKED)" with stray paren.
+    run jq -r '.status' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "BLOCKED"
+
+    # And EXIT-CLEAN Grounds 2 must have fired: counter reset to 0, state CLOSED.
+    run jq -r '.consecutive_no_progress' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "0"
+    run jq -r '.state' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state"
+    assert_output "CLOSED"
+}
+
+@test "PARSER-HARDENING: lowercase linear_open_count / linear_done_count (PROMPT.md drift) parses correctly" {
+    # Reproduces the second half of the NLTlabsPE 2026-04-30 incident. The
+    # project's PROMPT.md emits the canonical schema with lowercase field
+    # names (`linear_open_count: 0`) but the hook used to grep case-sensitive
+    # for "LINEAR_OPEN_COUNT:" and silently dropped the value. Result: every
+    # loop wrote `linear_open_count: null` to status.json, the harness's
+    # exit gate skipped on every iteration, and Claude could never signal a
+    # clean empty-backlog exit.
+    local body="---RALPH_STATUS---
+STATUS: BLOCKED
+TASKS_COMPLETED_THIS_LOOP: 0
+FILES_MODIFIED: 0
+TESTS_STATUS: NOT_RUN
+WORK_TYPE: IMPLEMENTATION
+linear_open_count: 0
+linear_done_count: 142
+linear_current_issue: none
+EXIT_SIGNAL: true
+RECOMMENDATION: All issues blocked.
+---END_RALPH_STATUS---"
+    local input; input=$(jq -Rs '{result: .}' <<<"$body")
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$input"
+    assert_success
+
+    run jq -r '.linear_open_count' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "0"
+    run jq -r '.linear_done_count' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "142"
+    run jq -r '.status' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "BLOCKED"
+    run jq -r '.exit_signal' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "true"
+}
+
+@test "PARSER-HARDENING: TESTS_STATUS does NOT bleed into STATUS field via unanchored grep" {
+    # Defense regression. Even with the awk pre-pass + line-anchored greps,
+    # confirm that TESTS_STATUS: PASSING does not get picked up as
+    # status=PASSING (the original code worked around this with a brittle
+    # `grep -v "TESTS_STATUS\|END_RALPH"` filter; the new line-anchor makes
+    # that filter redundant — this test is the regression guard).
+    local body="---RALPH_STATUS---
+STATUS: COMPLETE
+TASKS_COMPLETED_THIS_LOOP: 1
+FILES_MODIFIED: 1
+TESTS_STATUS: PASSING
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: false
+RECOMMENDATION: Done.
+---END_RALPH_STATUS---"
+    local input; input=$(jq -Rs '{result: .}' <<<"$body")
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$input"
+    assert_success
+
+    # Crucial: status must be "COMPLETE" not "PASSING" — i.e. the anchored
+    # grep correctly distinguishes the STATUS line from the TESTS_STATUS line.
+    run jq -r '.status' "$TEST_TEMP_DIR/.ralph/status.json"
+    assert_output "COMPLETE"
+}
+
 @test "TAP-741 hook: non-numeric LINEAR_OPEN_COUNT is coerced to null" {
     local body="---RALPH_STATUS---
 STATUS: IN_PROGRESS
