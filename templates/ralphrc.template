@@ -119,6 +119,35 @@ CB_COOLDOWN_MINUTES=30
 CB_AUTO_RESET=false
 
 # =============================================================================
+# MODEL ROUTING (PER-TASK TYPE + QA ESCALATION)
+# =============================================================================
+#
+# Task-type based routing with QA failure escalation (lib/complexity.sh).
+# When enabled, build_claude_command picks models based on task type and
+# QA failure history instead of always using CLAUDE_MODEL above.
+#
+# Routing logic:
+#   - docs/tools (lookups, audits, reports): → haiku (~1/5 sonnet cost)
+#   - code (implementation, tests, fixes): → sonnet (floor, always)
+#   - arch (design, research, migration): → opus
+#   - QA escalation: if task fails QA 3+ times in a row, → opus (safety net)
+#
+# Default: true (cost + reliability). Set false to keep all calls on CLAUDE_MODEL.
+# Per-iteration decisions are appended to .ralph/.model_routing.jsonl
+# (includes task_type and reason fields for observability).
+RALPH_MODEL_ROUTING_ENABLED=true
+
+# Model overrides (deprecated; kept for compatibility).
+# Task-type routing supersedes these. Set to empty to use defaults.
+RALPH_MODEL_TRIVIAL=haiku
+RALPH_MODEL_ROUTINE=sonnet
+RALPH_MODEL_COMPLEX=sonnet
+RALPH_MODEL_ARCH=opus
+
+# Fallback model when routing is disabled OR the next task text is empty.
+RALPH_DEFAULT_MODEL=sonnet
+
+# =============================================================================
 # LOG ROTATION
 # =============================================================================
 

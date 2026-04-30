@@ -114,7 +114,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.10.1"
+RALPH_VERSION="2.11.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
