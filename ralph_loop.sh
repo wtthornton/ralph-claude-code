@@ -24,6 +24,8 @@ source "$SCRIPT_DIR/lib/circuit_breaker.sh" || { echo "FATAL: Failed to source l
 [[ -f "$SCRIPT_DIR/lib/backup.sh" ]] && source "$SCRIPT_DIR/lib/backup.sh"
 [[ -f "$SCRIPT_DIR/lib/audit.sh" ]] && source "$SCRIPT_DIR/lib/audit.sh"
 [[ -f "$SCRIPT_DIR/lib/context_management.sh" ]] && source "$SCRIPT_DIR/lib/context_management.sh"
+[[ -f "$SCRIPT_DIR/lib/complexity.sh" ]] && source "$SCRIPT_DIR/lib/complexity.sh"
+[[ -f "$SCRIPT_DIR/lib/qa_failures.sh" ]] && source "$SCRIPT_DIR/lib/qa_failures.sh"
 [[ -f "$SCRIPT_DIR/lib/tracing.sh" ]] && source "$SCRIPT_DIR/lib/tracing.sh"
 [[ -f "$SCRIPT_DIR/lib/linear_backend.sh" ]] && source "$SCRIPT_DIR/lib/linear_backend.sh"
 [[ -f "$SCRIPT_DIR/lib/linear_optimizer.sh" ]] && source "$SCRIPT_DIR/lib/linear_optimizer.sh"
@@ -112,7 +114,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.9.2"
+RALPH_VERSION="2.10.1"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -2138,12 +2140,22 @@ build_loop_context() {
             next_task=$(printf '%s' "$next_task" | ralph_sanitize_prompt_text 300)
             context+="Next issue: ${next_task}. "
         fi
-        context+="If 'RESUME IN PROGRESS' is shown above, work that ticket FIRST before starting any new issue — run \`git log main --grep='<TICKET-ID>'\` to check if commits exist; if the work is on an unmerged branch, merge it now (\`gh pr merge --squash --auto\` or \`git merge\`). Only start a new ticket after the in-progress one reaches Done or is confirmed blocked by a genuine R2 hard blocker. Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means commits are on \`main\`. Before Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists. If work is only on a branch, attempt to self-merge (\`gh pr merge --squash --auto\` or \`git merge\`); if the merge is blocked (no permission, required checks pending, conflicts you cannot resolve this loop), post a Linear comment listing unmerged SHAs and leave the ticket **In Progress** so Ralph retries next loop — do NOT move it to In Review for this. RALPH IS HEADLESS: there is no human on standby to review, merge, or answer questions. There is no human reviewer. 'In Review' is reserved for HARD blockers only — the EXACT four: (1) missing credentials/API keys a human must generate (e.g. OAuth token requiring browser click-through), (2) explicit budget/spend cap reached, (3) irreversible destructive operation requiring human sign-off: production database migration dropping data, secret rotation, mass deletion, credential exfiltration risk — NOT security bug fixes or hardening (those are Done), (4) genuinely ambiguous product decision where both interpretations have real cost and neither is a safe default. When in doubt between Done and In Review: pick Done if AC is substantively met, In Progress if it is not. NEVER pick In Review out of uncertainty. Everything else is NOT In Review: unmerged branch → In Progress + retry; flaky tests / red build / lint failures → fix them; 'code probably works but I'm unsure' → Done if AC substantively met; 'needs code review' → Done (no reviewer exists); security bug fix or hardening → Done; 'couldn't figure out how to do X' → leave In Progress, Ralph retries with fresh context next loop. When you do use In Review, the last Linear comment MUST name one of the four exact reasons above verbatim — if you cannot, pick Done or In Progress instead. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain. REQUIRED: include LINEAR_OPEN_COUNT: <N> and LINEAR_DONE_COUNT: <N> in your RALPH_STATUS block (counts of open and completed issues in project '${RALPH_LINEAR_PROJECT}', fetched via Linear MCP) — the harness reads these to replace its missing API-key lookup."
+        # Per-task model routing input (lib/complexity.sh).
+        # Prefer in-progress > next ticket; falls back to empty (routing no-ops).
+        RALPH_CURRENT_TASK_TEXT="${in_progress_task:-$next_task}"
+        context+="If 'RESUME IN PROGRESS' is shown above, work that ticket FIRST before starting any new issue — run \`git log main --grep='<TICKET-ID>'\` to check if commits exist; if the work is on an unmerged branch, merge it now (\`gh pr merge --squash --auto\` or \`git merge\`). Only start a new ticket after the in-progress one reaches Done or is confirmed blocked by a genuine R2 hard blocker. Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means commits are on \`main\`. Before Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists. If work is only on a branch, attempt to self-merge (\`gh pr merge --squash --auto\` or \`git merge\`); if the merge is blocked (no permission, required checks pending, conflicts you cannot resolve this loop), post a Linear comment listing unmerged SHAs and leave the ticket **In Progress** so Ralph retries next loop — do NOT move it to In Review for this. RALPH IS HEADLESS: there is no human on standby to review, merge, or answer questions. There is no human reviewer. 'In Review' is reserved for HARD blockers only — the EXACT four: (1) missing credentials/API keys a human must generate (e.g. OAuth token requiring browser click-through), (2) explicit budget/spend cap reached, (3) irreversible destructive operation requiring human sign-off: production database migration dropping data, secret rotation, mass deletion, credential exfiltration risk — NOT security bug fixes or hardening (those are Done), (4) genuinely ambiguous product decision where both interpretations have real cost and neither is a safe default. When in doubt between Done and In Review: pick Done if AC is substantively met, In Progress if it is not. NEVER pick In Review out of uncertainty. Everything else is NOT In Review: unmerged branch → In Progress + retry; flaky tests / red build / lint failures → fix them; 'code probably works but I'm unsure' → Done if AC substantively met; 'needs code review' → Done (no reviewer exists); security bug fix or hardening → Done; 'couldn't figure out how to do X' → leave In Progress, Ralph retries with fresh context next loop. When you do use In Review, the last Linear comment MUST name one of the four exact reasons above verbatim — if you cannot, pick Done or In Progress instead. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain. REQUIRED: include LINEAR_OPEN_COUNT: <N>, LINEAR_DONE_COUNT: <N>, and LINEAR_ISSUE: <ID-or-NONE> (the issue you worked this loop, e.g. TAP-915, or NONE if no issue was touched) in your RALPH_STATUS block. If you worked under an epic, also include LINEAR_EPIC: <ID>, LINEAR_EPIC_DONE: <N>, LINEAR_EPIC_TOTAL: <N>. Counts come from Linear MCP — the harness reads these to populate the live monitor."
     # Bug #3 Fix: Support indented markdown checkboxes with [[:space:]]* pattern
     elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local incomplete_tasks
         incomplete_tasks=$(grep -cE "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null) || incomplete_tasks=0
         context+="Remaining tasks: ${incomplete_tasks}. "
+        # Per-task model routing input (lib/complexity.sh): first unchecked
+        # task line, stripped of leading checkbox + whitespace, capped to 300
+        # chars to keep classifier regex cheap.
+        local _next_unchecked
+        _next_unchecked=$(grep -m1 -E "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null \
+            | sed -E 's/^[[:space:]]*- \[ \][[:space:]]*//' | head -c 300)
+        RALPH_CURRENT_TASK_TEXT="$_next_unchecked"
     fi
 
     # PERF: Read circuit breaker state and previous summary in single jq call (was: 2 separate jq spawns)
@@ -2883,7 +2895,30 @@ build_claude_command() {
     fi
 
     # Model + effort flags
-    [[ -n "$CLAUDE_MODEL" ]] && CLAUDE_CMD_ARGS+=("--model" "$CLAUDE_MODEL")
+    # Per-task routing (lib/complexity.sh): when RALPH_MODEL_ROUTING_ENABLED=true
+    # and the current task text is known, ralph_select_model returns a tier model
+    # (haiku/sonnet/opus) based on task type + QA failure count escalation.
+    # RALPH_CURRENT_QA_FAILURE_COUNT tracks consecutive failures per Linear issue;
+    # when >= 3, escalates to Opus as a safety net. Defaults to 0 if not set.
+    # Falls back to CLAUDE_MODEL when routing is disabled or task text is empty.
+    # Local var so we don't mutate CLAUDE_MODEL across iterations.
+    local effective_model="$CLAUDE_MODEL"
+    local qa_failure_count="${RALPH_CURRENT_QA_FAILURE_COUNT:-0}"
+    if [[ "${RALPH_MODEL_ROUTING_ENABLED:-false}" == "true" ]] \
+        && declare -f ralph_select_model &>/dev/null \
+        && [[ -n "${RALPH_CURRENT_TASK_TEXT:-}" ]]; then
+        local _routed_model
+        _routed_model=$(ralph_select_model "$RALPH_CURRENT_TASK_TEXT" "$qa_failure_count" 2>/dev/null) || _routed_model=""
+        if [[ -n "$_routed_model" ]]; then
+            effective_model="$_routed_model"
+            if [[ "$effective_model" != "$CLAUDE_MODEL" ]]; then
+                local _qa_note=""
+                [[ "$qa_failure_count" -ge 3 ]] && _qa_note=" (QA escalation: $qa_failure_count failures)"
+                log_status "INFO" "Model routed: $effective_model (task type)${_qa_note}, override of $CLAUDE_MODEL"
+            fi
+        fi
+    fi
+    [[ -n "$effective_model" ]] && CLAUDE_CMD_ARGS+=("--model" "$effective_model")
     [[ -n "$CLAUDE_EFFORT" ]] && CLAUDE_CMD_ARGS+=("--effort" "$CLAUDE_EFFORT")
 
     # Agent invocation

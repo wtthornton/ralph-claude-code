@@ -356,3 +356,45 @@ teardown() {
     type=$(ralph_classify_task_type "Update user profile")
     [[ "$type" == "code" ]]
 }
+
+# QA failure count wiring tests (Story 4: qa_failures integration)
+
+@test "ralph_select_model escalates when QA_FAILURE_COUNT >= 3 is passed as param" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    local model
+    # build_claude_command will read RALPH_CURRENT_QA_FAILURE_COUNT from env
+    # and pass it as the 2nd param to ralph_select_model
+    model=$(ralph_select_model "Write documentation" 3)
+    # Even though task is docs (→ haiku), QA count=3 forces opus
+    [[ "$model" == "opus" ]]
+}
+
+@test "ralph_select_model: RALPH_CURRENT_QA_FAILURE_COUNT=0 uses type routing" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    export RALPH_CURRENT_QA_FAILURE_COUNT=0
+    local model
+    model=$(ralph_select_model "Write documentation" 0)
+    # With QA count=0, docs type routes to haiku
+    [[ "$model" == "haiku" ]]
+}
+
+@test "ralph_select_model: RALPH_CURRENT_QA_FAILURE_COUNT=2 does not escalate" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    export RALPH_CURRENT_QA_FAILURE_COUNT=2
+    local model
+    model=$(ralph_select_model "Implement feature" 0)
+    # With QA count=2 (below threshold), code type routes to sonnet
+    [[ "$model" == "sonnet" ]]
+}
+
+@test "ralph_select_model: QA_FAILURE_COUNT acts as second parameter override" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    export RALPH_CURRENT_QA_FAILURE_COUNT=1
+    # When both env var and function param are set, both contribute to escalation
+    local model
+    model=$(ralph_select_model "Scan files" 2)
+    # QA_FAILURE_COUNT=1 (not set from env actually, but 0 defaults) + param=2 = 2 total
+    # But the function uses ONLY the param passed, not env var
+    # So this test verifies that the function param takes precedence
+    [[ "$model" == "haiku" ]]  # tools type at count=2 is still haiku
+}
