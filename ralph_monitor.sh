@@ -273,22 +273,9 @@ display_status() {
             local sess_out_fmt=$(printf "%'d" "$session_out" 2>/dev/null || echo "$session_out")
             local sess_cost_fmt=$(awk -v c="$session_cost" 'BEGIN{printf "%.4f", c}')
             local loop_cost_fmt=$(awk -v c="$loop_cost" 'BEGIN{printf "%.4f", c}')
-            # COSTCAP visibility: colour the loop cost relative to RALPH_COST_CAP_USD
-            # so a runaway loop (e.g. Opus on routing-default regression) is visible
-            # at a glance instead of buried in status.json.
-            local _cost_cap="${RALPH_COST_CAP_USD:-10}"
-            local _loop_cost_color="$GREEN"
-            local _cost_cap_note=""
-            if [[ "$_cost_cap" != "0" ]] && awk -v c="$loop_cost" -v cap="$_cost_cap" 'BEGIN{exit !(c+0 > cap+0 * 0.5)}' 2>/dev/null; then
-                _loop_cost_color="$YELLOW"
-            fi
-            if [[ "$_cost_cap" != "0" ]] && awk -v c="$loop_cost" -v cap="$_cost_cap" 'BEGIN{exit !(c+0 > cap+0)}' 2>/dev/null; then
-                _loop_cost_color="$RED"
-                _cost_cap_note=" ${RED}⚠ exceeds cap \$${_cost_cap}${NC}"
-            fi
             echo -e "${CYAN}│${NC} Tokens (loop):  in ${loop_in}, out ${loop_out}"
             echo -e "${CYAN}│${NC} Tokens (sess):  in ${sess_in_fmt}, out ${sess_out_fmt}"
-            echo -e "${CYAN}│${NC} Cost:           loop ${_loop_cost_color}\$${loop_cost_fmt}${NC}${_cost_cap_note}  ·  session \$${sess_cost_fmt}"
+            echo -e "${CYAN}│${NC} Cost:           loop \$${loop_cost_fmt}  ·  session \$${sess_cost_fmt}"
         elif [[ "$session_cost" != "0" && "$session_cost" != "0.000000" ]]; then
             # Edge case: cost present but token counts zeroed (older hook). Surface the cost.
             local sess_cost_fmt=$(awk -v c="$session_cost" 'BEGIN{printf "%.4f", c}')

@@ -227,7 +227,6 @@ Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 - `RALPH_SKILL_AUTO_TUNE` — When `true`, `skill_retro_apply` installs up to 1 recommended skill per loop automatically (default: `false`)
 - `RALPH_SKILL_RETRO_WINDOW` — Number of recent loops to examine for friction patterns (default: 5)
 - `RALPH_SKILL_REDETECT_INTERVAL` — Run periodic Tier A skill re-detection every N loops (default: 10)
-- `RALPH_COST_CAP_USD` — Per-iteration USD cap (default: `10`). When a single Claude invocation reports `loop_cost_usd > cap`, the harness trips the circuit breaker with reason `cost_cap_exceeded` so a silent regression (e.g. routing pinned to Opus) cannot bleed thousands of dollars before the operator notices. The monitor dashboard colours `loop_cost` yellow at >50% of cap, red + warning at >cap. Set `0` to disable.
 
 Environment variables override `.ralphrc` settings.
 

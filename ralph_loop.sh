@@ -114,7 +114,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.11.1"
+RALPH_VERSION="2.11.2"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -4947,41 +4947,6 @@ main() {
             CONSECUTIVE_TIMEOUT_COUNT=0
             # LOGFIX-4: Reset fast failure counter on success
             CONSECUTIVE_FAST_FAILURE_COUNT=0
-
-            # COSTCAP: Defense-in-depth against runaway loops. The April 2026
-            # routing-default regression had each loop cost ~$57 on Opus while
-            # producing 0 tracked tasks. Cap a single loop at RALPH_COST_CAP_USD
-            # (default $10); any single loop above that trips the breaker so a
-            # silent regression cannot bleed thousands of dollars before the
-            # operator notices. Set RALPH_COST_CAP_USD=0 to disable.
-            local _cost_cap="${RALPH_COST_CAP_USD:-10}"
-            if [[ "$_cost_cap" != "0" ]] && command -v jq &>/dev/null; then
-                local _last_cost
-                _last_cost=$(jq -r '.loop_cost_usd // 0' "$STATUS_FILE" 2>/dev/null || echo "0")
-                # awk for float compare; bash arithmetic is integer-only
-                if awk -v c="$_last_cost" -v cap="$_cost_cap" 'BEGIN{exit !(c+0 > cap+0)}'; then
-                    log_status "ERROR" "🛑 Cost cap exceeded: loop #$loop_count cost \$$_last_cost > cap \$$_cost_cap"
-                    log_status "INFO" "Tripping circuit breaker. Investigate before resuming. Cap: RALPH_COST_CAP_USD"
-                    if [[ -f "$CB_STATE_FILE" ]] && command -v jq &>/dev/null; then
-                        local _cb_total_opens
-                        _cb_total_opens=$(jq -r '.total_opens // 0' "$CB_STATE_FILE" 2>/dev/null || echo "0")
-                        _cb_total_opens=$((_cb_total_opens + 1))
-                        cat > "$CB_STATE_FILE" <<CBEOF
-{
-    "state": "$CB_STATE_OPEN",
-    "last_change": "$(get_iso_timestamp)",
-    "opened_at": "$(get_iso_timestamp)",
-    "consecutive_no_progress": 0,
-    "total_opens": $_cb_total_opens,
-    "reason": "cost_cap_exceeded: loop_cost=\$$_last_cost cap=\$$_cost_cap"
-}
-CBEOF
-                    fi
-                    reset_session "cost_cap_exceeded"
-                    update_status "$loop_count" "$(_read_call_count)" "circuit_breaker_open" "halted" "cost_cap_exceeded"
-                    break
-                fi
-            fi
 
             # Brief pause between successful executions (reduced from 5s in v1.8.5)
             sleep 2
