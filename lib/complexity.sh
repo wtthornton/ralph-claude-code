@@ -190,12 +190,18 @@ ralph_classify_task_type() {
     echo "code"
 }
 
-# ralph_select_model — Select model based on complexity
+# ralph_select_model — Select model based on task type + retry escalation
 #
 # Usage: model=$(ralph_select_model "task text" retry_count)
 #
 # Returns model name string. If RALPH_MODEL_ROUTING_ENABLED=false,
 # always returns RALPH_DEFAULT_MODEL.
+#
+# Routing logic (task-type primary):
+#   - retry_count >= 3: force Opus (safety escalation for stuck tasks)
+#   - docs/tools: Haiku (low cost, sufficient for lookups/analysis)
+#   - code: Sonnet (floor, always; protects from under-spend)
+#   - arch: Opus (research, design, migration)
 #
 ralph_select_model() {
     local task_text="${1:-}"
@@ -206,28 +212,53 @@ ralph_select_model() {
         return 0
     fi
 
-    local complexity
-    complexity=$(ralph_classify_task_complexity "$task_text" "$retry_count")
-
     local model
-    case "$complexity" in
-        1|2) model="$RALPH_MODEL_TRIVIAL" ;;
-        3)   model="$RALPH_MODEL_ROUTINE" ;;
-        4)   model="$RALPH_MODEL_COMPLEX" ;;
-        5)   model="$RALPH_MODEL_ARCH" ;;
-        *)   model="$RALPH_DEFAULT_MODEL" ;;
-    esac
+    local task_type
+    local routing_reason=""
 
-    # Log routing decision
+    # Escalation: 3+ consecutive failures on same task → force Opus
+    if [[ "$retry_count" -ge 3 ]]; then
+        model="opus"
+        routing_reason="qa_failure_escalation"
+        _complexity_debug "Retry escalation: $retry_count failures → force Opus"
+    else
+        # Task-type primary routing
+        task_type=$(ralph_classify_task_type "$task_text")
+        case "$task_type" in
+            docs|tools)
+                model="haiku"
+                routing_reason="type_haiku"
+                _complexity_debug "Task type [$task_type] → haiku"
+                ;;
+            code)
+                model="sonnet"
+                routing_reason="type_code"
+                _complexity_debug "Task type [code] → sonnet (floor)"
+                ;;
+            arch)
+                model="opus"
+                routing_reason="type_arch"
+                _complexity_debug "Task type [arch] → opus"
+                ;;
+            *)
+                model="$RALPH_DEFAULT_MODEL"
+                routing_reason="type_unknown"
+                _complexity_debug "Unknown task type [$task_type] → fallback"
+                ;;
+        esac
+    fi
+
+    # Log routing decision with task type and retry context
     local routing_log="${RALPH_DIR:-.ralph}/.model_routing.jsonl"
     if command -v jq &>/dev/null; then
         local routing_entry
         routing_entry=$(jq -n \
             --arg ts "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-            --arg complexity "$(ralph_complexity_name "$complexity")" \
+            --arg task_type "${task_type:-unknown}" \
             --arg model "$model" \
             --arg retry "$retry_count" \
-            '{timestamp: $ts, complexity: $complexity, model: $model, retry_count: ($retry | tonumber)}')
+            --arg reason "$routing_reason" \
+            '{timestamp: $ts, task_type: $task_type, model: $model, retry_count: ($retry | tonumber), reason: $reason}')
         echo "$routing_entry" >> "$routing_log" 2>/dev/null
     fi
 

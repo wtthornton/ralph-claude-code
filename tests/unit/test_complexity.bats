@@ -103,18 +103,94 @@ teardown() {
     [[ "$model" == "sonnet" ]]
 }
 
-@test "ralph_select_model routes trivial to haiku" {
+@test "ralph_select_model (legacy) routes trivial to haiku when enabled" {
     export RALPH_MODEL_ROUTING_ENABLED="true"
     local model
     model=$(ralph_select_model "[TRIVIAL] Fix typo")
+    # With task-type routing, this becomes code (not docs/tools/arch), so sonnet
+    [[ "$model" == "sonnet" ]]
+}
+
+@test "ralph_select_model (new) routes docs to haiku" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    local model
+    model=$(ralph_select_model "Update README.md with examples")
     [[ "$model" == "haiku" ]]
 }
 
-@test "ralph_select_model routes architectural to opus" {
+@test "ralph_select_model (new) routes tools to haiku" {
     export RALPH_MODEL_ROUTING_ENABLED="true"
     local model
-    model=$(ralph_select_model "[ARCHITECTURAL] Redesign platform")
+    model=$(ralph_select_model "Scan codebase for vulnerabilities")
+    [[ "$model" == "haiku" ]]
+}
+
+@test "ralph_select_model (new) routes code to sonnet (floor)" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    local model
+    model=$(ralph_select_model "Implement user login feature")
+    [[ "$model" == "sonnet" ]]
+}
+
+@test "ralph_select_model (new) routes arch to opus" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    local model
+    model=$(ralph_select_model "Design database migration strategy")
     [[ "$model" == "opus" ]]
+}
+
+@test "ralph_select_model retry escalation: 3+ failures force opus" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    local model
+    model=$(ralph_select_model "Update README.md" 3)
+    # docs type would be haiku, but 3 retries override to opus
+    [[ "$model" == "opus" ]]
+}
+
+@test "ralph_select_model retry escalation: 4+ failures force opus" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    local model
+    model=$(ralph_select_model "Implement endpoint" 5)
+    # code type would be sonnet, but 5 retries override to opus
+    [[ "$model" == "opus" ]]
+}
+
+@test "ralph_select_model retry escalation: 1-2 failures don't override" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    local model
+    model=$(ralph_select_model "Scan for issues" 2)
+    # tools type is haiku, 2 retries is below threshold
+    [[ "$model" == "haiku" ]]
+}
+
+@test "ralph_select_model logs routing decision to .model_routing.jsonl" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    export RALPH_DIR="$BATS_TEST_TMPDIR/.ralph"
+    mkdir -p "$RALPH_DIR"
+    local model
+    model=$(ralph_select_model "Update documentation" 0)
+    [[ -f "$RALPH_DIR/.model_routing.jsonl" ]]
+    grep -q "docs" "$RALPH_DIR/.model_routing.jsonl"
+    grep -q "haiku" "$RALPH_DIR/.model_routing.jsonl"
+}
+
+@test "ralph_select_model routing log includes reason field" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    export RALPH_DIR="$BATS_TEST_TMPDIR/.ralph"
+    mkdir -p "$RALPH_DIR"
+    local model
+    model=$(ralph_select_model "Scan for problems" 0)
+    grep -q "type_haiku" "$RALPH_DIR/.model_routing.jsonl"
+}
+
+@test "ralph_select_model routing log includes qa_failure_escalation reason" {
+    export RALPH_MODEL_ROUTING_ENABLED="true"
+    export RALPH_DIR="$BATS_TEST_TMPDIR/.ralph"
+    mkdir -p "$RALPH_DIR"
+    local model
+    model=$(ralph_select_model "Update docs" 3)
+    grep -q "qa_failure_escalation" "$RALPH_DIR/.model_routing.jsonl"
+    grep -q "opus" "$RALPH_DIR/.model_routing.jsonl"
 }
 
 # TestTaskTypeClassifier — Task-type classification (docs/tools/code/arch)
