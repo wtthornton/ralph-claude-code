@@ -116,3 +116,167 @@ teardown() {
     model=$(ralph_select_model "[ARCHITECTURAL] Redesign platform")
     [[ "$model" == "opus" ]]
 }
+
+# TestTaskTypeClassifier — Task-type classification (docs/tools/code/arch)
+
+@test "task type: docs — .md file detected" {
+    local type
+    type=$(ralph_classify_task_type "Update README.md with new examples")
+    [[ "$type" == "docs" ]]
+}
+
+@test "task type: docs — README keyword" {
+    local type
+    type=$(ralph_classify_task_type "Add installation section to README")
+    [[ "$type" == "docs" ]]
+}
+
+@test "task type: docs — CHANGELOG keyword" {
+    local type
+    type=$(ralph_classify_task_type "Add 2.11.0 release notes to CHANGELOG")
+    [[ "$type" == "docs" ]]
+}
+
+@test "task type: docs — docstring keyword" {
+    local type
+    type=$(ralph_classify_task_type "Add docstrings to complex functions")
+    [[ "$type" == "docs" ]]
+}
+
+@test "task type: docs — documentation keyword" {
+    local type
+    type=$(ralph_classify_task_type "Improve API documentation for users")
+    [[ "$type" == "docs" ]]
+}
+
+@test "task type: tools — lookup keyword" {
+    local type
+    type=$(ralph_classify_task_type "Lookup dependencies in requirements.txt")
+    [[ "$type" == "tools" ]]
+}
+
+@test "task type: tools — audit keyword" {
+    local type
+    type=$(ralph_classify_task_type "Audit security vulnerabilities")
+    [[ "$type" == "tools" ]]
+}
+
+@test "task type: tools — scan keyword" {
+    local type
+    type=$(ralph_classify_task_type "Scan codebase for deprecated APIs")
+    [[ "$type" == "tools" ]]
+}
+
+@test "task type: tools — check keyword" {
+    local type
+    type=$(ralph_classify_task_type "Check linting errors in Python files")
+    [[ "$type" == "tools" ]]
+}
+
+@test "task type: tools — report keyword" {
+    local type
+    type=$(ralph_classify_task_type "Generate test coverage report")
+    [[ "$type" == "tools" ]]
+}
+
+@test "task type: tools — analyze keyword" {
+    local type
+    type=$(ralph_classify_task_type "Analyze performance bottlenecks")
+    [[ "$type" == "tools" ]]
+}
+
+@test "task type: tools — find keyword" {
+    local type
+    type=$(ralph_classify_task_type "Find all dead code in the project")
+    [[ "$type" == "tools" ]]
+}
+
+@test "task type: tools — search keyword" {
+    local type
+    type=$(ralph_classify_task_type "Search for hardcoded credentials")
+    [[ "$type" == "tools" ]]
+}
+
+@test "task type: tools — identify keyword" {
+    local type
+    type=$(ralph_classify_task_type "Identify missing test coverage")
+    [[ "$type" == "tools" ]]
+}
+
+@test "task type: arch — architect keyword" {
+    local type
+    type=$(ralph_classify_task_type "Architect a new microservices platform")
+    [[ "$type" == "arch" ]]
+}
+
+@test "task type: arch — design keyword" {
+    local type
+    type=$(ralph_classify_task_type "Design the new authentication flow")
+    [[ "$type" == "arch" ]]
+}
+
+@test "task type: arch — research keyword" {
+    local type
+    type=$(ralph_classify_task_type "Research distributed tracing solutions")
+    [[ "$type" == "arch" ]]
+}
+
+@test "task type: arch — migrate keyword" {
+    local type
+    type=$(ralph_classify_task_type "Migrate database schema to v2")
+    [[ "$type" == "arch" ]]
+}
+
+@test "task type: arch — refactor keyword" {
+    local type
+    type=$(ralph_classify_task_type "Refactor authentication module")
+    [[ "$type" == "arch" ]]
+}
+
+@test "task type: arch — rewrite keyword" {
+    local type
+    type=$(ralph_classify_task_type "Rewrite the parser from scratch")
+    [[ "$type" == "arch" ]]
+}
+
+@test "task type: arch — prototype keyword" {
+    local type
+    type=$(ralph_classify_task_type "Prototype WebSocket support")
+    [[ "$type" == "arch" ]]
+}
+
+@test "task type: code — default for implementation" {
+    local type
+    type=$(ralph_classify_task_type "Implement user login endpoint")
+    [[ "$type" == "code" ]]
+}
+
+@test "task type: code — default for feature" {
+    local type
+    type=$(ralph_classify_task_type "Add email validation to sign-up form")
+    [[ "$type" == "code" ]]
+}
+
+@test "task type: code — default for fix" {
+    local type
+    type=$(ralph_classify_task_type "Fix null pointer exception in user model")
+    [[ "$type" == "code" ]]
+}
+
+@test "task type: code — default for test" {
+    local type
+    type=$(ralph_classify_task_type "Add unit tests for auth module")
+    [[ "$type" == "code" ]]
+}
+
+@test "task type: code — empty task defaults to code" {
+    local type
+    type=$(ralph_classify_task_type "")
+    [[ "$type" == "code" ]]
+}
+
+@test "task type: code — generic task defaults to code" {
+    local type
+    type=$(ralph_classify_task_type "Update user profile")
+    [[ "$type" == "code" ]]
+}

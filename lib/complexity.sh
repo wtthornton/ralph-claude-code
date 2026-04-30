@@ -1,15 +1,20 @@
 #!/bin/bash
 
-# lib/complexity.sh — Task complexity classifier + cost-aware model routing (Phase 14)
+# lib/complexity.sh — Task classification + cost-aware model routing (Phase 14+)
 #
-# Classifies tasks into 5 levels without LLM calls (regex/heuristics only).
-# Used by COSTROUTE-1 (classifier) and COSTROUTE-2 (dynamic model selection).
+# Dual classification system:
+#   1. Complexity bands (5 levels): TRIVIAL, SIMPLE, ROUTINE, COMPLEX, ARCHITECTURAL
+#   2. Task types (4 categories): docs, tools, code, arch
 #
-# Return values: 1=TRIVIAL, 2=SIMPLE, 3=ROUTINE, 4=COMPLEX, 5=ARCHITECTURAL
+# Task-type routing (PRIMARY):
+#   - docs: README, CHANGELOG, docstrings, .md files, documentation
+#   - tools: lookups, audits, scans, reports, analysis
+#   - code: implementation, features, tests, fixes (default)
+#   - arch: architecture, design, research, migration, refactoring
 #
 # Configuration:
 #   RALPH_MODEL_ROUTING_ENABLED=false  — Enable dynamic model selection (default: false)
-#   RALPH_MODEL_TRIVIAL=haiku          — Model for trivial/simple tasks
+#   RALPH_MODEL_TRIVIAL=haiku          — Model for trivial/simple tasks (deprecated; type-based preferred)
 #   RALPH_MODEL_ROUTINE=sonnet         — Model for routine tasks (default)
 #   RALPH_MODEL_COMPLEX=sonnet         — Model for complex tasks
 #   RALPH_MODEL_ARCH=opus              — Model for architectural tasks
@@ -138,6 +143,51 @@ ralph_complexity_name() {
         5) echo "ARCHITECTURAL" ;;
         *) echo "ROUTINE" ;;
     esac
+}
+
+# ralph_classify_task_type — Classify task by type for task-aware routing
+#
+# Usage: type=$(ralph_classify_task_type "task description")
+# Returns: docs | tools | code | arch
+#
+# Classification priority:
+#   1. docs: README, CHANGELOG, docstrings, .md files, documentation, comments, API docs
+#   2. tools: lookups, audits, scans, reports, analysis, queries, finding/identifying
+#   3. arch: architecture, design, research, migration, refactoring, prototyping
+#   4. code: default (implementation, features, tests, fixes)
+#
+ralph_classify_task_type() {
+    local task_text="${1:-}"
+
+    if [[ -z "$task_text" ]]; then
+        echo "code"
+        return
+    fi
+
+    # Docs classification: .md, README, CHANGELOG, docs/, documentation, docstring, comment, API
+    if echo "$task_text" | grep -qiE '\.md|readme|changelog|docs/|documentation|docstring|comment|api.?doc'; then
+        _complexity_debug "Task type: docs"
+        echo "docs"
+        return
+    fi
+
+    # Tools classification: lookup, audit, scan, check, list, report, analyze, find, search, identify, query (word boundaries)
+    if echo "$task_text" | grep -qiE '\b(lookup|audit|scan|check|list|report|analyze|find|search|identify|query)\b'; then
+        _complexity_debug "Task type: tools"
+        echo "tools"
+        return
+    fi
+
+    # Arch classification: architect, design, research, migrate, refactor, rewrite, prototype, platform, infrastructure (word boundaries)
+    if echo "$task_text" | grep -qiE '\b(architect|design|research|migrate|refactor|rewrite|prototype|platform|infrastructure|schema)\b'; then
+        _complexity_debug "Task type: arch"
+        echo "arch"
+        return
+    fi
+
+    # Code classification: default
+    _complexity_debug "Task type: code (default)"
+    echo "code"
 }
 
 # ralph_select_model — Select model based on complexity
