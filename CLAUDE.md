@@ -74,7 +74,8 @@ bats tests/unit/test_cli_parsing.bats
 | `github_issues.sh` | GitHub Issue integration — import, assess, filter, batch, lifecycle (Phase 10) |
 | `sandbox.sh` | Docker sandbox — `ralph --sandbox`, container management, signal forwarding (Phase 11). V2: rootless Docker detection, `--network none` egress control, gVisor runtime support, resource usage reporting (Phase 14) |
 | `tracing.sh` | OpenTelemetry traces — GenAI Semantic Conventions, JSONL OTLP format, secret sanitization (Phase 14) |
-| `complexity.sh` | Task complexity classifier — 5-level (TRIVIAL→ARCHITECTURAL), dynamic model routing (Phase 14) |
+| `complexity.sh` | Task classification + model routing — Task-type classifier (docs/tools/code/arch) with QA failure escalation. `ralph_classify_task_type` for type-aware routing (Phase 14+), `ralph_select_model` for model selection (type-based + 3-fail opus escalation), per-routing logging to `.model_routing.jsonl` |
+| `qa_failures.sh` | QA failure state tracking — persistent per-issue failure counters in `.ralph/.qa_failures.json`. Incremented on QA failure, reset on PASSING. Read by router to escalate to Opus after 3+ consecutive failures on same issue. |
 | `memory.sh` | Cross-session memory — episodic (what worked/failed), semantic (project index), decay/pruning (Phase 14) |
 | `import_graph.sh` | AST-based file dependency graph — Python `ast`, JS/TS `madge`/grep fallback. Cached in `.ralph/.import_graph.json` with mtime staleness detection. Async background rebuild, incremental invalidation via hooks. (PLANOPT epic) |
 | `plan_optimizer.sh` | Fix plan task reordering — parses fix_plan.md, resolves vague tasks via ralph-explorer (Haiku), detects dependencies via import graph + explicit metadata + phase convention, orders via Unix `tsort`, validates semantic equivalence before atomic write. Runs at session start for changed sections only. (PLANOPT epic) |
@@ -217,11 +218,63 @@ Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 - `RALPH_OPTIMIZER_FETCH_LIMIT` — Max issues to fetch and score per optimizer run (default: 20)
 - `RALPH_OPTIMIZER_EXPLORER_MAX` — Max ralph-explorer calls per optimizer session (default: 3)
 - `RALPH_MCP_PROBE_TIMEOUT_SECONDS` — Upper bound on the startup `claude mcp list` probe (default: 30). High default covers cold-start cases where stdio MCP servers spawn child processes and HTTP MCPs do auth round-trips. Warm runs return in 1–2s so the cap is invisible.
+- `RALPH_MODEL_ROUTING_ENABLED` — Per-task type + QA escalation → model routing (default: `true`). When enabled, `build_claude_command` classifies the next task via `ralph_classify_task_type` (docs/tools/code/arch) and calls `ralph_select_model` with the QA failure count (from `.ralph/.qa_failures.json` for the current Linear issue). Routing: docs/tools → `haiku` (~1/5 cost), code → `sonnet` (floor), arch → `opus`, QA failures ≥3 → `opus` (safety escalation). Task text comes from the next Linear issue (or in-progress one if present) or first unchecked `fix_plan.md` line; routing decisions append to `.ralph/.model_routing.jsonl` (includes `task_type` and `reason` fields). Falls back to `CLAUDE_MODEL` when task text is empty. Old complexity-band variables (`RALPH_MODEL_TRIVIAL`, etc.) are deprecated but still recognized for backwards compatibility.
 - `RALPH_SKILL_AUTO_TUNE` — When `true`, `skill_retro_apply` installs up to 1 recommended skill per loop automatically (default: `false`)
 - `RALPH_SKILL_RETRO_WINDOW` — Number of recent loops to examine for friction patterns (default: 5)
 - `RALPH_SKILL_REDETECT_INTERVAL` — Run periodic Tier A skill re-detection every N loops (default: 10)
 
 Environment variables override `.ralphrc` settings.
+
+## Observability: Task-Type Routing & QA Escalation
+
+### Model Routing Decisions (.model_routing.jsonl)
+
+When `RALPH_MODEL_ROUTING_ENABLED=true`, every loop appends a JSON line to `.ralph/.model_routing.jsonl` describing the routing decision:
+
+```json
+{"timestamp":"2026-04-30T14:23:45Z","task_type":"code","model":"sonnet","retry_count":0,"reason":"type_code"}
+{"timestamp":"2026-04-30T14:24:12Z","task_type":"docs","model":"haiku","retry_count":0,"reason":"type_haiku"}
+{"timestamp":"2026-04-30T14:25:30Z","task_type":"code","model":"opus","retry_count":3,"reason":"qa_failure_escalation"}
+```
+
+**Fields**:
+- `timestamp`: ISO-8601 time of routing decision
+- `task_type`: `docs`, `tools`, `code`, or `arch`
+- `model`: Selected model (`haiku`, `sonnet`, `opus`)
+- `retry_count`: QA failure count for the current issue (0–N)
+- `reason`: Routing signal (`type_haiku`, `type_code`, `type_arch`, `qa_failure_escalation`)
+
+**Observability queries**:
+
+```bash
+# Count routing decisions by type and model
+jq -s 'group_by(.task_type) | map({type: .[0].task_type, count: length, models: (map(.model) | unique)})' .ralph/.model_routing.jsonl
+
+# Find all QA escalations (retry_count >= 3)
+jq 'select(.retry_count >= 3)' .ralph/.model_routing.jsonl
+
+# Average model cost per task type (rough estimate: haiku~1, sonnet~3, opus~5)
+jq -s 'group_by(.task_type) | map({type: .[0].task_type, avg_cost: (map({haiku:1, sonnet:3, opus:5}[.model]) | add / length)})' .ralph/.model_routing.jsonl
+
+# Check for stuck tasks (same issue failing QA repeatedly)
+jq 'select(.reason == "qa_failure_escalation") | {task_type, retry_count, timestamp}' .ralph/.model_routing.jsonl
+```
+
+### QA Failure State (.qa_failures.json)
+
+Tracks consecutive QA failures per Linear issue:
+
+```json
+{"TAP-123": 2, "TAP-456": 1}
+```
+
+**Query**: Check current failure count for an issue:
+
+```bash
+jq '.["TAP-123"]' .ralph/.qa_failures.json
+```
+
+The count increments on QA failure (called by on-stop hook), resets on PASSING (via `qa_failures_reset`), and triggers Opus escalation at count ≥3.
 
 ## Testing
 
