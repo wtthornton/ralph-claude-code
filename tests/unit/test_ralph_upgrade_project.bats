@@ -27,6 +27,23 @@ setup() {
         "$PROJECT_DIR/.ralph/AGENT.md" \
         "$PROJECT_DIR/.ralphrc"
 
+    # The script reads RALPH_HOME=$HOME/.ralph at startup. CI runners have
+    # no Ralph install, so we stage a fake one under a sandbox HOME that
+    # mirrors what `bash install.sh` would have produced: hooks/agents/
+    # skills_global/ from the source checkout. Symlinks are fine — the
+    # script reads, never writes, into RALPH_TEMPLATES.
+    FAKE_HOME="$TEST_DIR/home"
+    mkdir -p "$FAKE_HOME/.ralph/templates"
+    ln -s "$PROJECT_ROOT/templates/hooks"  "$FAKE_HOME/.ralph/templates/hooks"
+    ln -s "$PROJECT_ROOT/templates/skills" "$FAKE_HOME/.ralph/templates/skills"
+    # Agent files live under .claude/agents/ in the source checkout, not
+    # templates/agents/, so stage them explicitly.
+    mkdir -p "$FAKE_HOME/.ralph/templates/agents"
+    for a in "$PROJECT_ROOT"/.claude/agents/ralph*.md; do
+        [[ -f "$a" ]] && ln -s "$a" "$FAKE_HOME/.ralph/templates/agents/$(basename "$a")"
+    done
+    export HOME="$FAKE_HOME"
+
     # Count the templates the script will iterate. Anchored to the source
     # checkout so the test follows whatever the repo currently ships.
     HOOK_TEMPLATE_COUNT=$(find "$PROJECT_ROOT/templates/hooks" -maxdepth 1 -name '*.sh' -type f | wc -l | tr -d '[:space:]')
