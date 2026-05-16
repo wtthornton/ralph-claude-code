@@ -3638,16 +3638,21 @@ ralph_probe_mcp_servers() {
     local _max_age="${RALPH_MCP_PROBE_SENTINEL_MAX_AGE:-86400}"
     if [[ "${RALPH_MCP_PROBE_SKIP_IF_UNCHANGED:-true}" == "true" && -f "$_sentinel_file" ]]; then
         local _ts _age _stored_hash _live_hash
-        _ts=$(awk -F= '/^ts=/{print $2}' "$_sentinel_file" 2>/dev/null || echo 0)
+        # Use ${var:-0} instead of `|| echo 0`: awk exits 0 even when it prints
+        # nothing (no matching lines), so the `||` fallback would never fire on an
+        # empty or corrupt sentinel, leaving _ts empty and causing an arithmetic
+        # syntax error in the next line.
+        _ts=$(awk -F= '/^ts=/{print $2}' "$_sentinel_file" 2>/dev/null); _ts=${_ts:-0}
         _age=$(( $(date +%s) - _ts ))
         if (( _age < _max_age )); then
-            _stored_hash=$(awk -F= '/^hash=/{print $2}' "$_sentinel_file" 2>/dev/null || echo "")
-            _live_hash=$(ralph_mcp_compute_probe_hash 2>/dev/null || echo "")
+            _stored_hash=$(awk -F= '/^hash=/{print $2}' "$_sentinel_file" 2>/dev/null); _stored_hash=${_stored_hash:-}
+            _live_hash=$(ralph_mcp_compute_probe_hash 2>/dev/null); _live_hash=${_live_hash:-}
             if [[ -n "$_live_hash" && "$_stored_hash" == "$_live_hash" ]]; then
-                RALPH_MCP_TAPPS_AVAILABLE=$(awk -F= '/^tapps=/{print $2}' "$_sentinel_file" 2>/dev/null || echo "false")
-                RALPH_MCP_DOCS_AVAILABLE=$(awk -F= '/^docs=/{print $2}' "$_sentinel_file" 2>/dev/null || echo "false")
-                RALPH_MCP_BRAIN_AVAILABLE=$(awk -F= '/^brain=/{print $2}' "$_sentinel_file" 2>/dev/null || echo "false")
-                RALPH_MCP_BRAIN_AUTH_FAILED=$(awk -F= '/^brain_auth_failed=/{print $2}' "$_sentinel_file" 2>/dev/null || echo "false")
+                local _tapps _docs _brain _brain_auth
+                _tapps=$(awk -F= '/^tapps=/{print $2}' "$_sentinel_file" 2>/dev/null); RALPH_MCP_TAPPS_AVAILABLE=${_tapps:-false}
+                _docs=$(awk -F= '/^docs=/{print $2}' "$_sentinel_file" 2>/dev/null); RALPH_MCP_DOCS_AVAILABLE=${_docs:-false}
+                _brain=$(awk -F= '/^brain=/{print $2}' "$_sentinel_file" 2>/dev/null); RALPH_MCP_BRAIN_AVAILABLE=${_brain:-false}
+                _brain_auth=$(awk -F= '/^brain_auth_failed=/{print $2}' "$_sentinel_file" 2>/dev/null); RALPH_MCP_BRAIN_AUTH_FAILED=${_brain_auth:-false}
                 log_status "INFO" "MCP probe cached (age ${_age}s): tapps=${RALPH_MCP_TAPPS_AVAILABLE} docs=${RALPH_MCP_DOCS_AVAILABLE} brain=${RALPH_MCP_BRAIN_AVAILABLE}"
                 return 0
             fi

@@ -272,6 +272,33 @@ docs-mcp timeout"
 }
 
 # ---------------------------------------------------------------------------
+# Robustness: empty / corrupt sentinel does not cause arithmetic error
+# ---------------------------------------------------------------------------
+
+@test "TAP-1838: empty sentinel file falls through to live probe without error" {
+    _make_mock_claude
+    export MOCK_CLAUDE_MCP_OUTPUT="tapps-mcp connected"
+    # Write an empty sentinel — awk finds no ^ts= line, would return empty string
+    : > "$RALPH_MCP_PROBE_SENTINEL_FILE"
+
+    run ralph_probe_mcp_servers
+    # Must succeed (no arithmetic syntax error), and probe must have run
+    assert_success
+    grep -q "MCP probe: tapps-mcp reachable" "$LOG_FILE"
+}
+
+@test "TAP-1838: corrupt sentinel (no ts= line) falls through to live probe" {
+    _make_mock_claude
+    export MOCK_CLAUDE_MCP_OUTPUT="tapps-mcp connected"
+    printf 'hash=deadbeef\ntapps=true\n' > "$RALPH_MCP_PROBE_SENTINEL_FILE"
+
+    run ralph_probe_mcp_servers
+    assert_success
+    # Probe ran (ts missing → _ts=0 → age enormous → expired → live probe)
+    grep -q "MCP probe: tapps-mcp reachable" "$LOG_FILE"
+}
+
+# ---------------------------------------------------------------------------
 # Round-trip: write sentinel → hit on next call
 # ---------------------------------------------------------------------------
 
