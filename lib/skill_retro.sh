@@ -117,6 +117,21 @@ skill_retro_detect_friction() {
         fi
     fi
 
+    # --- TAP-1876 — Signal: interpreter -c|-e denials (python3 / node / etc.)
+    # Scan recent ralph.log lines for the validate-command.sh denial shape.
+    # 3+ denials in the window installs the python-introspection skill so
+    # next loop reaches for file-based execution instead.
+    if [[ -f "$log_file" ]]; then
+        local interp_denials
+        interp_denials=$(tail -n $((RALPH_SKILL_RETRO_WINDOW * 50)) "$log_file" 2>/dev/null \
+            | grep -cE 'BLOCKED: (python|python3|perl|ruby|node|bash|sh|zsh) -[ce] script-execution' 2>/dev/null \
+            | tr -cd '0-9') || interp_denials=0
+        if [[ "${interp_denials:-0}" -ge 3 ]]; then
+            signals+=("{\"type\":\"interpreter_dash_c_denials\",\"severity\":\"medium\",\"count\":${interp_denials}}")
+            recommended+=("python-introspection")
+        fi
+    fi
+
     # --- Signal: UNKNOWN work type with no progress (confused loop, only meaningful after first loop) ---
     if [[ "$work_type" == "UNKNOWN" && "$tasks_completed" -eq 0 && "$files_modified" -eq 0 && "$loop_count" -gt 0 ]]; then
         signals+=("{\"type\":\"confused_work_type\",\"severity\":\"low\"}")

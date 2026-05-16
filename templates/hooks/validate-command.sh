@@ -107,12 +107,33 @@ if [[ "$CMD0" == "find" ]]; then
 fi
 
 # ---- 4. Interpreter -c / -e escape hatches -----------------------------------
+# TAP-1876: include a one-line remediation pointing at file-based execution,
+# which IS permitted. Without this, every loop where Claude tries
+# `python3 -c "import x"` burns a tool call AND the next loop tries the
+# same shape because the denial message gives no out.
+
+_interpreter_snippet_path() {
+    # Suggest an idiomatic extension per interpreter so the remediation
+    # reads naturally for whichever language Claude reached for.
+    case "$1" in
+        python|python3) echo "/tmp/snippet.py" ;;
+        perl)           echo "/tmp/snippet.pl" ;;
+        ruby)           echo "/tmp/snippet.rb" ;;
+        node)           echo "/tmp/snippet.js" ;;
+        bash|sh|zsh)    echo "/tmp/snippet.sh" ;;
+        *)              echo "/tmp/snippet"    ;;
+    esac
+}
 
 case "$CMD0" in
     python|python3|perl|ruby|node|bash|sh|zsh)
         for arg in "${ARGV[@]:1}"; do
             case "$arg" in
-                -c|-e) block "$CMD0 $arg script-execution not allowed" ;;
+                -c|-e)
+                    _snippet=$(_interpreter_snippet_path "$CMD0")
+                    echo "BLOCKED: $CMD0 $arg script-execution not allowed. Write the snippet to $_snippet (or similar) and run \"$CMD0 $_snippet\" instead: $COMMAND" >&2
+                    exit 2
+                    ;;
             esac
         done
         ;;
