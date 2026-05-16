@@ -8,9 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [2.15.1] — 2026-05-16
+
+### Fixed
+
+- **TAP-1875 — Coordinator brief.json missing on ~88% of cache-miss spawns.** The ralph-coordinator subagent was returning the one-line summary without invoking the Write tool on 44 of 50 loops in the 2026-05-15 → 2026-05-16 tapps-brain campaign, defeating the TAP-1682 brief cache and forcing every cache-miss loop to re-derive risk classification from scratch. Three reinforcing fixes: (1) `.claude/agents/ralph-coordinator.md` `MODE=brief` now carries a literal Write-tool example + the full required JSON schema inline and flags "summary without writing the file" as a contract violation; (2) `ralph_loop.sh:ralph_spawn_coordinator` rewrites the prompt body from "Write per the schema" to a numbered REQUIRED ACTION block naming every required field + enum constraints; (3) on rc=0-no-file, the harness retries the brief invocation once with an explicit "your previous response did not write the file" header — the resumed session preserves the task context — then calls `brain_client_write_failure(source="coordinator-brief")` if the retry still fails so skill-retro can surface a sustained regression next campaign. 5 new BATS cases in `tests/unit/test_coordinator_brief.bats`.
+
+- **TAP-1876 — `python3 -c` friction in validate-command.sh denial flow.** Claude burned a tool call on ~28 of 50 loops retrying `python3 -c "…"` for read-only introspection (imports, version checks, AST parses). The hook correctly denied each attempt, but the denial message said nothing about the workaround — file-based execution is allowed. The fix names the remediation per-interpreter: `templates/hooks/validate-command.sh` section 4 now emits `BLOCKED: $CMD0 $arg script-execution not allowed. Write the snippet to /tmp/snippet.<ext> (or similar) and run "$CMD0 /tmp/snippet.<ext>" instead: …` with the right extension (`.py`/`.js`/`.pl`/`.rb`/`.sh`) per interpreter. New Tier-B `python-introspection` skill ships under `templates/skills/global/python-introspection/` (SKILL.md + import-check example). `lib/skill_retro.sh` gains an `interpreter_dash_c_denials` friction signal that auto-installs the new skill once ≥3 denials accumulate in the rolling window. `.ralph/hooks/validate-command.sh` kept byte-identical to the template per the TAP-624 parity rule. 15 new BATS cases in `tests/unit/test_validate_command.bats`.
+
+- **TAP-1877 — Execution stats WARN line leaked `(00 scope, N system)` double-zero.** Canonical `grep -c | ... || echo 0` pitfall documented in CLAUDE.md, leaking through `lib/exec_helpers.sh:131-137`. `grep -c` on a no-match exits 1 with stdout `"0"`, so the `|| echo 0` branch appended another `"0"` and `tr -d '[:space:]'` collapsed the pair into the literal `"00"` that landed in the operator-facing WARN line (9 of 50 lines in the 2026-05-15 → 2026-05-16 tapps-brain ralph.log). Replaced the inline idiom with the documented `tr -cd '0-9' || true` + `${var:-0}` pattern and extracted the stats-line emission into a new `exec_log_execution_stats` helper so the regression surface is unit-testable. 5 new BATS cases in `tests/unit/test_exec_post_run.bats`.
+
 ### Added
 
 - **TAP-1838 — MCP probe sentinel: skip `claude mcp list` when inputs are unchanged.** `ralph_probe_mcp_servers()` ran `claude mcp list` (up to 30s) on every session start, even when the `claude` binary version and both MCP config files (`.mcp.json`, `~/.claude.json`) were unchanged from the last run. A new `ralph_mcp_compute_probe_hash()` helper computes a SHA-256 over those three inputs; on a successful live probe the result is written to `.ralph/.mcp-probe-sentinel` (key=value format: `ts`, `hash`, `tapps`, `docs`, `brain`, `brain_auth_failed`). Subsequent startups that find a sentinel younger than `RALPH_MCP_PROBE_SENTINEL_MAX_AGE` seconds (default 86400 / 24 h) with a matching hash load the cached flags immediately and skip the live probe entirely. New knob: `RALPH_MCP_PROBE_SKIP_IF_UNCHANGED=true` (default true) — set to `false` to always run the live probe. Sentinel is not written when (a) `claude mcp list` returns empty output (probe failed), or (b) no SHA-256 command is available (safe degradation: probe runs every time). 17 new BATS cases in `tests/unit/test_mcp_probe_sentinel.bats`.
+
+### Tests
+
+- Unit suite grew from **1707 → 1751 cases** (+44) across 4 new BATS files: `test_mcp_probe_sentinel.bats` (TAP-1838, +17), `test_coordinator_brief.bats` (TAP-1875, +5), `test_validate_command.bats` (TAP-1876, +15), `test_exec_post_run.bats` (TAP-1877, +5), with adjacent existing files picking up the remaining +2. All green; integration suite 203/203.
 
 ---
 
