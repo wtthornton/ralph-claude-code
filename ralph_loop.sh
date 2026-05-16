@@ -2604,12 +2604,28 @@ ralph_spawn_coordinator() {
 
     # TAP-921: brief body — MODE= header added by ralph_coordinator_invoke,
     # session capture + resume-or-spawn handled by _coordinator_invoke_claude.
+    # TAP-1875: spell the contract out. The prior body said "Write per the
+    # schema" and 88% of cache-miss spawns returned the one-line summary
+    # without invoking the Write tool. Reiterate the file path + atomic
+    # pattern + JSON shape inline so the coordinator can't shortcut to
+    # "summarize only".
     local coord_body
     coord_body="TASK_SOURCE=${task_source}
 LOOP=${loop_count}
 TASK_INPUT: ${task_input}
 
-Write ${brief_target} per the schema in lib/brief.sh, then return a one-line summary."
+REQUIRED ACTION (do this BEFORE returning the summary):
+  1. Use the Write tool to write the brief JSON to ${brief_target} (a single
+     Write call — the Claude Code Write tool is atomic at the tool layer).
+  2. The JSON must include every required field from lib/brief.sh:brief_validate
+     (schema_version=1, task_id, task_source, task_summary, risk_level
+     LOW|MEDIUM|HIGH, affected_modules[], acceptance_criteria[], qa_required,
+     delegate_to ralph|ralph-architect, coordinator_confidence in [0,1],
+     created_at ISO-8601 UTC).
+  3. Return a ≤3-line summary AFTER the file is written.
+
+Returning a summary without writing ${brief_target} is a contract violation
+that trips the harness's coordinator regression detector."
 
     ralph_coordinator_invoke brief "$coord_body"
     local _coord_rc=$?
@@ -2647,9 +2663,46 @@ Write ${brief_target} per the schema in lib/brief.sh, then return a one-line sum
             _brief_updated_at=$(brief_read_field linear_issue_updated_at 2>/dev/null) || _brief_updated_at=""
             exec_save_brief_cache "$_cache_issue_id" "$_brief_updated_at" || true
         fi
-    else
-        log_status "WARN" "coordinator: brief missing or invalid — clearing"
-        rm -f "$brief_target" 2>/dev/null || true
+        return 0
+    fi
+
+    # TAP-1875: rc=0 but no brief on disk. Retry once with an even more
+    # explicit "your previous response did not write the file" header — the
+    # session resume is preserved by _coordinator_invoke_claude so the
+    # coordinator already has the task context in its turn budget. Capped
+    # at one retry; further failures fall through to the WARN + brain_learn.
+    local _retry_body="MODE_RETRY=brief
+
+Your previous response did not write ${brief_target}. The Write tool MUST be
+used. Repeat the workflow now:
+  1. Write tool: file_path=${brief_target}, content=<the JSON>
+Then return the one-line summary.
+${coord_body}"
+    ralph_coordinator_invoke brief "$_retry_body"
+    if [[ -s "$brief_target" ]] && brief_validate "$brief_target" 2>/dev/null; then
+        local _risk_retry
+        _risk_retry=$(brief_read_field risk_level 2>/dev/null) || _risk_retry="unknown"
+        log_status "INFO" "coordinator: brief written on retry (risk=${_risk_retry})"
+        if [[ -n "$_cache_issue_id" ]] && declare -F exec_save_brief_cache >/dev/null 2>&1; then
+            local _brief_updated_at_r=""
+            _brief_updated_at_r=$(brief_read_field linear_issue_updated_at 2>/dev/null) || _brief_updated_at_r=""
+            exec_save_brief_cache "$_cache_issue_id" "$_brief_updated_at_r" || true
+        fi
+        return 0
+    fi
+
+    log_status "WARN" "coordinator: brief missing or invalid — clearing"
+    rm -f "$brief_target" 2>/dev/null || true
+    # TAP-1875: feed the regression signal into the brain so skill-retro
+    # surfaces a sustained drop next campaign. Best-effort; never blocks.
+    if declare -F brain_client_write_failure >/dev/null 2>&1; then
+        local _brain_task="${_cache_issue_id:-coordinator_brief_write}"
+        brain_client_write_failure \
+            "$RALPH_DIR" \
+            "coordinator returned without writing brief.json" \
+            "rc=0 but ${brief_target} missing or invalid after retry" \
+            "$_brain_task" \
+            "coordinator-brief" >/dev/null 2>&1 || true
     fi
 }
 
