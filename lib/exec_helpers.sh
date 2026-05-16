@@ -126,18 +126,8 @@ exec_run_live() {
     # LOGFIX-4: export tool count for fast-trip detection in main loop.
     LAST_TOOL_COUNT=${_tool_count:-0}
     # LOGFIX-5: categorize errors into expected (tool scope) vs system (real failures).
-    local _expected_errors=0 _system_errors=0
-    if [[ ${_error_count:-0} -gt 0 ]]; then
-        _expected_errors=$(grep -B1 '"is_error":true' "$output_file" 2>/dev/null \
-            | grep -ciE 'permission|denied|too large|exceeds.*token|exceeds.*limit|outside.*allowed|not allowed' \
-            || echo 0)
-        _expected_errors=$(echo "$_expected_errors" | tr -d '[:space:]')
-        _system_errors=$(( ${_error_count:-0} - ${_expected_errors:-0} ))
-        [[ $_system_errors -lt 0 ]] && _system_errors=0
-        log_status "WARN" "Execution stats: Tools=${_tool_count:-0} Agents=${_agent_count:-0} Errors=${_error_count:-0} (${_expected_errors} scope, ${_system_errors} system)"
-    else
-        log_status "INFO" "Execution stats: Tools=${_tool_count:-0} Agents=${_agent_count:-0} Errors=0"
-    fi
+    exec_log_execution_stats "$output_file" \
+        "${_tool_count:-0}" "${_agent_count:-0}" "${_error_count:-0}"
 
     # Extract session ID from stream-json output for session continuity.
     # Stream-json format has session_id in the final "result" type message.
@@ -1039,4 +1029,46 @@ exec_aggregate_qa_results() {
     joined="${joined%, }"
     printf 'FAIL: %s (%s)\n' "$joined" "$first_fail_kind"
     return 1
+}
+
+# exec_log_execution_stats — Emit the post-run Tools/Agents/Errors line.
+#
+# Args:
+#   $1 output_file   — path to the NDJSON stream captured during the run
+#   $2 tool_count    — count of "type":"tool_use" events
+#   $3 agent_count   — count of "subtype":"task_started" events
+#   $4 error_count   — count of "is_error":true events
+#
+# When error_count == 0, emits an INFO line. When error_count > 0, splits the
+# error budget into expected (tool-scope: permission denied, oversize input,
+# token-limit exceeded, etc.) vs. system (real CLI/runtime failures) and emits
+# a WARN line.
+#
+# TAP-1877: the original inline version paired `grep -c | ... || echo 0` with
+# `tr -d '[:space:]'`, which combined into the literal "00" string when grep
+# found no matches — leaking `(00 scope, N system)` to the operator-facing
+# WARN line. The fix uses the documented `tr -cd '0-9' || true` pattern
+# plus `${var:-0}` so future arithmetic stays safe regardless of whether
+# the pipeline produced "0", "" or a digit run.
+exec_log_execution_stats() {
+    local output_file="$1"
+    local tool_count="${2:-0}"
+    local agent_count="${3:-0}"
+    local error_count="${4:-0}"
+
+    if [[ "${error_count:-0}" -eq 0 ]]; then
+        log_status "INFO" "Execution stats: Tools=${tool_count:-0} Agents=${agent_count:-0} Errors=0"
+        return 0
+    fi
+
+    local expected_errors
+    expected_errors=$(grep -B1 '"is_error":true' "$output_file" 2>/dev/null \
+        | grep -ciE 'permission|denied|too large|exceeds.*token|exceeds.*limit|outside.*allowed|not allowed' \
+        | tr -cd '0-9' || true)
+    expected_errors=${expected_errors:-0}
+
+    local system_errors=$(( ${error_count:-0} - ${expected_errors:-0} ))
+    [[ $system_errors -lt 0 ]] && system_errors=0
+
+    log_status "WARN" "Execution stats: Tools=${tool_count:-0} Agents=${agent_count:-0} Errors=${error_count:-0} (${expected_errors} scope, ${system_errors} system)"
 }
