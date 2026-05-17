@@ -183,6 +183,30 @@ DRY_RUN=false
 RALPH_BETA_TOOL_SEARCH=true
 
 # =============================================================================
+# BRANCH HYGIENE (TAP-1878 / TAP-1880)
+# =============================================================================
+
+# Auto-delete squash-merged tap-* working branches at startup
+# (lib/branch_cleanup.sh). Detection uses `git cherry main <branch>`;
+# branches in RALPH_BRANCH_CLEANUP_PROTECTED, the currently-checked-out
+# branch, RALPH_CURRENT_BRANCH, and any branch younger than
+# RALPH_BRANCH_CLEANUP_MIN_AGE_HOURS are skipped. Failures are WARN-only.
+RALPH_BRANCH_CLEANUP_ENABLED=true
+
+# Branches matching this prefix are eligible for cleanup. Non-matching
+# branches are never touched. Default 'tap-' matches the gitBranchName
+# Linear assigns to tickets in the TAP team.
+RALPH_BRANCH_PREFIX=tap-
+
+# Minimum branch age (in hours) before cleanup considers it. Default 24h
+# avoids deleting branches in active retry / in-flight reviews.
+RALPH_BRANCH_CLEANUP_MIN_AGE_HOURS=24
+
+# Colon-separated patterns (bash glob) that are NEVER deleted regardless
+# of `git cherry` evidence. Default protects main + the standard mirrors.
+RALPH_BRANCH_CLEANUP_PROTECTED=main:master:develop:release/*
+
+# =============================================================================
 # ADVANCED SETTINGS
 # =============================================================================
 

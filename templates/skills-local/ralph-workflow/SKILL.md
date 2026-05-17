@@ -52,7 +52,11 @@ Ralph reads tasks from one of two backends, set by `RALPH_TASK_SOURCE` in
     `git log main --grep='<TICKET-ID>'` and confirm at least one
     matching commit exists on `main`. If the work is only on a branch,
     attempt self-merge (`gh pr merge --squash --auto`, direct
-    `git merge`). If the merge is blocked (no permission, conflicts,
+    `git merge`). After a successful squash-merge, delete the source
+    branch locally (`git branch -D <branch>`) and on origin
+    (`git push origin --delete <branch>` — best-effort, ignore
+    network/permission errors) so the repo stays at `main` + active
+    branch. If the merge is blocked (no permission, conflicts,
     required checks pending): post a Linear comment listing the
     unmerged SHAs and **leave the ticket In Progress** — Ralph will
     retry next loop. An unmerged branch is **not** a Done state and is
