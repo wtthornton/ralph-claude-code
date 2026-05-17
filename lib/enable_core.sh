@@ -544,6 +544,87 @@ get_templates_dir() {
     return 1
 }
 
+# merge_gitignore_block - Idempotent line-by-line merge of Ralph .gitignore
+# entries from templates/.gitignore into a target .gitignore. Adds only
+# missing pattern lines; preserves all user content and ordering.
+#
+# Parameters:
+#   $1 (target_file) - Target .gitignore path (default: ./.gitignore)
+#   $2 (source_file) - Source template path (default: $(get_templates_dir)/.gitignore)
+#   $3 (dry_run)     - When "true", counts missing lines without writing.
+#                      The count is published in GITIGNORE_MERGE_APPENDED.
+#
+# Returns:
+#   0 on success (including no-op when all lines already present)
+#   1 on missing source template
+#
+# Side effects:
+#   Sets global GITIGNORE_MERGE_APPENDED to the number of lines appended
+#   (or would-be-appended in dry-run). Read by ralph_upgrade_project.sh
+#   for operator-visible "merged N lines" / "already current" logging.
+#
+# Notes:
+#   - Blank lines and pure-comment lines from the source are skipped (they
+#     are not patterns and would falsely match nothing).
+#   - Membership check uses `grep -qxF` (exact whole-line, fixed-string)
+#     so `.ralph/*` does not collide with `.ralph/.call_count`.
+#   - A blank-line separator is inserted before the first appended line
+#     when the target is non-empty, to keep the merged block readable.
+GITIGNORE_MERGE_APPENDED=0
+
+merge_gitignore_block() {
+    local target_file="${1:-.gitignore}"
+    local source_file="${2:-}"
+    local dry_run="${3:-false}"
+
+    GITIGNORE_MERGE_APPENDED=0
+
+    if [[ -z "$source_file" ]]; then
+        local templates_dir
+        templates_dir=$(get_templates_dir 2>/dev/null) || {
+            enable_log "WARN" "merge_gitignore_block: templates dir not found"
+            return 1
+        }
+        source_file="$templates_dir/.gitignore"
+    fi
+
+    if [[ ! -f "$source_file" ]]; then
+        enable_log "WARN" "merge_gitignore_block: source $source_file not found"
+        return 1
+    fi
+
+    if [[ "$dry_run" != "true" ]]; then
+        touch "$target_file" 2>/dev/null || return 1
+    fi
+
+    local appended=0
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" ]] && continue
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+
+        if ! grep -qxF -- "$line" "$target_file" 2>/dev/null; then
+            if [[ "$dry_run" != "true" ]]; then
+                if [[ "$appended" -eq 0 ]] && [[ -s "$target_file" ]]; then
+                    # Ensure trailing newline before appending new block
+                    if [[ -n "$(tail -c1 "$target_file" 2>/dev/null)" ]]; then
+                        printf '\n' >> "$target_file"
+                    fi
+                    printf '\n# Ralph managed entries\n' >> "$target_file"
+                fi
+                printf '%s\n' "$line" >> "$target_file"
+            fi
+            appended=$((appended + 1))
+        fi
+    done < "$source_file"
+
+    GITIGNORE_MERGE_APPENDED="$appended"
+    if [[ "$appended" -gt 0 ]] && [[ "$dry_run" != "true" ]]; then
+        enable_log "SUCCESS" "Merged $appended Ralph entries into $target_file"
+    fi
+    return 0
+}
+
 # generate_prompt_md - Generate PROMPT.md with project context
 #
 # Parameters:
@@ -873,32 +954,15 @@ enable_ralph_in_directory() {
     fix_plan_content=$(generate_fix_plan_md "$task_content")
     safe_create_file ".ralph/fix_plan.md" "$fix_plan_content"
 
-    # Handle .gitignore — never overwrite user's .gitignore, merge Ralph entries instead
+    # Handle .gitignore — single source of truth is templates/.gitignore.
+    # Fresh install: copy the template. Existing .gitignore: line-by-line
+    # merge of any missing Ralph patterns via merge_gitignore_block (which
+    # is also reused by ralph_upgrade_project.sh for the backfill path).
     local templates_dir
     templates_dir=$(get_templates_dir 2>/dev/null) || true
     if [[ -n "$templates_dir" ]] && [[ -f "$templates_dir/.gitignore" ]]; then
         if [[ -f ".gitignore" ]]; then
-            # Merge: add missing Ralph entries to existing .gitignore
-            local ralph_marker="# Ralph managed entries"
-            if ! grep -qF "$ralph_marker" ".gitignore" 2>/dev/null; then
-                {
-                    echo ""
-                    echo "$ralph_marker"
-                    echo ".ralph/logs/"
-                    echo ".ralph/metrics/"
-                    echo ".ralph/backups/"
-                    echo ".ralph/.circuit_breaker_state"
-                    echo ".ralph/.call_count"
-                    echo ".ralph/.last_reset"
-                    echo ".ralph/.exit_signals"
-                    echo ".ralph/.claude_session_id"
-                    echo ".ralph/status.json"
-                    echo "claude_output_*.log"
-                } >> ".gitignore"
-                enable_log "SUCCESS" "Merged Ralph entries into existing .gitignore"
-            else
-                enable_log "SKIP" ".gitignore already has Ralph entries"
-            fi
+            merge_gitignore_block ".gitignore" "$templates_dir/.gitignore"
         else
             local gitignore_content
             gitignore_content=$(<"$templates_dir/.gitignore")

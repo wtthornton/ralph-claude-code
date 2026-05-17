@@ -454,9 +454,11 @@ EOF
     # HOME is already isolated to TEST_DIR/home by setup()
     mkdir -p "$HOME/.ralph/templates"
     cat > "$HOME/.ralph/templates/.gitignore" << 'EOF'
-.ralph/.call_count
-.ralph/.last_reset
-.ralph/status.json
+.ralph/*
+!.ralph/PROMPT.md
+!.ralph/AGENT.md
+!.ralph/fix_plan.md
+!.ralph/hooks/
 EOF
 
     export ENABLE_FORCE="false"
@@ -467,14 +469,18 @@ EOF
 
     assert_success
     [[ -f ".gitignore" ]]
-    grep -q ".ralph/.call_count" .gitignore
+    grep -qxF ".ralph/*" .gitignore
+    grep -qxF "!.ralph/PROMPT.md" .gitignore
 }
 
-@test "enable_ralph_in_directory skips .gitignore when one exists and no force" {
+@test "enable_ralph_in_directory merges Ralph entries into existing .gitignore" {
     mkdir -p "$HOME/.ralph/templates"
-    echo ".ralph/.call_count" > "$HOME/.ralph/templates/.gitignore"
+    cat > "$HOME/.ralph/templates/.gitignore" << 'EOF'
+.ralph/*
+!.ralph/PROMPT.md
+EOF
 
-    # Pre-existing .gitignore
+    # Pre-existing .gitignore with user content
     echo "my-custom-ignore" > .gitignore
 
     export ENABLE_FORCE="false"
@@ -484,15 +490,19 @@ EOF
     run enable_ralph_in_directory
 
     assert_success
-    # Should preserve existing .gitignore content
-    grep -q "my-custom-ignore" .gitignore
+    # User content preserved
+    grep -qxF "my-custom-ignore" .gitignore
+    # Ralph allowlist patterns merged in
+    grep -qxF ".ralph/*" .gitignore
+    grep -qxF "!.ralph/PROMPT.md" .gitignore
 }
 
-@test "enable_ralph_in_directory merges Ralph entries into existing .gitignore with force" {
+@test "enable_ralph_in_directory gitignore merge is idempotent across re-runs" {
     mkdir -p "$HOME/.ralph/templates"
-    echo ".ralph/.call_count" > "$HOME/.ralph/templates/.gitignore"
-
-    # Pre-existing .gitignore with different content
+    cat > "$HOME/.ralph/templates/.gitignore" << 'EOF'
+.ralph/*
+!.ralph/PROMPT.md
+EOF
     echo "my-custom-ignore" > .gitignore
 
     export ENABLE_FORCE="true"
@@ -500,13 +510,16 @@ EOF
     export ENABLE_PROJECT_NAME="test-project"
 
     run enable_ralph_in_directory
-
     assert_success
-    # Original content preserved
-    grep -q "my-custom-ignore" .gitignore
-    # Ralph entries merged in
-    grep -q "# Ralph managed entries" .gitignore
-    grep -q ".ralph/logs/" .gitignore
+    local first_hash
+    first_hash=$(sha256sum .gitignore | awk '{print $1}')
+
+    run enable_ralph_in_directory
+    assert_success
+    local second_hash
+    second_hash=$(sha256sum .gitignore | awk '{print $1}')
+
+    [ "$first_hash" = "$second_hash" ]
 }
 
 @test "enable_ralph_in_directory succeeds when templates dir exists but .gitignore is missing" {
@@ -555,33 +568,27 @@ EOF
 }
 
 @test "ENABLE-4: gitignore merge adds Ralph entries without overwriting" {
+    cat > template-gitignore <<'EOF'
+.ralph/*
+!.ralph/PROMPT.md
+EOF
     echo "node_modules/" > .gitignore
-    # Simulate the merge logic
-    local ralph_marker="# Ralph managed entries"
-    if ! grep -qF "$ralph_marker" ".gitignore" 2>/dev/null; then
-        echo "" >> .gitignore
-        echo "$ralph_marker" >> .gitignore
-        echo ".ralph/logs/" >> .gitignore
-    fi
-    # Original content preserved
-    grep -q "node_modules/" .gitignore
-    # Ralph entries added
-    grep -q "# Ralph managed entries" .gitignore
-    grep -q ".ralph/logs/" .gitignore
+    merge_gitignore_block .gitignore template-gitignore
+
+    grep -qxF "node_modules/" .gitignore
+    grep -qxF ".ralph/*" .gitignore
+    grep -qxF "!.ralph/PROMPT.md" .gitignore
 }
 
 @test "ENABLE-4: gitignore merge is idempotent — does not duplicate entries" {
-    # Create .gitignore that already has Ralph entries
-    printf "node_modules/\n\n# Ralph managed entries\n.ralph/logs/\n" > .gitignore
-    local ralph_marker="# Ralph managed entries"
-    # Run merge logic again
-    if ! grep -qF "$ralph_marker" ".gitignore" 2>/dev/null; then
-        echo "" >> .gitignore
-        echo "$ralph_marker" >> .gitignore
-        echo ".ralph/logs/" >> .gitignore
-    fi
-    # Should only have one occurrence of the marker
-    local marker_count
-    marker_count=$(grep -cF "# Ralph managed entries" .gitignore)
-    [[ "$marker_count" -eq 1 ]]
+    cat > template-gitignore <<'EOF'
+.ralph/*
+!.ralph/PROMPT.md
+EOF
+    printf "node_modules/\n.ralph/*\n!.ralph/PROMPT.md\n" > .gitignore
+
+    merge_gitignore_block .gitignore template-gitignore
+
+    [ "$(grep -cxF '.ralph/*' .gitignore)" -eq 1 ]
+    [ "$(grep -cxF '!.ralph/PROMPT.md' .gitignore)" -eq 1 ]
 }
