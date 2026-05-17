@@ -10,6 +10,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.15.2] — 2026-05-17
+
+### Fixed
+
+- **TAP-1881 — `.gitignore` audit: allowlist pattern + idempotent upgrade backfill.** Closes [TAP-1682](https://linear.app/tappscodingagents/issue/TAP-1682) origin: every Ralph-managed consumer repo's `git status` was leaking 14 untracked `.ralph/` state files (`.brief_cache/`, `.coordinator_timings.jsonl`, `.model_routing.jsonl`, `.qa_failures.json`, `.import_graph.json`, `brief.json`, …) because `templates/.gitignore` was a hand-maintained denylist and `lib/enable_core.sh:884-897` carried a duplicate hardcoded list with a marker-skip merge that froze after first install. Two stories collapse three failure modes into one source of truth:
+  - **TAP-1882** — `templates/.gitignore` switches to `.ralph/*` + `!` allowlist exceptions (`PROMPT.md`, `AGENT.md`, `fix_plan.md`, `hooks/`, `.gitkeep`). Any new state-file writer under `.ralph/` is absorbed automatically — no template churn per feature. `lib/enable_core.sh` loses its duplicate hardcoded list and marker-skip merge; new top-level `merge_gitignore_block` helper reads canonical patterns from `templates/.gitignore` and appends missing ones via `grep -qxF` membership check. User content above and below the Ralph block is preserved byte-for-byte. 12 new BATS cases in `tests/unit/test_gitignore_merge.bats`.
+  - **TAP-1883** — `ralph_upgrade_project.sh` reuses `merge_gitignore_block` as a Tier-2 merge so `ralph upgrade` retrofits the allowlist into existing consumer repos without losing user-added entries. New `dry_run=true` mode on the helper publishes the would-be-appended count via `GITIGNORE_MERGE_APPENDED` so `--dry-run` still surfaces the operator-visible diff. Bottom of `ralph_upgrade_project.sh` gains a `BASH_SOURCE` guard so its functions are sourceable from tests without running `main()`. 9 new BATS cases.
+
+### Added
+
+- **TAP-1988 — Tool Search BETA opt-in via `ANTHROPIC_BETA` header.** Parent epic [TAP-1983](https://linear.app/tappscodingagents/issue/TAP-1983) — without the `advanced-tool-use-2025-11-20` beta header, the Anthropic API hides every tool annotated `defer_loading: true` from the catalog entirely and the agent has no recovery path. `ralph_loop.sh:build_claude_command` now exports `ANTHROPIC_BETA` before every Claude CLI invocation, read by the Anthropic SDK and forwarded as the `anthropic-beta` HTTP header. Multi-value-safe: an operator-set `ANTHROPIC_BETA="other-beta"` is preserved and the tool-search token is appended; if the token is already present, the env var is left untouched (no duplication across repeated calls). `RALPH_BETA_TOOL_SEARCH=false` is the escape hatch. New `templates/ralphrc.template` section "ANTHROPIC BETA FEATURES" documents the override. 6 new BATS cases in `tests/unit/test_build_claude_command.bats`.
+
+- **TAP-1878 — Branch hygiene: auto-cleanup of squash-merged Ralph working branches.** Consumer-repo audit in `wtthornton/tapps-brain` 2026-05-16 found 32 local + 17 origin stale `tap-*` branches accumulated across loops; every consumer repo hits this without harness-side cleanup. Two complementary mechanisms ship together:
+  - **TAP-1879** — `ralph_loop.sh:2228` prompt and `templates/skills-local/ralph-workflow/SKILL.md` (R1) both gain the same sentence: after a successful squash-merge to `main`, run `git branch -D <branch>` locally and `git push origin --delete <branch>` on origin, framed best-effort so network/permission errors don't block the loop. Lockstep enforced per the `feedback_default_doc_lockstep` memory. 9 new BATS cases in `tests/unit/test_branch_cleanup_prompt.bats`.
+  - **TAP-1880** — new `lib/branch_cleanup.sh` module (`ralph_cleanup_merged_branches` orchestrator + 4 helpers) invoked once per Ralph invocation from `main()` as the harness-side safety net for branches the LLM forgot to delete. Detection uses `git cherry main <branch>` — the only squash-merge-aware primitive (`git branch --merged` does NOT detect squash-merges because squash creates a new commit on `main`). Four-layer safety envelope makes false-positive deletion structurally impossible: cherry evidence + `RALPH_BRANCH_CLEANUP_PROTECTED` glob list (default `main:master:develop:release/*`) + `RALPH_BRANCH_PREFIX` filter (default `tap-`) + `RALPH_BRANCH_CLEANUP_MIN_AGE_HOURS` threshold (default 24). Currently-checked-out branch and `RALPH_CURRENT_BRANCH` pin are always preserved. All failures (network, permission, missing remote) are WARN-only — orchestrator always returns 0 so a botched cleanup never trips the CB. 18 new BATS cases in `tests/unit/test_branch_cleanup.bats`. Real-world validation post-merge: deleted 2 stale `tap-1838-*` branches in this repo on first run with no manual intervention.
+
+### Tests
+
+- Unit suite grew from **1751 → 1778 cases** (+27) across 4 new BATS files: `test_gitignore_merge.bats` (+21), `test_build_claude_command.bats` (+6), `test_branch_cleanup_prompt.bats` (+9), `test_branch_cleanup.bats` (+18), with adjacent existing files (`test_enable_core.bats`) picking up the rewrites against the new helper. All green; full unit suite still 100% pass.
+
+---
+
 ## [2.15.1] — 2026-05-16
 
 ### Fixed
