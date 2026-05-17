@@ -551,10 +551,17 @@ get_templates_dir() {
 # Parameters:
 #   $1 (target_file) - Target .gitignore path (default: ./.gitignore)
 #   $2 (source_file) - Source template path (default: $(get_templates_dir)/.gitignore)
+#   $3 (dry_run)     - When "true", counts missing lines without writing.
+#                      The count is published in GITIGNORE_MERGE_APPENDED.
 #
 # Returns:
 #   0 on success (including no-op when all lines already present)
 #   1 on missing source template
+#
+# Side effects:
+#   Sets global GITIGNORE_MERGE_APPENDED to the number of lines appended
+#   (or would-be-appended in dry-run). Read by ralph_upgrade_project.sh
+#   for operator-visible "merged N lines" / "already current" logging.
 #
 # Notes:
 #   - Blank lines and pure-comment lines from the source are skipped (they
@@ -563,9 +570,14 @@ get_templates_dir() {
 #     so `.ralph/*` does not collide with `.ralph/.call_count`.
 #   - A blank-line separator is inserted before the first appended line
 #     when the target is non-empty, to keep the merged block readable.
+GITIGNORE_MERGE_APPENDED=0
+
 merge_gitignore_block() {
     local target_file="${1:-.gitignore}"
     local source_file="${2:-}"
+    local dry_run="${3:-false}"
+
+    GITIGNORE_MERGE_APPENDED=0
 
     if [[ -z "$source_file" ]]; then
         local templates_dir
@@ -581,7 +593,9 @@ merge_gitignore_block() {
         return 1
     fi
 
-    touch "$target_file" 2>/dev/null || return 1
+    if [[ "$dry_run" != "true" ]]; then
+        touch "$target_file" 2>/dev/null || return 1
+    fi
 
     local appended=0
     local line
@@ -590,19 +604,22 @@ merge_gitignore_block() {
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
 
         if ! grep -qxF -- "$line" "$target_file" 2>/dev/null; then
-            if [[ "$appended" -eq 0 ]] && [[ -s "$target_file" ]]; then
-                # Ensure trailing newline before appending new block
-                if [[ -n "$(tail -c1 "$target_file" 2>/dev/null)" ]]; then
-                    printf '\n' >> "$target_file"
+            if [[ "$dry_run" != "true" ]]; then
+                if [[ "$appended" -eq 0 ]] && [[ -s "$target_file" ]]; then
+                    # Ensure trailing newline before appending new block
+                    if [[ -n "$(tail -c1 "$target_file" 2>/dev/null)" ]]; then
+                        printf '\n' >> "$target_file"
+                    fi
+                    printf '\n# Ralph managed entries\n' >> "$target_file"
                 fi
-                printf '\n# Ralph managed entries\n' >> "$target_file"
+                printf '%s\n' "$line" >> "$target_file"
             fi
-            printf '%s\n' "$line" >> "$target_file"
             appended=$((appended + 1))
         fi
     done < "$source_file"
 
-    if [[ "$appended" -gt 0 ]]; then
+    GITIGNORE_MERGE_APPENDED="$appended"
+    if [[ "$appended" -gt 0 ]] && [[ "$dry_run" != "true" ]]; then
         enable_log "SUCCESS" "Merged $appended Ralph entries into $target_file"
     fi
     return 0

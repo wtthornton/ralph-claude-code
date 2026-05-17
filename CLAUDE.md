@@ -420,6 +420,7 @@ The version string exists in **two** files that **must stay in sync**:
 - **Commands** (`~/.local/bin/`): `ralph`, `ralph-monitor`, `ralph-setup`, `ralph-import`, `ralph-migrate`, `ralph-enable`, `ralph-enable-ci`, `ralph-sdk`, `ralph-doctor`, `ralph-upgrade`
 - **Scripts and libs** (`~/.ralph/`): Main scripts + `lib/` modules
 - **Templates** (`~/.ralph/templates/`): Project scaffolding templates
+- **Upgrade backfill** (TAP-1883): `ralph-upgrade-project` now backfills missing `templates/.gitignore` patterns into consumer repos via the shared `merge_gitignore_block` helper. Runs as a Tier 2 merge alongside `.ralphrc` and `settings.json`. Idempotent (second run is a no-op), preserves user-added `.gitignore` entries byte-for-byte, honors `--dry-run`.
 - **Global Claude skills** (`~/.claude/skills/`): Tier S baseline synced from `templates/skills/global/` at install/upgrade time via `lib/skills_install.sh`. Ralph-installed skill dirs carry a `.ralph-managed` sidecar; user-authored skills or user-modified files are never touched (TAP-574). The canonical library is maintained in-repo under `templates/skills/global/<name>/` with `SKILL.md` + `examples/` — currently 5 Tier S skills (`search-first`, `tdd-workflow`, `simplify`, `context-audit`, `agentic-engineering`), each enforced by `tests/unit/test_skill_frontmatter.bats` + `test_skill_content.bats` (TAP-575).
 
 <!-- BEGIN: karpathy-guidelines c9a44ae (MIT, forrestchang/andrej-karpathy-skills) -->

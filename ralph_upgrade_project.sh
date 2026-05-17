@@ -907,6 +907,94 @@ upgrade_prompt_md() {
 }
 
 # =============================================================================
+# Tier 2: Merge — .gitignore (idempotent backfill via shared helper)
+# =============================================================================
+# TAP-1883: reuses merge_gitignore_block from lib/enable_core.sh so install
+# and upgrade share one source of truth for Ralph's allowlist pattern.
+
+_resolve_enable_core_path() {
+    local p
+    p="$(dirname "${BASH_SOURCE[0]}")/lib/enable_core.sh"
+    [[ -f "$p" ]] && { echo "$p"; return 0; }
+    p="${RALPH_HOME}/lib/enable_core.sh"
+    [[ -f "$p" ]] && { echo "$p"; return 0; }
+    return 1
+}
+
+upgrade_gitignore() {
+    local project="$1"
+    local template_gitignore="$RALPH_TEMPLATES/.gitignore"
+    local project_gitignore="$project/.gitignore"
+
+    if [[ ! -f "$template_gitignore" ]]; then
+        log WARN "No .gitignore template at $template_gitignore — skipping"
+        return 0
+    fi
+
+    # Source the shared helper lazily on first call. Sourcing the whole
+    # enable_core.sh costs a one-time function-namespace pollution but keeps
+    # the merge logic in one place (the alternative is a duplicate copy that
+    # would silently drift the way the original denylist did — see TAP-1881).
+    if ! declare -F merge_gitignore_block >/dev/null 2>&1; then
+        local helper_path
+        if ! helper_path=$(_resolve_enable_core_path); then
+            log WARN "lib/enable_core.sh not found — cannot backfill .gitignore"
+            return 0
+        fi
+        # shellcheck disable=SC1090
+        source "$helper_path"
+    fi
+
+    # Fresh-project edge case: no .gitignore at all. Copy the template
+    # verbatim and we're done.
+    if [[ ! -f "$project_gitignore" ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            log DRY "Would create .gitignore from $template_gitignore"
+            PROJ_CREATED=$((PROJ_CREATED + 1))
+            audit "gitignore: would create from $template_gitignore"
+            return 0
+        fi
+        cp "$template_gitignore" "$project_gitignore"
+        log SUCCESS "Created .gitignore from template"
+        audit "gitignore: created from $template_gitignore"
+        PROJ_CREATED=$((PROJ_CREATED + 1))
+        return 0
+    fi
+
+    # Existing .gitignore: dry-run first to count missing patterns, so the
+    # operator log shows the diff regardless of DRY_RUN.
+    GITIGNORE_MERGE_APPENDED=0
+    if ! merge_gitignore_block "$project_gitignore" "$template_gitignore" "true" >/dev/null 2>&1; then
+        log WARN "merge_gitignore_block dry-run failed for $project_gitignore"
+        return 0
+    fi
+    local missing="$GITIGNORE_MERGE_APPENDED"
+
+    if [[ "$missing" -eq 0 ]]; then
+        log SKIP ".gitignore already current"
+        PROJ_SKIPPED=$((PROJ_SKIPPED + 1))
+        audit "gitignore: already current — no entries appended"
+        return 0
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log DRY "Would merge $missing missing Ralph entries into .gitignore"
+        PROJ_UPDATED=$((PROJ_UPDATED + 1))
+        audit "gitignore: would merge $missing entries from $template_gitignore"
+        return 0
+    fi
+
+    create_backup "$project" ".gitignore"
+    if ! merge_gitignore_block "$project_gitignore" "$template_gitignore" "false" >/dev/null 2>&1; then
+        log WARN "merge_gitignore_block failed for $project_gitignore"
+        return 0
+    fi
+    log SUCCESS "Merged $missing missing Ralph entries into .gitignore"
+    audit "gitignore: merged $missing entries from $template_gitignore"
+    PROJ_UPDATED=$((PROJ_UPDATED + 1))
+}
+
+# =============================================================================
 # Single-project orchestrator
 # =============================================================================
 
@@ -958,6 +1046,9 @@ upgrade_single_project() {
 
         # Tier 2: settings.json
         merge_settings_json "$project"
+
+        # Tier 2: .gitignore (TAP-1883 — backfill allowlist patterns)
+        upgrade_gitignore "$project"
 
         # Tier 2: .ralph/PROMPT.md (marker-bounded section only)
         upgrade_prompt_md "$project"
@@ -1177,4 +1268,9 @@ main() {
     print_summary
 }
 
-main "$@"
+# Sourcing-safe entry point: only run main when invoked as a script. Tests
+# that need upgrade_gitignore / upgrade_single_project as library functions
+# source this file directly (TAP-1883).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
