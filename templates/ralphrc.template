@@ -169,6 +169,20 @@ LOG_MAX_OUTPUT_FILES=20
 DRY_RUN=false
 
 # =============================================================================
+# ANTHROPIC BETA FEATURES (TAP-1988)
+# =============================================================================
+
+# Tool Search BETA opt-in. When true (default), Ralph exports
+# ANTHROPIC_BETA=advanced-tool-use-2025-11-20 before invoking the Claude
+# CLI so the API serves the deferred-tool catalog and on-demand fetch.
+# Without this header, tools annotated `defer_loading: true` are hidden
+# from the catalog entirely and the agent has no recovery path.
+#
+# Set to false to disable (operator rollback in case the beta misbehaves).
+# Honored at the build_claude_command boundary, so each loop re-evaluates.
+RALPH_BETA_TOOL_SEARCH=true
+
+# =============================================================================
 # ADVANCED SETTINGS
 # =============================================================================
 

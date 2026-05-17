@@ -3325,6 +3325,29 @@ build_claude_command() {
         return 1
     fi
 
+    # TAP-1988: Tool Search BETA opt-in. The Anthropic API serves the
+    # tool-search machinery only when the request carries the
+    # `advanced-tool-use-2025-11-20` beta header — without it, tools
+    # annotated `defer_loading: true` are simply hidden from the catalog
+    # and the agent has no recovery path.
+    #
+    # Mechanism: export ANTHROPIC_BETA (read by the Anthropic SDK that
+    # backs the Claude CLI; forwarded as the `anthropic-beta` HTTP
+    # header). Multi-value betas are comma-separated, so we append
+    # without clobbering any operator-set value.
+    #
+    # Escape hatch: RALPH_BETA_TOOL_SEARCH=false skips the export
+    # entirely (operator rollback).
+    if [[ "${RALPH_BETA_TOOL_SEARCH:-true}" == "true" ]]; then
+        local _tool_search_beta="advanced-tool-use-2025-11-20"
+        local _existing_betas="${ANTHROPIC_BETA:-}"
+        if [[ -z "$_existing_betas" ]]; then
+            export ANTHROPIC_BETA="$_tool_search_beta"
+        elif [[ ",${_existing_betas}," != *",${_tool_search_beta},"* ]]; then
+            export ANTHROPIC_BETA="${_existing_betas},${_tool_search_beta}"
+        fi
+    fi
+
     # Model + effort flags
     # Per-task routing (lib/complexity.sh): when RALPH_MODEL_ROUTING_ENABLED=true,
     # ralph_select_model returns a tier model (haiku/sonnet/opus) based on task
