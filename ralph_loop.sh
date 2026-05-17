@@ -31,6 +31,7 @@ source "$SCRIPT_DIR/lib/exec_helpers.sh" || { echo "FATAL: Failed to source lib/
 [[ -f "$SCRIPT_DIR/lib/linear_backend.sh" ]] && source "$SCRIPT_DIR/lib/linear_backend.sh"
 [[ -f "$SCRIPT_DIR/lib/linear_optimizer.sh" ]] && source "$SCRIPT_DIR/lib/linear_optimizer.sh"
 [[ -f "$SCRIPT_DIR/lib/skill_retro.sh" ]] && source "$SCRIPT_DIR/lib/skill_retro.sh"
+[[ -f "$SCRIPT_DIR/lib/branch_cleanup.sh" ]] && source "$SCRIPT_DIR/lib/branch_cleanup.sh"
 # BRAIN-PHASE-B1: memory writes from on-stop hook. Sourced here so the main
 # loop also has access if we later want to write outside hook context.
 [[ -f "$SCRIPT_DIR/lib/brain_client.sh" ]] && source "$SCRIPT_DIR/lib/brain_client.sh"
@@ -4599,6 +4600,16 @@ main() {
     log_status "SUCCESS" "🚀 Ralph loop starting with Claude Code"
     log_status "INFO" "Max calls per hour: $MAX_CALLS_PER_HOUR"
     log_status "INFO" "Logs: $LOG_DIR/ | Docs: $DOCS_DIR/ | Status: $STATUS_FILE"
+
+    # TAP-1880: epic-boundary branch janitor — runs once per Ralph invocation
+    # (same low-frequency cadence as the existing QA / backup deferrals).
+    # Deletes squash-merged tap-* branches the prompt-side fix (TAP-1879)
+    # missed. Safety envelope: git cherry evidence, protected list, min-age
+    # threshold, prefix filter, currently-checked-out skip. Always returns
+    # 0 — cleanup failures are WARN-only and never trip the circuit breaker.
+    if declare -F ralph_cleanup_merged_branches >/dev/null 2>&1; then
+        ralph_cleanup_merged_branches
+    fi
 
     # Surface model-routing health at startup. The "default false" regression in
     # lib/complexity.sh silently pinned every loop to CLAUDE_MODEL=opus and
