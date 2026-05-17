@@ -1,20 +1,11 @@
-# Ralph generated files (inside .ralph/ subfolder)
-.ralph/.call_count
-.ralph/.last_reset
-.ralph/.exit_signals
-.ralph/status.json
-.ralph/.ralph_session
-.ralph/.ralph_session_history
-.ralph/.claude_session_id
-.ralph/.response_analysis
-.ralph/.circuit_breaker_state
-.ralph/.circuit_breaker_history
-
-# Ralph logs and generated docs
-.ralph/logs/*
-!.ralph/logs/.gitkeep
-.ralph/docs/generated/*
-!.ralph/docs/generated/.gitkeep
+# Ralph state — allowlist pattern; ignore .ralph/* except committed files below
+.ralph/*
+!.ralph/PROMPT.md
+!.ralph/AGENT.md
+!.ralph/fix_plan.md
+!.ralph/hooks/
+!.ralph/hooks/**
+!.ralph/.gitkeep
 
 # General logs
 *.log
@@ -26,13 +17,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 .temp/
-
-# LOCK-1: Instance lock file (auto-released by flock kernel syscall)
-.ralph/.ralph.lock
-
-# WSL-1: Orphaned temp files from atomic writes (cross-fs copy+unlink)
-.ralph/status.json.*
-.ralph/.circuit_breaker_state.*
 
 # Node modules (if using Node.js projects)
 node_modules/

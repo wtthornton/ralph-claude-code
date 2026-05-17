@@ -195,6 +195,8 @@ The main Ralph agent (Sonnet) handles routine work with task batching (up to 5 s
 
 ### State Files (in `.ralph/` within managed projects)
 
+**Committed vs ignored (TAP-1882):** `templates/.gitignore` uses an allowlist for `.ralph/` — `.ralph/*` ignores everything except the small known-good set: `PROMPT.md`, `AGENT.md`, `fix_plan.md`, and `hooks/`. Every other file documented below (counters, status, caches, JSONL logs) is ephemeral state and is **never** committed. New `.ralph/<thing>` writers do not need to update `templates/.gitignore` — the allowlist absorbs them automatically. The merge helper `merge_gitignore_block` in `lib/enable_core.sh` is called from both `enable_core.sh` (fresh install) and `ralph_upgrade_project.sh` (backfill into existing repos) so consumer repos converge on the same allowlist without losing user-added entries.
+
 - `.call_count` / `.last_reset` — Rate limit tracking (hourly reset)
 - `.exit_signals` — Exit signal history
 - `status.json` — Real-time status and response analysis (written by on-stop.sh hook)
