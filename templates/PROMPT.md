@@ -62,7 +62,11 @@ project code. Deleting them halts the loop.
 <!--TASK_SOURCE:file:end-->
 <!--TASK_SOURCE:linear:start-->
   - Tasks live in your Linear project (`RALPH_LINEAR_PROJECT`), not in
-    `fix_plan.md`. Read open issues via `mcp__plugin_linear_linear__list_issues`.
+    `fix_plan.md`. Read open issues via `mcp__plugin_linear_linear__list_issues`
+    with `limit: 100` (see the linear-read skill). For projects with >30
+    issues you may want to raise `MAX_MCP_OUTPUT_TOKENS` (default 25000)
+    in the Linear plugin's `.mcp.json` env block so the response stays
+    inline instead of being dumped to a file the agent then has to re-Read.
 <!--TASK_SOURCE:linear:end-->
   - `AGENT.md`: Project build and run instructions
   - `PROMPT.md`: This file
@@ -80,10 +84,13 @@ project code. Deleting them halts the loop.
 <!--TASK_SOURCE:file:end-->
 <!--TASK_SOURCE:linear:start-->
 2. List open Linear issues in your project via
-   `mcp__plugin_linear_linear__list_issues` and pick the highest-priority
-   unblocked one. Do NOT read `.ralph/fix_plan.md` — Linear is the single
-   source of truth in this mode. The full workflow lives in the
-   **ralph-workflow** skill (linear-mode contract).
+   `mcp__plugin_linear_linear__list_issues` with `limit: 100` and pick the
+   highest-priority unblocked one. Do NOT read `.ralph/fix_plan.md` —
+   Linear is the single source of truth in this mode. The full workflow
+   lives in the **ralph-workflow** skill (linear-mode contract); the
+   **linear-read** skill covers the cache-first dance, the
+   `MAX_MCP_OUTPUT_TOKENS` env-var fix, and the dumped-result handling
+   for any page that ends up over the (default 25k-token) MCP ceiling.
 <!--TASK_SOURCE:linear:end-->
 3. **Verify the task is still needed** before writing code: re-read the
    acceptance criteria and search the codebase for prior work. If the
