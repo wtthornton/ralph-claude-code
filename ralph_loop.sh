@@ -159,7 +159,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.15.2"
+RALPH_VERSION="2.15.3"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -2505,6 +2505,26 @@ _coordinator_invoke_claude() {
                 log_status "DEBUG" "coordinator: session captured (${_new_sid:0:8}…)"
         fi
     fi
+
+    # AgentForge feedback #5: persist last 4KB of merged stdout+stderr on
+    # failure so the WARN line in ralph_{spawn,debrief}_coordinator has
+    # something to point at. Without this, `coordinator: debrief failed
+    # (exit 1) — continuing` is unobservable: intermittent (~30% of
+    # transitions in the field), and the underlying error (MCP timeout,
+    # permission denial, brain-side hiccup) is lost. Mode is extracted
+    # from the MODE= line that ralph_coordinator_invoke prepended.
+    if [[ $_rc -ne 0 && -n "$_stream_file" && -s "$_stream_file" ]]; then
+        local _mode_label="unknown"
+        if [[ "$input" =~ ^MODE=([a-z]+) ]]; then
+            _mode_label="${BASH_REMATCH[1]}"
+        fi
+        local _err_path="${RALPH_DIR:-.ralph}/.coordinator-${_mode_label}.err"
+        {
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] coordinator ${_mode_label} failed (exit ${_rc}) timeout=${_coord_timeout}s duration=${_coord_duration}s"
+            echo "--- last 4KB of merged stdout+stderr ---"
+            tail -c 4096 "$_stream_file" 2>/dev/null
+        } > "$_err_path" 2>/dev/null || true
+    fi
     [[ -n "$_stream_file" ]] && rm -f -- "$_stream_file" 2>/dev/null
     return $_rc
 }
@@ -2731,7 +2751,12 @@ Read .ralph/brief.json (if present), call brain_learn_success or brain_learn_fai
     ralph_coordinator_invoke debrief "$body"
     local _rc=$?
     if [[ $_rc -ne 0 ]]; then
-        log_status "WARN" "coordinator: debrief failed (exit $_rc) — continuing"
+        local _err_path="${RALPH_DIR:-.ralph}/.coordinator-debrief.err"
+        if [[ -s "$_err_path" ]]; then
+            log_status "WARN" "coordinator: debrief failed (exit $_rc) — see ${_err_path}"
+        else
+            log_status "WARN" "coordinator: debrief failed (exit $_rc) — continuing"
+        fi
         return 0
     fi
     log_status "INFO" "coordinator: debrief recorded (outcome=${outcome})"
@@ -4109,6 +4134,57 @@ ralph_compute_coordinator_timeout() {
     echo "$timeout_seconds"
 }
 
+# AgentForge feedback #1: push pending commits to origin after each
+# successful loop. Without this, multi-epic sessions accumulate unpushed
+# commits indefinitely: the per-task PR-merge flow (gh pr merge in the
+# ralph-workflow R1 rule) is the only thing that puts commits on origin,
+# and it only fires when the agent actually runs the merge. If the merge
+# path fails or is skipped (no GH remote, branch protection, missing
+# perms), commits sit local and Linear says "Done" while origin is unaware
+# — operator-visible state drift.
+#
+# Safety envelope:
+#   - No upstream branch (detached HEAD, brand-new local branch) → silent skip
+#   - Not in a git repo → silent skip
+#   - Zero unpushed commits → silent skip
+#   - Push failure → WARN with tail of git output to .ralph/.push-failure.err,
+#     never propagate failure / never trip CB. Operator gets visibility
+#     without the loop dying on a transient auth/network blip.
+#
+# Disable knob: RALPH_PUSH_EVERY_LOOP=false (default true). Honors DRY_RUN.
+ralph_push_pending_commits() {
+    [[ "${RALPH_PUSH_EVERY_LOOP:-true}" != "true" ]] && return 0
+    [[ "${DRY_RUN:-false}" == "true" ]] && return 0
+
+    local _git_root="${RALPH_PROJECT_ROOT:-.}"
+    if ! git -C "$_git_root" rev-parse --git-dir >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local _upstream
+    _upstream=$(git -C "$_git_root" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) || return 0
+    [[ -z "$_upstream" ]] && return 0
+
+    local _ahead
+    _ahead=$(git -C "$_git_root" rev-list --count "@{u}..HEAD" 2>/dev/null) || return 0
+    [[ "${_ahead:-0}" -eq 0 ]] && return 0
+
+    log_status "INFO" "push: $_ahead pending commit(s) → $_upstream"
+    local _push_out _push_rc=0
+    _push_out=$(git -C "$_git_root" push 2>&1) || _push_rc=$?
+    if [[ "$_push_rc" -eq 0 ]]; then
+        log_status "INFO" "push: succeeded ($_ahead commit(s) to $_upstream)"
+    else
+        log_status "WARN" "push: failed (exit $_push_rc) — $_ahead commit(s) still local on HEAD; see ${RALPH_DIR:-.ralph}/.push-failure.err"
+        {
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] git push failed (exit $_push_rc) ahead=$_ahead upstream=$_upstream"
+            echo "--- git output ---"
+            echo "$_push_out" | tail -c 1024
+        } > "${RALPH_DIR:-.ralph}/.push-failure.err" 2>/dev/null || true
+    fi
+    return 0
+}
+
 # Main execution function
 execute_claude_code() {
     local timestamp=$(date '+%Y-%m-%d_%H-%M-%S')
@@ -4313,6 +4389,10 @@ execute_claude_code() {
 
         # CBDECAY-1: Record success for sliding window
         cb_record_success
+
+        # AgentForge feedback #1: push any pending commits so origin reflects
+        # the autonomous work in real time. No-op when ahead==0 or no upstream.
+        ralph_push_pending_commits
 
         return 0
     else

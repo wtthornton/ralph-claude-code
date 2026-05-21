@@ -41,7 +41,7 @@ Ralph reads tasks from one of two backends, set by `RALPH_TASK_SOURCE` in
   In Progress → Done`. Claude moves the ticket between these states
   in real time as it works. Use `mcp__plugin_linear_linear__list_issues`
   to discover, `mcp__plugin_linear_linear__save_issue` with
-  `stateId: "In Progress"` on pickup, and `stateId: "Done"` on
+  `state: "In Progress"` on pickup, and `state: "Done"` on
   completion (only after R1 below is satisfied). The full state-machine
   spec lives in `docs/LINEAR-WORKFLOW.md`; the must-know rules are
   inline below.
@@ -93,7 +93,7 @@ substitutions: "fix_plan.md task" ↔ "Linear issue", "tick checkbox" ↔
    In **linear mode**: first check for a `RESUME IN PROGRESS` ticket
    injected into your context (R3) and finish it before picking a new
    one; then move the picked ticket to **In Progress** via
-   `mcp__plugin_linear_linear__save_issue` with `stateId: "In Progress"`
+   `mcp__plugin_linear_linear__save_issue` with `state: "In Progress"`
    *before* doing any work, so the Linear board reflects what's
    actually being worked on right now.
 2. **Verify the task is still needed.** Re-read the task body /
@@ -129,7 +129,7 @@ substitutions: "fix_plan.md task" ↔ "Linear issue", "tick checkbox" ↔
    the merge is blocked, post a comment with the unmerged SHAs and
    **leave the ticket In Progress** for retry next loop. Only when R1
    is satisfied: post a summary comment and move the ticket to
-   **Done** via `save_issue` with `stateId: "Done"`.
+   **Done** via `save_issue` with `state: "Done"`.
 6. Commit the implementation and the fix_plan update together when it makes
    sense as a single logical change.
 7. **Decide if this closes the epic.** An epic boundary is the last `- [ ]`

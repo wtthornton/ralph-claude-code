@@ -105,7 +105,10 @@ project code. Deleting them halts the loop.
 <!--TASK_SOURCE:linear:start-->
 6. Move the Linear issue to Done via
    `mcp__plugin_linear_linear__save_issue` once the work is on `main`,
-   and commit changes.
+   and commit changes. **Field-name nudge:** Linear's workflow-state
+   field is `state`, not `status` or `stateId`. Use
+   `state: "In Progress"` on pickup and `state: "Done"` on completion —
+   the plugin accepts a state type, name, or ID via that single field.
 <!--TASK_SOURCE:linear:end-->
 
 ## Current Task

@@ -44,7 +44,8 @@ write_status() {
     "tasks_completed": ${1:-0},
     "permission_denial_count": ${2:-0},
     "recommendation": "${3:-}",
-    "exit_signal": "${4:-false}"
+    "exit_signal": "${4:-false}",
+    "files_modified": ${5:-0}
 }
 JSON
 }
@@ -164,4 +165,63 @@ JSON
         || fail "ralph_loop.sh still contains the inline debrief decision"
     ! grep -qE 'rm -f "\$\{RALPH_DIR\}/\.coordinator_block"' "$ROOT/ralph_loop.sh" \
         || fail "ralph_loop.sh still contains the inline BLOCK flag removal"
+}
+
+# ----------------------------------------------------------------------------
+# AgentForge feedback #2: block self-reinforcing exit-on-empty success
+# learnings. When exit_signal=true AND files_modified=0, the loop's only
+# "completed task" was a verify-and-exit no-op — memorizing it as a success
+# primes future briefs toward premature exit. The harness gate must skip
+# the success debrief in this signature.
+# ----------------------------------------------------------------------------
+
+@test "AgentForge #2: exit_signal=true + files_modified=0 → success debrief SKIPPED" {
+    write_status 1 0 "" "true" 0
+    CB_OPEN_RESULT=1
+
+    # Replace the last-only log_status with an appending capture so we can
+    # find the skip-message even after the cleanup log fires later.
+    ALL_LOGS=()
+    log_status() { ALL_LOGS+=("$1|$2"); LAST_LOG_LEVEL="$1"; LAST_LOG_MSG="$2"; }
+    export -f log_status
+
+    exec_post_run_coordinator
+
+    [[ "$DEBRIEF_OUTCOME" == "" ]] \
+        || fail "expected debrief SKIPPED on empty-backlog exit, got outcome='$DEBRIEF_OUTCOME'"
+    local found=0
+    for line in "${ALL_LOGS[@]}"; do
+        [[ "$line" == *"skipping success debrief"* ]] && found=1
+    done
+    [[ "$found" -eq 1 ]] || fail "expected 'skipping success debrief' log among: ${ALL_LOGS[*]}"
+}
+
+@test "AgentForge #2: exit_signal=true + files_modified>0 → success debrief FIRES" {
+    write_status 1 0 "" "true" 3
+    CB_OPEN_RESULT=1
+
+    exec_post_run_coordinator
+
+    [[ "$DEBRIEF_OUTCOME" == "success" ]] \
+        || fail "expected success debrief when files_modified>0 even on exit_signal=true, got '$DEBRIEF_OUTCOME'"
+}
+
+@test "AgentForge #2: exit_signal=false + files_modified=0 → success debrief FIRES (normal path)" {
+    write_status 1 0 "" "false" 0
+    CB_OPEN_RESULT=1
+
+    exec_post_run_coordinator
+
+    [[ "$DEBRIEF_OUTCOME" == "success" ]] \
+        || fail "exit_signal=false should not trip the AgentForge #2 gate; expected success debrief"
+}
+
+@test "AgentForge #2: CB open path is unaffected (failure debrief still fires)" {
+    write_status 0 0 "rotate" "true" 0
+    CB_OPEN_RESULT=0  # CB OPEN
+
+    exec_post_run_coordinator
+
+    [[ "$DEBRIEF_OUTCOME" == "failure" ]] \
+        || fail "CB-open path must still record failure regardless of exit_signal/files_modified"
 }

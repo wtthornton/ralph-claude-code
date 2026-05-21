@@ -134,6 +134,44 @@ EOF
         || fail "expected WARN about debrief failure, got: $output"
 }
 
+# ---- AgentForge feedback #5: debrief stderr persistence ----------------------
+
+@test "AgentForge #5: WARN references .coordinator-debrief.err when file exists" {
+    # Simulate the inner _coordinator_invoke_claude having already written
+    # the err file from its capture block, then returning non-zero.
+    _coordinator_invoke_claude() {
+        printf 'stderr from a flaky MCP call\n' > "$RALPH_DIR/.coordinator-debrief.err"
+        return 1
+    }
+    export CLAUDE_CODE_CMD=bash
+
+    run ralph_debrief_coordinator success ""
+    [[ "$status" -eq 0 ]] || fail "expected zero exit (best-effort) on invoke failure"
+    [[ "$output" == *".coordinator-debrief.err"* ]] \
+        || fail "WARN must reference .coordinator-debrief.err when it exists; got: $output"
+}
+
+@test "AgentForge #5: WARN falls back to 'continuing' when err file absent" {
+    _coordinator_invoke_claude() { return 1; }  # writes no err file
+    export CLAUDE_CODE_CMD=bash
+    rm -f "$RALPH_DIR/.coordinator-debrief.err"
+
+    run ralph_debrief_coordinator success ""
+    [[ "$status" -eq 0 ]] || fail "expected zero exit"
+    [[ "$output" == *"debrief failed"*"continuing"* ]] \
+        || fail "WARN must fall back to 'continuing' when no err file; got: $output"
+}
+
+@test "AgentForge #5: capture block exists in _coordinator_invoke_claude" {
+    # Static guard — the capture-on-failure block is what makes the WARN
+    # path observable. Pin a unique fragment of the block so future
+    # refactors don't silently drop it.
+    grep -q 'coordinator ${_mode_label} failed' "$REPO_ROOT_FIXED/ralph_loop.sh" \
+        || fail "expected stderr-capture block in _coordinator_invoke_claude"
+    grep -q '_err_path="\${RALPH_DIR:-.ralph}/.coordinator-\${_mode_label}.err"' "$REPO_ROOT_FIXED/ralph_loop.sh" \
+        || fail "expected per-mode err path computation in _coordinator_invoke_claude"
+}
+
 @test "TAP-917: brief is cleared after a successful debrief" {
     write_valid_brief
     [[ -s "$RALPH_DIR/brief.json" ]] || fail "fixture should write a brief"

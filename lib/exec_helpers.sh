@@ -681,7 +681,24 @@ exec_post_run_coordinator() {
         _detail=$(jq -r '.recommendation // ""' "${RALPH_DIR}/status.json" 2>/dev/null || echo "")
         ralph_debrief_coordinator "failure" "$_detail"
     elif [[ "${_debrief_tasks:-0}" -gt 0 ]]; then
-        ralph_debrief_coordinator "success" ""
+        # AgentForge feedback #2: skip the success debrief when the loop's
+        # only "completed task" was a no-op exit (EXIT_SIGNAL: true with
+        # zero files modified). The signature is the verify-and-exit
+        # campaign close: Claude reports STATUS: COMPLETE, ticks one
+        # verification task, and emits EXIT_SIGNAL: true without touching
+        # code. brain_learn_success on this shape memorizes a
+        # premature-exit pattern that later briefs surface via brain_recall
+        # — self-reinforcing because each subsequent confirmation
+        # strengthens the prior. Gate at the harness so the coordinator
+        # agent can't bypass via off-spec calls.
+        local _exit_sig _files_mod
+        _exit_sig=$(jq -r '.exit_signal // "false"' "${RALPH_DIR}/status.json" 2>/dev/null || echo "false")
+        _files_mod=$(jq -r '.files_modified // 0' "${RALPH_DIR}/status.json" 2>/dev/null || echo "0")
+        if [[ "$_exit_sig" == "true" ]] && [[ "${_files_mod:-0}" -eq 0 ]]; then
+            log_status "INFO" "coordinator: skipping success debrief (empty-backlog exit — not a learnable success pattern)"
+        else
+            ralph_debrief_coordinator "success" ""
+        fi
     fi
 
     # 2. BLOCK signal surfacing — log once, then remove the flag.

@@ -321,6 +321,21 @@ RALPH_OPTIMIZER_EXPLORER_MAX=3
 RALPH_MAX_EXPLORER_RESOLVE=5
 
 # =============================================================================
+# PERIODIC PUSH (AgentForge feedback #1)
+# =============================================================================
+# After each successful loop iteration that produced commits, run `git push`
+# so origin reflects the autonomous work in real time. Prevents the multi-epic
+# state-drift pattern where local main accumulates 10+ unpushed commits while
+# Linear shows tickets as Done — operators expect autonomous work to be
+# upstream-visible without manual push.
+#
+# Safe by default: silent skip when the branch has no upstream (detached HEAD,
+# brand-new local branch) or no commits ahead; WARN on push failure with
+# diagnostic tail in .ralph/.push-failure.err, never trips the circuit
+# breaker. Disable for unattended runs that intentionally batch pushes.
+RALPH_PUSH_EVERY_LOOP=true
+
+# =============================================================================
 # CONTEXT MANAGEMENT (Phase 14)
 # =============================================================================
 
