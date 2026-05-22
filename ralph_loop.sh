@@ -1751,7 +1751,11 @@ check_claude_updates() {
     # UPKEEP-1: Check if we've exceeded update attempts for this version
     if [[ -f "$UPDATE_FAILURE_FILE" ]]; then
         local failures
-        failures=$(grep -c "$latest_version" "$UPDATE_FAILURE_FILE" 2>/dev/null || echo "0")
+        # Pipe through `tr -cd '0-9'` to neutralize the `grep -c | echo "0"`
+        # pitfall: on zero matches grep exits 1 with stdout "0", then `||
+        # echo "0"` appends another "0", yielding "0\n0" and breaking -ge.
+        failures=$(grep -c "$latest_version" "$UPDATE_FAILURE_FILE" 2>/dev/null | tr -cd '0-9')
+        failures=${failures:-0}
         if [[ "$failures" -ge "$MAX_UPDATE_ATTEMPTS" ]]; then
             log_status "DEBUG" "Skipping update to $latest_version (previous $failures failures exceeded threshold)"
             return 0
@@ -1777,7 +1781,8 @@ check_claude_updates() {
             log_status "WARN" "Claude CLI update failed — version unchanged at $installed_version"
             echo "$(date +%s) $latest_version" >> "$UPDATE_FAILURE_FILE"
             local fail_count
-            fail_count=$(grep -c "$latest_version" "$UPDATE_FAILURE_FILE" 2>/dev/null || echo "1")
+            fail_count=$(grep -c "$latest_version" "$UPDATE_FAILURE_FILE" 2>/dev/null | tr -cd '0-9')
+            fail_count=${fail_count:-1}
             if [[ "$fail_count" -ge "$MAX_UPDATE_ATTEMPTS" ]]; then
                 log_status "WARN" "Update to $latest_version has failed $fail_count times — suppressing further attempts"
                 log_status "WARN" "Update manually: npm install -g @anthropic-ai/claude-code@$latest_version"

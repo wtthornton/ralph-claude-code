@@ -219,8 +219,15 @@ ralph_prune_stale_memories() {
     fi
 
     if command -v jq &>/dev/null; then
-        jq -c --arg cutoff "$cutoff_date" 'select(.timestamp >= $cutoff)' "$episodes_file" \
-            > "${episodes_file}.tmp" 2>/dev/null
-        mv "${episodes_file}.tmp" "$episodes_file"
+        # Only replace the episodes file when jq exits cleanly. Without this
+        # guard, a jq failure (corrupt JSONL line, missing field, OOM) left an
+        # empty .tmp that mv -f then promoted on top of the real file, silently
+        # wiping every cross-session episode.
+        if jq -c --arg cutoff "$cutoff_date" 'select(.timestamp >= $cutoff)' \
+                "$episodes_file" > "${episodes_file}.tmp" 2>/dev/null; then
+            mv "${episodes_file}.tmp" "$episodes_file"
+        else
+            rm -f "${episodes_file}.tmp" 2>/dev/null
+        fi
     fi
 }

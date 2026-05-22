@@ -123,7 +123,11 @@ else
   # PLANOPT: Progress re-grounding (Reflexion pattern)
   last_completed=""
   if [[ -f "$FIX_PLAN" ]]; then
-    last_completed=$(grep -E '^\- \[x\]' "$FIX_PLAN" | tail -1 | sed 's/^- \[x\] //' | head -c 80)
+    # `|| true` so an empty grep result under `set -euo pipefail` does not
+    # abort the hook (fresh project with no completed tasks → grep exits 1
+    # → pipefail propagates → set -e kills the script without ever emitting
+    # the SystemPrompt context block).
+    last_completed=$(grep -E '^\- \[x\]' "$FIX_PLAN" 2>/dev/null | tail -1 | sed 's/^- \[x\] //' | head -c 80 || true)
   fi
 
   cat >&2 <<EOF

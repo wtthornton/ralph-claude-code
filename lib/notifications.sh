@@ -110,7 +110,12 @@ _notify_webhook() {
         -d "$payload" \
         --max-time 5 \
         "$RALPH_WEBHOOK_URL" >/dev/null 2>&1; then
-        echo "WARN: webhook POST failed for event=$event_type url=$RALPH_WEBHOOK_URL" >&2
+        # Log host only — many webhook providers (Discord, Slack, Mattermost,
+        # etc.) embed the bot token directly in the URL path, so logging the
+        # full URL leaks credentials into ralph.log on every transient failure.
+        local _wh_host
+        _wh_host=$(printf '%s' "$RALPH_WEBHOOK_URL" | sed -E 's|^([a-z]+://[^/]+).*|\1|')
+        echo "WARN: webhook POST failed for event=$event_type host=${_wh_host:-<unparseable>}" >&2
     fi
 }
 
