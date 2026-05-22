@@ -40,6 +40,20 @@ while [[ "$CMD0" == "env" || "$CMD0" == "sudo" || "$CMD0" == *"="* ]] && (( ${#A
     CMD0="${ARGV[0]:-}"
 done
 
+# Skip `uv run`, `pipx run`, `poetry run` wrappers so `uv run python -c` is
+# detected as a python invocation, not a uv invocation. The runner command
+# may take its own flags before the interpreter; we conservatively skip the
+# common shape `<runner> run <interp> [-c ...]` only.
+if [[ "$CMD0" == "uv" || "$CMD0" == "pipx" || "$CMD0" == "poetry" ]] \
+   && [[ "${ARGV[1]:-}" == "run" ]] && (( ${#ARGV[@]} > 2 )); then
+    ARGV=("${ARGV[@]:2}")
+    CMD0="${ARGV[0]:-}"
+fi
+
+# Normalize CMD0 to its basename so /usr/bin/python3 and python3 match the
+# same case branches below. Strip everything up to the last `/`.
+CMD0="${CMD0##*/}"
+
 # ---- 1. Destructive git ------------------------------------------------------
 
 if [[ "$CMD0" == "git" ]]; then
@@ -125,19 +139,32 @@ _interpreter_snippet_path() {
     esac
 }
 
-case "$CMD0" in
-    python|python3|perl|ruby|node|bash|sh|zsh)
-        for arg in "${ARGV[@]:1}"; do
-            case "$arg" in
-                -c|-e)
-                    _snippet=$(_interpreter_snippet_path "$CMD0")
-                    echo "BLOCKED: $CMD0 $arg script-execution not allowed. Write the snippet to $_snippet (or similar) and run \"$CMD0 $_snippet\" instead: $COMMAND" >&2
-                    exit 2
-                    ;;
-            esac
-        done
-        ;;
-esac
+# Versioned binaries (python3.12, python3.11, pypy3.10) reduce to the base
+# interpreter family for the snippet-path lookup. We don't need to be exact
+# about the version — only about the language.
+_interp_family() {
+    case "$1" in
+        python|python3|python3.*|python2|python2.*|pypy|pypy3|pypy3.*) echo "python" ;;
+        perl|perl5|perl5.*)     echo "perl" ;;
+        ruby|ruby[0-9]*)        echo "ruby" ;;
+        node|nodejs|node[0-9]*) echo "node" ;;
+        bash|sh|zsh|dash|ksh)   echo "$1" ;;
+        *) echo "" ;;
+    esac
+}
+
+_family=$(_interp_family "$CMD0")
+if [[ -n "$_family" ]]; then
+    for arg in "${ARGV[@]:1}"; do
+        case "$arg" in
+            -c|-e)
+                _snippet=$(_interpreter_snippet_path "$_family")
+                echo "BLOCKED: $CMD0 $arg script-execution not allowed. Write the snippet to $_snippet (or similar) and run \"$CMD0 $_snippet\" instead: $COMMAND" >&2
+                exit 2
+                ;;
+        esac
+    done
+fi
 
 # ---- 5. Write-capable tools hitting protected paths --------------------------
 

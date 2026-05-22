@@ -48,12 +48,31 @@ Ralph reads tasks from one of two backends, set by `RALPH_TASK_SOURCE` in
 
   **Hard rules (linear mode) — these are not optional**:
 
-  - **R1 — Done requires `main`.** Before moving a ticket to Done, run
-    `git log main --grep='<TICKET-ID>'` and confirm at least one
-    matching commit exists on `main`. If the work is only on a branch,
-    attempt self-merge (`gh pr merge --squash --auto`, direct
-    `git merge`). After a successful squash-merge, delete the source
-    branch locally (`git branch -D <branch>`) and on origin
+  - **R0 — Branch first, never commit on `main`.** Before the first
+    `git add` for a ticket, create a feature branch:
+    `git checkout -b <branch>` where `<branch>` is the Linear issue's
+    `gitBranchName` field (e.g. `tap-2299-content-safety-gate`) or
+    `<ticket-id-lowercase>-<short-slug>` if that field is unset. All
+    `git commit` / `git push` calls for the ticket happen on that
+    branch. **Never `git commit` while `HEAD` is `main`**; **never
+    `git push origin main`**. R0 is the *mechanism* by which R1 is
+    satisfied — R1 alone (commit-on-main check) accepts direct-to-main
+    pushes, which is the loophole that lets a ticket close without ever
+    going through review. Before any commit, sanity-check the branch
+    with `git rev-parse --abbrev-ref HEAD`; if it returns `main`, stop
+    and create the branch. The exception is documentation-only commits
+    the operator explicitly authorized (rare; not an autonomous-loop
+    default).
+  - **R1 — Done requires `main` (via PR).** Before moving a ticket to
+    Done, run `git log main --grep='<TICKET-ID>'` and confirm at least
+    one matching commit exists on `main` AND that commit's message
+    ends with a ` (#NNN)` PR-merge suffix (the GitHub squash-merge
+    marker). Absence of the suffix means R0 was bypassed — that is a
+    rule violation; report it via `RECOMMENDATION` and leave the ticket
+    `In Progress`. If the work is only on a branch, run
+    `gh pr create` then `gh pr merge --squash --auto --delete-branch`.
+    After a successful squash-merge, also delete the source branch
+    locally (`git branch -D <branch>`) and confirm on origin
     (`git push origin --delete <branch>` — best-effort, ignore
     network/permission errors) so the repo stays at `main` + active
     branch. If the merge is blocked (no permission, conflicts,
@@ -168,6 +187,13 @@ catch yourself reaching for it, that's the signal to spawn a `Task`.
 3. Search the codebase before implementing (Grep/Glob, or delegate to
    `ralph-explorer` for anything non-trivial). Prefer existing helpers over
    new abstractions.
+3.5. **Create the feature branch (R0).** Before any `Edit` / `Write` that
+   produces a commit, run `git rev-parse --abbrev-ref HEAD`. If it returns
+   `main`, run `git checkout -b <branch>` where `<branch>` is the Linear
+   issue's `gitBranchName` (or `<ticket-id-lowercase>-<short-slug>` if
+   unset). All subsequent commits this loop happen on that branch. R0 is
+   not optional and not gated to "complex" work — single-file fixes go
+   through a branch + PR the same as multi-file refactors.
 4. Implement the smallest change that completes the task. No scope creep, no
    speculative refactors, no "while I'm here" cleanup.
 5. Close the task. **File mode**: flip the checkbox `- [ ]` → `- [x]`
@@ -224,10 +250,34 @@ catch yourself reaching for it, that's the signal to spawn a `Task`.
    error handling introduced during the implementation phase — never adds.
    Re-run QA after simplify to confirm nothing regressed. Skip this step if
    `RALPH_NO_DESLOP=true` is set in the environment or `.ralphrc`.
-8. Emit the `---RALPH_STATUS---` block (schema below).
-9. **STOP.** End your response within 2 lines of `---END_RALPH_STATUS---`.
-   Do not start the next task. Do not say "moving on." The harness will
-   re-invoke you for the next item.
+8. **Verify R0 was honored.** If you committed anything this loop, run
+   `git log -1 --format='%H %s' main` (after any merge) — if your
+   `TAP-####` ID appears in the message but the message lacks a
+   ` (#NNN)` PR-merge suffix, R0 was bypassed (the commit went direct
+   to main). Report it in `RECOMMENDATION` and pivot to revert + redo
+   via PR next loop. The AgentForge 2026-05-21 campaign had 13 of 20
+   commits go direct-to-main because step 5 didn't check; this is the
+   harness-side check that should have caught it.
+9. **Emit the `---RALPH_STATUS---` block (schema below).** This is
+   non-negotiable. Emit the block on **every** loop:
+   - Productive loop → fill the fields honestly.
+   - No-op loop (nothing to do, queue empty, all blocked) → emit
+     `STATUS: COMPLETE` (or `BLOCKED`) + `EXIT_SIGNAL: true` with the
+     appropriate Grounds (see the EXIT_SIGNAL gate).
+   - Early-exit / coordinator BLOCK / hook denial / API error → emit
+     `STATUS: BLOCKED`, `TASKS_COMPLETED_THIS_LOOP: 0`,
+     `FILES_MODIFIED: 0`, `EXIT_SIGNAL: false`, and put the reason in
+     `RECOMMENDATION`.
+
+   Three consecutive missing blocks trip the harness halt detector
+   (`no_status_block_3x`) and stop the campaign. The TAP-1899
+   productivity guard resets the counter when `files_modified>=1 OR
+   tasks_done>=1`, but a truly no-op loop without a block will halt.
+   When in doubt, emit anyway — the wrong block is recoverable; no
+   block kills the campaign.
+10. **STOP.** End your response within 2 lines of `---END_RALPH_STATUS---`.
+    Do not start the next task. Do not say "moving on." The harness will
+    re-invoke you for the next item.
 
 ## The status block
 

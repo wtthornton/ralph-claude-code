@@ -111,6 +111,53 @@ run_hook() {
         || fail "file-based node must be allowed, got $status: $output"
 }
 
+# ---- TAP-2336: extended coverage (absolute path, versioned, wrappers) --------
+# Loops #2-3 of the AgentForge 2026-05-21 campaign showed the original block
+# was bypassable via /usr/bin/python3, python3.12, and uv run python — all
+# now covered.
+
+@test "TAP-2336: /usr/bin/python3 -c BLOCKS (basename normalization)" {
+    run_hook '/usr/bin/python3 -c "import sys"'
+    [[ "$status" -eq 2 ]] \
+        || fail "absolute-path python3 -c must be blocked, got $status: $output"
+    [[ "$output" == *"BLOCKED"* ]] \
+        || fail "output must say BLOCKED: $output"
+}
+
+@test "TAP-2336: python3.12 -c BLOCKS (versioned interpreter)" {
+    run_hook 'python3.12 -c "import sys"'
+    [[ "$status" -eq 2 ]] \
+        || fail "versioned python3.12 -c must be blocked, got $status: $output"
+    [[ "$output" == *'/tmp/snippet.py'* ]] \
+        || fail "remediation must point at /tmp/snippet.py: $output"
+}
+
+@test "TAP-2336: uv run python -c BLOCKS (uv wrapper)" {
+    run_hook 'uv run python -c "import sys"'
+    [[ "$status" -eq 2 ]] \
+        || fail "uv run python -c must be blocked, got $status: $output"
+    [[ "$output" == *'/tmp/snippet.py'* ]] \
+        || fail "remediation must point at /tmp/snippet.py: $output"
+}
+
+@test "TAP-2336: poetry run python3 -c BLOCKS (poetry wrapper)" {
+    run_hook 'poetry run python3 -c "print(1)"'
+    [[ "$status" -eq 2 ]] \
+        || fail "poetry run python3 -c must be blocked, got $status: $output"
+}
+
+@test "TAP-2336: uv run pytest is allowed (not -c / -e)" {
+    run_hook 'uv run pytest tests/'
+    [[ "$status" -eq 0 ]] \
+        || fail "uv run pytest must be allowed, got $status: $output"
+}
+
+@test "TAP-2336: uv run python /tmp/snippet.py is allowed (file-based path)" {
+    run_hook 'uv run python /tmp/snippet.py'
+    [[ "$status" -eq 0 ]] \
+        || fail "uv run with file-based python must be allowed, got $status: $output"
+}
+
 # ---- python-introspection skill ships with the templates ---------------------
 
 @test "TAP-1876: python-introspection SKILL.md exists in templates/skills/global/" {
