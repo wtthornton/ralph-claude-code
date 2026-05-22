@@ -10,6 +10,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.15.9] — 2026-05-22
+
+### Coordinator brief lookahead (T4)
+
+- **T4 (PR [#39](https://github.com/wtthornton/ralph-claude-code/pull/39)) — brief lookahead via `NEXT_INTENDED_ISSUE` + `.ralph/brief-next.json`.** Adds a pre-warm path for the coordinator's brief so a multi-loop campaign can skip the cold-start coordinator spawn (~5–15 s) on the loop after Claude tells the harness what ticket it intends to pick next.
+
+  - Claude emits optional `NEXT_INTENDED_ISSUE: TAP-NNNN` in `RALPH_STATUS`
+  - `on-stop.sh` extracts it (shape-validated against `^[A-Z][A-Z0-9]*-[0-9]+$`) to `.ralph/.next_intended_issue`
+  - Main loop forks `ralph_prewarm_next_brief` in background after `cb_record_success`
+  - Background coordinator writes `.ralph/brief-next.json` (separate from `brief.json`)
+  - Next loop's `ralph_spawn_coordinator` consumes it on `task_id` match and skips its own spawn; mismatch or malformed brief → silently dropped, fall through to cache → spawn
+
+  Guards: `RALPH_PREWARM_NEXT_BRIEF=false` (opt-out), `RALPH_BRIEF_NEXT_MAX_AGE_SECONDS` (default 1800), `RALPH_PREWARM_TIMEOUT_SECONDS` (default 90, caps the background spawn), `brief_validate` gate on output. Same-ticket prewarm is skipped (the existing `brief_cache` will hit anyway).
+
+  9 BATS cases under `tests/unit/test_brief_lookahead.bats`. Documented in the ralph-workflow skill's status-block section.
+
+---
+
 ## [2.15.8] — 2026-05-22
 
 ### Throughput improvements (post-AgentForge campaign feedback)
