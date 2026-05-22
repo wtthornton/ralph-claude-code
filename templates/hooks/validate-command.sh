@@ -202,17 +202,21 @@ fi
 # ---- 5. Write-capable tools hitting protected paths --------------------------
 
 _is_protected_path() {
-    # Any .ralph/ or .claude/ or .ralphrc path, no exemptions — at the shell
-    # layer we can't prove the write is a narrow checkbox update the way the
-    # Edit-tool hook (protect-ralph-files.sh) can. If Ralph wants to tick off
-    # fix_plan.md it must go through the Edit tool.
+    # Any .ralph/ or .ralphrc path is blocked at the shell layer; the
+    # Edit-tool hook (protect-ralph-files.sh) carves out fix_plan.md /
+    # status.json from there, but Bash gets no such grace because we
+    # can't prove a `>` is a narrow update vs. a clobber.
     #
     # TAP-2344: .ralph/ and .ralphrc are anchored to the project root so the
     # global `~/.ralph/` install is allowed to be edited from inside a Ralph
-    # project (the hotfix workflow). .claude/ remains globally blocked
-    # because mutating `~/.claude/settings.json` from inside a project
-    # would affect every Claude Code session — that gate stays closed
-    # until a separate ticket lands proper carve-outs.
+    # project (the hotfix workflow).
+    #
+    # TAP-2345 (F4): bring .claude/ carve-outs to parity with the Edit-side
+    # hook so `cat > .claude/rules/foo.md` and Bash-side skill installs
+    # stop being dead-ends that force a tool pivot. Block only the
+    # subdirs that are genuinely dangerous to clobber (settings.json,
+    # agents/, hooks/) — rules/, skills/, commands/ are routine agent
+    # surface area.
     local p="$1"
     p="${p%\"}"; p="${p#\"}"; p="${p%\'}"; p="${p#\'}"
     case "$p" in
@@ -220,6 +224,18 @@ _is_protected_path() {
         .ralph|.ralph/*|./.ralph/*) return 0 ;;
         "$_proj_dir"/.ralphrc) return 0 ;;
         .ralphrc|./.ralphrc) return 0 ;;
+        # Carve-outs FIRST: rules/, skills/, commands/ are explicitly
+        # allowed before the .claude/* blanket block fires.
+        *.claude/rules|*.claude/rules/*) return 1 ;;
+        *.claude/skills|*.claude/skills/*) return 1 ;;
+        *.claude/commands|*.claude/commands/*) return 1 ;;
+        .claude/rules|.claude/rules/*) return 1 ;;
+        .claude/skills|.claude/skills/*) return 1 ;;
+        .claude/commands|.claude/commands/*) return 1 ;;
+        ./.claude/rules|./.claude/rules/*) return 1 ;;
+        ./.claude/skills|./.claude/skills/*) return 1 ;;
+        ./.claude/commands|./.claude/commands/*) return 1 ;;
+        # Remaining .claude/ (settings.json, agents/, hooks/) — blocked.
         .claude|.claude/*|./.claude/*|*/.claude/*) return 0 ;;
     esac
     return 1
@@ -251,7 +267,14 @@ case "$NORM" in
     *" > .ralph/"*|*" >> .ralph/"*|*" > ./.ralph/"*|*" >> ./.ralph/"*)
         block "redirect into .ralph/" ;;
 esac
+# TAP-2345 (F4): allow redirects into .claude/rules/, .claude/skills/,
+# .claude/commands/ — those are routine agent surface area and the
+# Edit-side hook already allows them. Settings, agents/, hooks/ stay
+# blocked. The carve-out cases must precede the catch-all so they win.
 case "$NORM" in
+    *" > .claude/rules/"*|*" >> .claude/rules/"*|*" > ./.claude/rules/"*|*" >> ./.claude/rules/"*) ;;
+    *" > .claude/skills/"*|*" >> .claude/skills/"*|*" > ./.claude/skills/"*|*" >> ./.claude/skills/"*) ;;
+    *" > .claude/commands/"*|*" >> .claude/commands/"*|*" > ./.claude/commands/"*|*" >> ./.claude/commands/"*) ;;
     *" > .claude/"*|*" >> .claude/"*|*" > ./.claude/"*|*" >> ./.claude/"*)
         block "redirect into .claude/" ;;
 esac
