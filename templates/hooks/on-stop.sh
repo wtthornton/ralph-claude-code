@@ -304,6 +304,20 @@ fi
 # Validate loop_count is numeric before arithmetic
 [[ "$loop_count" =~ ^[0-9]+$ ]] || loop_count=0
 loop_count=$((loop_count + 1))
+
+# TAP-2346 (F7): when ralph_loop.sh::main exports LOOP_COUNT for the
+# current iteration, prefer it over the inherited+1 value. Without this,
+# the harness's per-invocation counter (reset to 0 on each `ralph` start)
+# and the hook's cumulative-across-sessions counter diverge — operators
+# observed "Response Analysis - Loop #19" while the harness was on
+# iteration #10. LOOP_COUNT is only set inside the RALPH_LOOP_ACTIVE-
+# guarded path (ralph_loop.sh:4975), so behavior for interactive Claude
+# Code sessions is unchanged (the RALPH_LOOP_ACTIVE guard above already
+# returned 0 for those).
+if [[ -n "${LOOP_COUNT:-}" && "${LOOP_COUNT}" =~ ^[0-9]+$ ]]; then
+  loop_count="$LOOP_COUNT"
+fi
+
 [[ "$prev_session_cost" =~ ^[0-9]+(\.[0-9]+)?$ ]] || prev_session_cost=0
 [[ "$prev_session_input" =~ ^[0-9]+$ ]] || prev_session_input=0
 [[ "$prev_session_output" =~ ^[0-9]+$ ]] || prev_session_output=0
