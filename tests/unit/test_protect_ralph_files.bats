@@ -100,6 +100,34 @@ run_hook() {
         || fail "relative .ralphrc must be blocked, got $status: $output"
 }
 
+# ---- .ralphrc.local — operator-only override surface ---------------------
+# The whole point of .ralphrc.local is to give operators a per-repo opt-out
+# (e.g. RALPH_ALLOW_PUSH_MAIN=1 for direct-to-main workflows) that the agent
+# cannot self-unlock. If the agent could Edit/Write this file, the bypass
+# would be meaningless. Mirror the .ralphrc anchoring (project root + bare).
+
+@test "edit to project .ralphrc.local is BLOCKED" {
+    run_hook "$TEST_DIR/.ralphrc.local"
+    [[ "$status" -eq 2 ]] \
+        || fail "project .ralphrc.local must be blocked, got $status: $output"
+}
+
+@test "edit to relative .ralphrc.local is BLOCKED" {
+    run_hook ".ralphrc.local"
+    [[ "$status" -eq 2 ]] \
+        || fail "relative .ralphrc.local must be blocked, got $status: $output"
+}
+
+@test "sibling-repo .ralphrc.local outside project root is ALLOWED" {
+    # Same anchoring as .ralphrc — protect only THIS project's overrides;
+    # a different repo's .ralphrc.local must not be blocked from inside
+    # this project (the cross-repo hotfix workflow).
+    mkdir -p "$TEST_DIR/sibling_repo"
+    run_hook "$TEST_DIR/sibling_repo/.ralphrc.local"
+    [[ "$status" -eq 0 ]] \
+        || fail "sibling repo .ralphrc.local must be allowed, got $status: $output"
+}
+
 # ---- .claude/ — globally blocked (separate ticket for carve-outs) --------
 
 @test "TAP-2344: edit to .claude/agents/ralph.md is BLOCKED" {

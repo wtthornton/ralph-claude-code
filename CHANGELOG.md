@@ -10,6 +10,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.17.0] — 2026-05-22
+
+Minor release adding `.ralphrc.local` — the operator-only override surface that closes the "R0 escape hatch is agent-unreachable" gap surfaced by the tapps-mcp upgrade review (every Ralph-managed repo with `protect-ralph-files.sh` could neither bypass the R0 push-to-main block from inside the harness nor land the bypass without an out-of-band shell ritual).
+
+### Added
+
+- **`.ralphrc.local` — operator-only override surface** ([CLAUDE.md](CLAUDE.md#L252)).
+  - `load_ralphrc()` in [ralph_loop.sh:341-353](ralph_loop.sh#L341-L353) sources `.ralphrc.local` immediately after `.ralphrc`, wrapped in `set -a` / `set +a` so values auto-export to the Claude CLI invocation and downstream hook subprocesses. Precedence: CLI > env > `.ralphrc.local` > `.ralphrc` > script default.
+  - [templates/hooks/protect-ralph-files.sh:64-72](templates/hooks/protect-ralph-files.sh#L64-L72) blocks agent edits to `.ralphrc.local` with the same anchoring as `.ralphrc` (project root + bare path; sibling-repo files in cross-repo hotfix workflows are not caught).
+  - Added to `templates/.gitignore` and the repo's own `.gitignore` so the override file stays out of commits.
+  - **Caveat documented:** `load_ralphrc()` returns early when `.ralphrc` is absent, so `.ralphrc.local` is only sourced when a base `.ralphrc` exists. Operators wanting overrides-only must `touch .ralphrc` first.
+  - **Primary motivator:** persist `RALPH_ALLOW_PUSH_MAIN=1` once for direct-to-main workflows instead of re-exporting on every harness restart. The agent can never erase or rewrite the file from inside Claude Code, so the R0 push-to-main block in `validate-command.sh` cannot be self-unlocked.
+
+### Tests
+
+- 3 new cases in [tests/unit/test_protect_ralph_files.bats:102-128](tests/unit/test_protect_ralph_files.bats#L102-L128): project blocked, relative blocked, sibling-repo allowed.
+- 5 new cases in [tests/unit/test_cli_rc_precedence.bats:137-216](tests/unit/test_cli_rc_precedence.bats#L137-L216): override beats `.ralphrc`, env still beats `.ralphrc.local`, absent file is a no-op, no-base-`.ralphrc` early-return is asserted (not a silent regression), and auto-export to subprocesses is verified by checking the exported environment after `load_ralphrc`.
+
+---
+
 ## [2.16.1] — 2026-05-22
 
 Patch release bundling three post-2.16.0 changes from downstream feedback (tapps-mcp upgrade review + AgentForge campaign). No harness contract changes; no new config knobs.

@@ -133,3 +133,90 @@ EOF
     result=$(_run_in_isolated_shell '_cli_LOG_MAX_SIZE_MB=50; LOG_MAX_SIZE_MB=50' 'LOG_MAX_SIZE_MB')
     [[ "$result" == "50" ]]
 }
+
+# =============================================================================
+# .ralphrc.local — operator-only override surface
+# =============================================================================
+# Primary motivator: per-repo bypasses like RALPH_ALLOW_PUSH_MAIN=1 that the
+# agent must not be able to self-unlock. .ralphrc.local is sourced AFTER
+# .ralphrc but BEFORE env / CLI restoration, with `set -a` so values auto-
+# export to the Claude CLI invocation and downstream hook subprocesses.
+
+@test ".ralphrc.local value overrides .ralphrc value (no env, no CLI)" {
+    cat > .ralphrc <<'EOF'
+CLAUDE_TIMEOUT_MINUTES=30
+EOF
+    cat > .ralphrc.local <<'EOF'
+CLAUDE_TIMEOUT_MINUTES=120
+EOF
+    local result
+    result=$(_run_in_isolated_shell '_cli_CLAUDE_TIMEOUT_MINUTES=""; _env_CLAUDE_TIMEOUT_MINUTES=""' 'CLAUDE_TIMEOUT_MINUTES')
+    [[ "$result" == "120" ]] \
+        || { echo "expected 120 (.ralphrc.local), got '$result'"; return 1; }
+}
+
+@test "env var still beats .ralphrc.local (precedence integrity)" {
+    cat > .ralphrc <<'EOF'
+CLAUDE_TIMEOUT_MINUTES=30
+EOF
+    cat > .ralphrc.local <<'EOF'
+CLAUDE_TIMEOUT_MINUTES=120
+EOF
+    local result
+    result=$(_run_in_isolated_shell '_env_CLAUDE_TIMEOUT_MINUTES=999; CLAUDE_TIMEOUT_MINUTES=999' 'CLAUDE_TIMEOUT_MINUTES')
+    [[ "$result" == "999" ]] \
+        || { echo "expected 999 (env), got '$result'"; return 1; }
+}
+
+@test ".ralphrc.local absent is a no-op (falls back to .ralphrc)" {
+    cat > .ralphrc <<'EOF'
+CLAUDE_TIMEOUT_MINUTES=42
+EOF
+    [[ ! -e .ralphrc.local ]] || rm .ralphrc.local
+    local result
+    result=$(_run_in_isolated_shell '_cli_CLAUDE_TIMEOUT_MINUTES=""; _env_CLAUDE_TIMEOUT_MINUTES=""' 'CLAUDE_TIMEOUT_MINUTES')
+    [[ "$result" == "42" ]] \
+        || { echo "expected 42 (.ralphrc), got '$result'"; return 1; }
+}
+
+@test ".ralphrc.local-only (no .ralphrc) still applies" {
+    [[ ! -e .ralphrc ]] || rm .ralphrc
+    cat > .ralphrc.local <<'EOF'
+CLAUDE_TIMEOUT_MINUTES=77
+EOF
+    # load_ralphrc returns early when .ralphrc is missing — that's correct
+    # behavior, but it also means .ralphrc.local needs to be sourced from
+    # the path we wired into load_ralphrc(). This test asserts the early-
+    # return shape: with no .ralphrc, .ralphrc.local is NOT sourced.
+    # Operators who only want overrides MUST also create an empty .ralphrc.
+    local result
+    result=$(_run_in_isolated_shell '_cli_CLAUDE_TIMEOUT_MINUTES=""; _env_CLAUDE_TIMEOUT_MINUTES=""' 'CLAUDE_TIMEOUT_MINUTES')
+    # No .ralphrc → load_ralphrc returns before sourcing anything → falls
+    # through to script default (CLAUDE_TIMEOUT_MINUTES=15 at ralph_loop.sh:239).
+    [[ "$result" == "15" ]] \
+        || { echo "expected 15 (script default — load_ralphrc returns early), got '$result'"; return 1; }
+}
+
+@test ".ralphrc.local variables auto-export to child processes" {
+    cat > .ralphrc <<'EOF'
+# (.ralphrc base values, no MY_PROBE_VAR)
+EOF
+    cat > .ralphrc.local <<'EOF'
+MY_PROBE_VAR=propagated
+EOF
+    # The whole point of `set -a` around the .ralphrc.local source is that
+    # vars like RALPH_ALLOW_PUSH_MAIN reach the hook subprocess. Verify by
+    # checking that a probe variable appears in the *exported* environment
+    # after load_ralphrc, not just in the shell-variable namespace.
+    local result
+    result=$(bash -c "
+        set +e
+        source '$RALPH_SCRIPT' >/dev/null 2>&1
+        trap - EXIT SIGINT SIGTERM
+        load_ralphrc >/dev/null 2>&1
+        # If exported, it shows up in 'env'. If only a shell var, it does not.
+        env | grep '^MY_PROBE_VAR=' || true
+    " 2>/dev/null)
+    [[ "$result" == "MY_PROBE_VAR=propagated" ]] \
+        || { echo "expected exported var, got '$result'"; return 1; }
+}

@@ -160,7 +160,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.16.1"
+RALPH_VERSION="2.17.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -336,6 +336,18 @@ load_ralphrc() {
     # Source .ralphrc (this may override default values)
     # shellcheck source=/dev/null
     source "$RALPHRC_FILE"
+
+    # Source .ralphrc.local overrides if present. Operator-owned, gitignored,
+    # and blocked from agent edits by protect-ralph-files.sh — the per-repo
+    # opt-out surface for hook bypasses like RALPH_ALLOW_PUSH_MAIN=1 on
+    # direct-to-main workflows. `set -a` auto-exports so values propagate to
+    # the Claude Code invocation and downstream hook subprocesses.
+    if [[ -f "${RALPHRC_FILE}.local" ]]; then
+        set -a
+        # shellcheck source=/dev/null
+        source "${RALPHRC_FILE}.local"
+        set +a
+    fi
 
     # Map .ralphrc variable names to internal names
     if [[ -n "${SESSION_CONTINUITY:-}" ]]; then
