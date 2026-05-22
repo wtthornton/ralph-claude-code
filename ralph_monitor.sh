@@ -421,6 +421,22 @@ display_status() {
         if [[ -n "$session_subagents" ]]; then
             echo -e "${CYAN}│${NC} Sub-agents (session): ${session_subagents}"
         fi
+        # T3 / 2.15.8: soft-warn when sub-agent spawn rate is high.
+        # Most loops should spawn ≤4 sub-agents (epic-boundary QA fan-out is 3:
+        # ralph-tester + ralph-reviewer + tapps-validator). Sustained >5/loop
+        # suggests anti-patterns: spawning Explore for context already in
+        # brief.json, spawning a worker for single-Bash ops, etc.
+        # Threshold is RALPH_SUBAGENT_AVG_WARN (default 5).
+        local _sa_warn="${RALPH_SUBAGENT_AVG_WARN:-5}"
+        local _sa_loop_total=$(echo "$status_data" | jq -r '.loop_subagents // {} | [.[]] | add // 0' 2>/dev/null || echo "0")
+        local _sa_sess_total=$(echo "$status_data" | jq -r '.session_subagents // {} | [.[]] | add // 0' 2>/dev/null || echo "0")
+        local _sa_loops=$(echo "$status_data" | jq -r '.loop_count // 0' 2>/dev/null || echo "0")
+        if [[ "$_sa_loops" -gt 0 && "$_sa_sess_total" -gt 0 ]]; then
+            local _sa_avg=$(awk -v t="$_sa_sess_total" -v l="$_sa_loops" 'BEGIN{printf "%.1f", t/l}')
+            if awk -v a="$_sa_avg" -v w="$_sa_warn" 'BEGIN{exit !(a > w)}'; then
+                echo -e "${CYAN}│${NC} ${RED}WARN:${NC}              sub-agent avg ${_sa_avg}/loop > ${_sa_warn} — review fan-out (skip Explore when brief.json has files; don't spawn for single-Bash ops)"
+            fi
+        fi
         # MCP activity — top 3 tools this loop by call count
         local loop_mcp_top=$(echo "$status_data" | jq -r '.loop_mcp_calls.by_tool // {} | to_entries | sort_by(-.value) | .[0:3] | map("\(.key | split("__") | last)×\(.value)") | join("  ")' 2>/dev/null || echo "")
         if [[ -n "$loop_mcp_top" ]]; then
@@ -542,13 +558,21 @@ display_status() {
 
 # Main monitor loop
 main() {
+    # T3 / 2.15.8: --once renders one dashboard snapshot and exits.
+    # Used by harness tests and external pollers; the operator-facing path
+    # remains the watch loop.
+    if [[ "${1:-}" == "--once" ]]; then
+        display_status
+        return 0
+    fi
+
     echo "Starting Ralph Monitor..."
     sleep 2
-    
+
     while true; do
         display_status
         sleep "$REFRESH_INTERVAL"
     done
 }
 
-main
+main "$@"

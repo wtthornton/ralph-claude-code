@@ -374,6 +374,33 @@ The harness combines your `EXIT_SIGNAL` with NLP completion heuristics
 - LARGE tasks (cross-module, architectural) run QA in their own scope —
   don't defer on those.
 
+## Sub-agent fan-out rules (T3 / 2.15.8)
+
+Every sub-agent spawn costs ~10–30 s of orchestration. Most productive
+loops should use ≤4 sub-agents; the monitor soft-warns above an avg of 5.
+The agent contract (`.claude/agents/ralph.md`) carries the full list, but
+the bright lines are:
+
+- **Don't spawn for single-`Bash` ops** — `gh pr merge --squash`,
+  `git push`, `git branch -D`, single-file `cat` are all one-line calls.
+- **Don't spawn for Linear writes** — the `linear-issue` skill already
+  does the dance from a sub-agent at the call site that needs it.
+- **Don't spawn `ralph-explorer` when `brief.json` already names the
+  files** — `affected_modules` IS the exploration result.
+- **Don't spawn for a single Read or Grep.** Sub-agents amortize work
+  over a context window — one read in a fresh window is pure spinup cost.
+
+Legitimate spawns:
+- Worktree-isolated work (ralph-tester, tapps-review-fixer)
+- Multi-file fan-out searches
+- **Epic-boundary QA fan-out (3 agents in ONE message)** —
+  ralph-tester + ralph-reviewer + tapps-validator dispatched together
+  via three `Task` calls in a single message. Aggregation rule:
+  **any FAIL or TIMEOUT collapses to FAIL** (matches the serial early-
+  exit semantics). The `.subagent_in_flight` sidecar coordinates so
+  no CB update lands while >1 agent is outstanding.
+- LARGE-task delegation to `ralph-architect`
+
 ## Scenarios (specification by example)
 
 These are the exact status blocks the harness's circuit breaker and response

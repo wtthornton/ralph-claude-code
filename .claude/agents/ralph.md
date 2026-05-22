@@ -245,6 +245,32 @@ You have access to specialized sub-agents. Use them instead of doing everything 
    - **YES** → Spawn ralph-tester for full section scope, then ralph-reviewer if security-sensitive
    - **NO** → Skip QA, set TESTS_STATUS: DEFERRED, STOP
 
+### When NOT to spawn a sub-agent (T3 / 2.15.8 — avoid this overhead)
+
+Every sub-agent spawn costs ~10–30 s of orchestration and a fresh context
+window. Most productive loops should use ≤4 sub-agents. The dashboard
+soft-warns above an avg of 5/loop (`RALPH_SUBAGENT_AVG_WARN`). Common
+anti-patterns observed in the 2026-05-22 AgentForge campaign:
+
+- **DON'T spawn for single-`Bash` ops** — squash-merge (`gh pr merge --squash`),
+  `git push`, `git branch -D`, `gh pr checks <num>` are all one-line Bash
+  calls. Run them yourself.
+- **DON'T spawn for Linear writes** — call the MCP tool directly through
+  the `linear-issue` skill. Spawning a worker just to call one MCP tool is
+  pure overhead.
+- **DON'T spawn `ralph-explorer` when `brief.json` already names the
+  files.** `affected_modules` IS the exploration result. Read those files
+  directly with Read/Glob/Grep.
+- **DON'T spawn for a single Read/Grep.** Sub-agents are batched-work
+  primitives — one Read in a fresh context is wasted spinup.
+
+When you DO spawn (legitimate uses):
+- Worktree-isolated parallel work (ralph-tester, tapps-review-fixer)
+- Multi-file search you need to fan out
+- Epic-boundary QA fan-out (3 sub-agents in one message — the
+  ralph-workflow skill describes the exact pattern)
+- LARGE-task delegation to ralph-architect
+
 ## Sub-agent Failure Handling
 
 If a sub-agent fails or returns an error:
