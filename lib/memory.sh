@@ -54,14 +54,20 @@ ralph_record_episode() {
         echo "$episode" >> "$episodes_file"
     fi
 
-    # Bound to max episodes (keep newest)
+    # Bound to max episodes (keep newest). Sibling of the ralph_prune_stale_memories
+    # fix in 724a00e: only promote the .tmp on a successful tail, otherwise an
+    # I/O failure mid-truncate (disk full, OOM) would silently wipe the entire
+    # cross-session memory bank.
     if [[ -f "$episodes_file" ]]; then
         local count
         count=$(wc -l < "$episodes_file")
         if [[ "$count" -gt "$RALPH_MAX_EPISODES" ]]; then
             local keep=$((RALPH_MAX_EPISODES))
-            tail -n "$keep" "$episodes_file" > "${episodes_file}.tmp"
-            mv "${episodes_file}.tmp" "$episodes_file"
+            if tail -n "$keep" "$episodes_file" > "${episodes_file}.tmp" 2>/dev/null; then
+                mv "${episodes_file}.tmp" "$episodes_file"
+            else
+                rm -f "${episodes_file}.tmp" 2>/dev/null
+            fi
         fi
     fi
 }

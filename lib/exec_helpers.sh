@@ -294,15 +294,17 @@ exec_run_background() {
             cp "$output_file" "$LIVE_LOG_FILE" 2>/dev/null
         fi
 
-        cat > "$PROGRESS_FILE" << EOF
-{
-    "status": "executing",
-    "indicator": "$progress_indicator",
-    "elapsed_seconds": $((progress_counter * 10)),
-    "last_output": "$last_line",
-    "timestamp": "$(date '+%Y-%m-%d %H:%M:%S')"
-}
-EOF
+        # Build via jq so literal "/\/newlines in last_line (every NDJSON tool_use
+        # line carries unescaped quotes) don't corrupt progress.json — the
+        # monitor reads it with jq and silently falls back to "idle" on parse
+        # failure, hiding the live status panel.
+        jq -nc \
+            --arg indicator "$progress_indicator" \
+            --argjson elapsed "$((progress_counter * 10))" \
+            --arg last_output "$last_line" \
+            --arg timestamp "$(date '+%Y-%m-%d %H:%M:%S')" \
+            '{status:"executing", indicator:$indicator, elapsed_seconds:$elapsed, last_output:$last_output, timestamp:$timestamp}' \
+            > "$PROGRESS_FILE" 2>/dev/null || true
 
         if [[ "$VERBOSE_PROGRESS" == "true" ]]; then
             if [[ -n "$last_line" ]]; then

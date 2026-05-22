@@ -179,13 +179,17 @@ plan_resolve_vague_tasks() {
         # Skip if already has a resolved annotation
         echo "$text" | grep -q '<!-- resolved:' && continue
 
-        # Spawn ralph-explorer (Haiku — fast, cheap, ~500 tokens)
+        # Spawn ralph-explorer (Haiku — fast, cheap, ~500 tokens).
+        # The Claude CLI rejects `--prompt` (only `-p` / `--print` are valid);
+        # under the old flag every invocation died with "unknown option
+        # '--prompt'" and `|| continue` swallowed the failure, so
+        # vague-task resolution has been silently dead since it shipped.
         local explorer_result
         explorer_result=$(claude --agent ralph-explorer \
-            --prompt "Which source files in $project_root implement this task: $text
+            --output-format json \
+            -p "Which source files in $project_root implement this task: $text
 Return ONLY file paths relative to project root, one per line. Max 3 files. No explanation." \
-            --max-turns 5 \
-            --output-format json 2>/dev/null | jq -r '.result // ""') || continue
+            2>/dev/null | jq -r '.result // ""') || continue
 
         if [[ -n "$explorer_result" ]]; then
             # Take first valid file path from explorer output

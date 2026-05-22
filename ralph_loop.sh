@@ -4022,13 +4022,19 @@ ralph_record_latency() {
     local duration_seconds="$1"
     echo "$duration_seconds" >> "$LATENCY_LOG"
 
-    # Keep only the last 50 samples to bound file size
+    # Keep only the last 50 samples to bound file size. Guard the mv behind
+    # tail success — same defect class as the memory.sh:222 fix in 724a00e: an
+    # unconditional mv after a failed tail (disk full, OOM, signal) silently
+    # promotes an empty/partial .tmp over the real log, wiping every latency
+    # sample and forcing adaptive_timeout back to the static default for the
+    # rest of the session until 3+ new samples accumulate.
     if [[ -f "$LATENCY_LOG" ]]; then
         local count
         count=$(wc -l < "$LATENCY_LOG" 2>/dev/null | tr -d '[:space:]')
         if [[ "$count" -gt 50 ]]; then
-            tail -50 "$LATENCY_LOG" > "${LATENCY_LOG}.tmp"
-            mv "${LATENCY_LOG}.tmp" "$LATENCY_LOG"
+            if tail -50 "$LATENCY_LOG" > "${LATENCY_LOG}.tmp" 2>/dev/null; then
+                mv "${LATENCY_LOG}.tmp" "$LATENCY_LOG"
+            fi
             rm -f "${LATENCY_LOG}.tmp" 2>/dev/null
         fi
     fi

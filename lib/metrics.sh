@@ -34,14 +34,31 @@ record_metric() {
     local mcp_docs_calls=0
 
     if [[ -f "$status_file" ]] && command -v jq &>/dev/null; then
-        work_type=$(jq -r '.WORK_TYPE // "UNKNOWN"' "$status_file" 2>/dev/null)
-        exit_signal=$(jq -r '.EXIT_SIGNAL // false' "$status_file" 2>/dev/null)
-        cb_state=$(jq -r '.circuit_breaker_state // "CLOSED"' "$status_file" 2>/dev/null)
-        completed_task=$(jq -r '.COMPLETED_TASK // ""' "$status_file" 2>/dev/null)
+        # Field names in status.json are lowercase (see on-stop.sh's jq -cn
+        # at templates/hooks/on-stop.sh:609). The previous uppercase reads
+        # silently defaulted every row to UNKNOWN/false, so `ralph --stats`
+        # has been reporting 0% success_rate and an "UNKNOWN: N" work-type
+        # bucket for every metrics-enabled run.
+        work_type=$(jq -r '.work_type // "UNKNOWN"' "$status_file" 2>/dev/null)
+        exit_signal=$(jq -r '.exit_signal // false' "$status_file" 2>/dev/null)
+        # `completed_task` has no exact equivalent in status.json; use
+        # `recommendation` (Claude's per-loop summary) as the closest proxy
+        # — better than the previous always-empty `.COMPLETED_TASK` read.
+        completed_task=$(jq -r '.recommendation // ""' "$status_file" 2>/dev/null)
         mcp_tapps_calls=$(jq -r '.loop_mcp_calls.tapps_mcp // 0' "$status_file" 2>/dev/null)
         mcp_docs_calls=$(jq -r '.loop_mcp_calls.docs_mcp // 0' "$status_file" 2>/dev/null)
         [[ "$mcp_tapps_calls" =~ ^[0-9]+$ ]] || mcp_tapps_calls=0
         [[ "$mcp_docs_calls"  =~ ^[0-9]+$ ]] || mcp_docs_calls=0
+    fi
+
+    # Circuit-breaker state lives in its own file (lib/circuit_breaker.sh
+    # writes $RALPH_DIR/.circuit_breaker_state), never in status.json. The
+    # previous `.circuit_breaker_state // "CLOSED"` read against status.json
+    # always defaulted, so the `cb_trips` aggregate in ralph_show_stats was
+    # permanently zero regardless of how often the breaker actually tripped.
+    local cb_state_file="${RALPH_DIR:-.ralph}/.circuit_breaker_state"
+    if [[ -f "$cb_state_file" ]] && command -v jq &>/dev/null; then
+        cb_state=$(jq -r '.state // "CLOSED"' "$cb_state_file" 2>/dev/null || echo "CLOSED")
     fi
 
     local call_count=0

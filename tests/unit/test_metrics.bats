@@ -109,12 +109,17 @@ EOF
 # =============================================================================
 
 _seed_status() {
-    # Build a status.json with a hostile COMPLETED_TASK payload using jq so
-    # all escaping is exact.
+    # Build a status.json matching the real schema templates/hooks/on-stop.sh
+    # writes (lowercase keys). The previous fixture used uppercase keys
+    # (WORK_TYPE / EXIT_SIGNAL / COMPLETED_TASK) that matched the buggy
+    # reader in lib/metrics.sh but never matched the on-stop hook's output —
+    # so the test was enshrining the field-name mismatch instead of catching
+    # it. Hostile payload goes into `recommendation` because that's the
+    # field record_metric now reads as the completed_task proxy.
     local payload="$1"
     jq -n --arg task "$payload" \
-        '{WORK_TYPE:"IMPLEMENTATION", EXIT_SIGNAL:false, circuit_breaker_state:"CLOSED",
-          COMPLETED_TASK:$task, loop_mcp_calls:{tapps_mcp:0, docs_mcp:0}}' \
+        '{work_type:"IMPLEMENTATION", exit_signal:false,
+          recommendation:$task, loop_mcp_calls:{tapps_mcp:0, docs_mcp:0}}' \
         > "$RALPH_DIR/status.json"
 }
 

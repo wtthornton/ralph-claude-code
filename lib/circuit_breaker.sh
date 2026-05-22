@@ -329,9 +329,16 @@ cb_prune_old_events() {
     cutoff=$((now - CB_FAILURE_DECAY_MINUTES * 60))
 
     if [[ -f "$CB_FAILURE_LOG" ]]; then
-        awk -v cutoff="$cutoff" '$1 >= cutoff' "$CB_FAILURE_LOG" > "${CB_FAILURE_LOG}.tmp"
-        mv "${CB_FAILURE_LOG}.tmp" "$CB_FAILURE_LOG"
-        rm -f "${CB_FAILURE_LOG}.tmp" 2>/dev/null  # WSL cleanup
+        # Only promote the .tmp when awk exits cleanly — an awk failure mid-write
+        # (disk full, OOM, signal) would otherwise leave an empty/partial .tmp
+        # that the unconditional mv then promoted over the real log, silently
+        # wiping the sliding-window failure history. Same pattern as the
+        # memory.sh:222 fix in 724a00e.
+        if awk -v cutoff="$cutoff" '$1 >= cutoff' "$CB_FAILURE_LOG" \
+                > "${CB_FAILURE_LOG}.tmp" 2>/dev/null; then
+            mv "${CB_FAILURE_LOG}.tmp" "$CB_FAILURE_LOG"
+        fi
+        rm -f "${CB_FAILURE_LOG}.tmp" 2>/dev/null  # WSL cleanup / failure path
     fi
 }
 
