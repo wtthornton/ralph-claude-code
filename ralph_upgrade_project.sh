@@ -36,7 +36,7 @@ RALPH_AGENTS_SOURCE="${RALPH_TEMPLATES}/agents"
 # in that project.
 RALPH_SKILLS_LOCAL_SOURCE="${RALPH_TEMPLATES}/skills-local"
 MAX_UPGRADE_BACKUPS=5
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 # =============================================================================
 # Colors and logging (same pattern as install.sh)
@@ -904,6 +904,45 @@ upgrade_prompt_md() {
 
     log SUCCESS "Refreshed RALPH-managed section in .ralph/PROMPT.md"
     PROJ_UPDATED=$((PROJ_UPDATED + 1))
+
+    detect_audit_campaign_workaround "$project_prompt"
+}
+
+# =============================================================================
+# Deprecation check: audit-campaign prompt-shim (ralph-workflow 1.1.0)
+# =============================================================================
+# Before ralph-workflow 1.1.0, projects running tapps_audit_campaign sessions
+# needed an inline workaround in their PROMPT.md telling Ralph to skip the R1
+# `git log` check for read-only audit work. ralph-workflow 1.1.0 makes that
+# native (see "Read-only audit task" scenario + R1 exemption clause). Warn if
+# the project still carries the workaround so the operator knows it can be
+# removed safely. Detection looks OUTSIDE the RALPH-managed markers, since
+# user-customized content lives there.
+detect_audit_campaign_workaround() {
+    local prompt_file="$1"
+    [[ -f "$prompt_file" ]] || return 0
+
+    # Strip the RALPH:START..RALPH:END block before scanning. We only care
+    # about user-authored content, not the managed section.
+    local unmanaged
+    unmanaged=$(awk '
+        /<!-- RALPH:START/ { skip=1; next }
+        /<!-- RALPH:END/   { skip=0; next }
+        skip == 1          { next }
+        { print }
+    ' "$prompt_file" 2>/dev/null) || return 0
+
+    # Two signals: explicit "audit-readonly" marker, or the historical
+    # R1-skip wording paired with an audit-campaign keyword. Either fires
+    # the deprecation notice.
+    if echo "$unmanaged" | grep -q "audit-readonly" || \
+       (echo "$unmanaged" | grep -qiE "skip.*R1|R1.*skip|R1.*exempt|exempt.*R1" && \
+        echo "$unmanaged" | grep -qiE "audit.?campaign|audit.?session|tapps_audit_campaign|audit-readonly"); then
+        log WARN "Detected audit-campaign workaround in $prompt_file"
+        log WARN "  ralph-workflow 1.1.0 supports read-only audit sessions natively"
+        log WARN "  (see 'Read-only audit task' + R1 exemption in the skill)."
+        log WARN "  Safe to remove the workaround from your PROMPT.md."
+    fi
 }
 
 # =============================================================================

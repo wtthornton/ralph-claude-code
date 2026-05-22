@@ -5,7 +5,7 @@ description: >
   RALPH_STATUS exit block, epic-boundary QA deferral, and the dual-condition
   EXIT_SIGNAL gate. Invoke at the start of every Ralph loop so the response
   follows the contract the harness depends on.
-version: 1.0.0
+version: 1.1.0
 ralph: true
 ralph_local: true
 user-invocable: false
@@ -57,6 +57,16 @@ Ralph reads tasks from one of two backends, set by `RALPH_TASK_SOURCE` in
     unmerged SHAs and **leave the ticket In Progress** — Ralph will
     retry next loop. An unmerged branch is **not** a Done state and is
     **not** an In Review state.
+
+    **R1 exemption — read-only audit work.** R1 does not apply when
+    `WORK_TYPE` is `AUDIT` and `FILES_MODIFIED` is 0. Audit work is
+    by-design non-mutating — the executor runs analysis tools, files
+    findings as child Linear issues, and closes the session ticket.
+    No commit on `main` referencing the ticket will exist, and that is
+    correct. Detect audit work via either: (a) the ticket carries an
+    `audit-readonly` Linear label, or (b) the ticket body contains the
+    marker `<!-- ralph: audit-readonly -->` in the first 500
+    characters. If neither signal is present, R1 still applies.
   - **R2 — In Review is for hard blockers only.** Use it only when work
     cannot proceed AND the blocker matches one of: missing credentials
     Claude cannot generate, explicit budget/spend cap reached,
@@ -78,6 +88,40 @@ Ralph reads tasks from one of two backends, set by `RALPH_TASK_SOURCE` in
 The execution contract below is identical for both backends, with the
 substitutions: "fix_plan.md task" ↔ "Linear issue", "tick checkbox" ↔
 "move to Done with a comment".
+
+### Linear writes — delegation pattern
+
+The main Ralph agent's `tools:` list intentionally omits
+`mcp__plugin_linear_linear__*` so the boundary in
+`.claude/rules/agent-scope.md` stays enforceable — Ralph cannot
+accidentally mutate a sibling project's Linear workspace from inside a
+loop. When the workflow requires a Linear write (state transition,
+comment, child-issue filing, label change), delegate via `Task`:
+
+1. Route through the **`linear-issue`** skill (epic/story
+   create/update) or **`linear-read`** skill (multi-issue list). Both
+   skills enforce the docs-mcp validator → `save_issue` chain that
+   `.claude/hooks/tapps-pre-linear-write.sh` requires (a
+   `docs_validate_linear_issue` sentinel < 30 min old). Raw
+   `save_issue` calls without that sentinel are blocked.
+2. Spawn a subagent that DOES carry the Linear MCP tools — typically
+   `general-purpose` (or `claude-agent` where available):
+
+   ```
+   Task(general-purpose, "Using the linear-issue skill, move TAP-NNNN to Done with summary comment: <one-paragraph summary>. Project: <project name>. Then call tapps_linear_snapshot_invalidate.")
+   ```
+
+3. Single-issue **reads** (you have the TAP-ID) go straight to
+   `mcp__plugin_linear_linear__get_issue` via the same subagent — no
+   skill wrapping needed (per `linear-standards.md`).
+4. For audit-session work (see "Read-only audit task" scenario
+   below): the close step files child findings + posts the summary
+   comment + moves to Done. Batch the whole close into one subagent
+   invocation so the docs-mcp sentinel covers every write.
+
+Never attempt `mcp__plugin_linear_linear__save_issue` from the main
+agent directly — the call will be denied by the tool list. If you
+catch yourself reaching for it, that's the signal to spawn a `Task`.
 
 ## Execution contract (one loop)
 
@@ -123,13 +167,17 @@ substitutions: "fix_plan.md task" ↔ "Linear issue", "tick checkbox" ↔
 4. Implement the smallest change that completes the task. No scope creep, no
    speculative refactors, no "while I'm here" cleanup.
 5. Close the task. **File mode**: flip the checkbox `- [ ]` → `- [x]`
-   in `fix_plan.md`. **Linear mode**: satisfy R1 first — run
+   in `fix_plan.md`. **Linear mode**: if `WORK_TYPE` is `AUDIT` and the
+   ticket has the `audit-readonly` signal, skip the R1 `git log` check
+   entirely and proceed to close — post a summary comment listing the
+   findings (TAP-#### children filed) and move the ticket to **Done**.
+   Otherwise satisfy R1 first — run
    `git log main --grep='<TICKET-ID>'` to confirm at least one commit
    is on `main`; if the work is branch-only, attempt self-merge; if
    the merge is blocked, post a comment with the unmerged SHAs and
    **leave the ticket In Progress** for retry next loop. Only when R1
-   is satisfied: post a summary comment and move the ticket to
-   **Done** via `save_issue` with `state: "Done"`.
+   is satisfied (or R1-exempt audit work): post a summary comment and
+   move the ticket to **Done** via `save_issue` with `state: "Done"`.
 6. Commit the implementation and the fix_plan update together when it makes
    sense as a single logical change.
 7. **Decide if this closes the epic.** An epic boundary is the last `- [ ]`
@@ -185,7 +233,7 @@ STATUS: IN_PROGRESS | COMPLETE | BLOCKED
 TASKS_COMPLETED_THIS_LOOP: <number>
 FILES_MODIFIED: <number>
 TESTS_STATUS: PASSING | FAILING | DEFERRED | NOT_RUN
-WORK_TYPE: IMPLEMENTATION | TESTING | DOCUMENTATION | REFACTORING | VERIFICATION
+WORK_TYPE: IMPLEMENTATION | TESTING | DOCUMENTATION | REFACTORING | VERIFICATION | AUDIT
 EXIT_SIGNAL: false | true
 RECOMMENDATION: <one line, what should happen next>
 ---END_RALPH_STATUS---
@@ -314,6 +362,50 @@ mode**, set it to `1` if you ticked a `fix_plan.md` checkbox. In
 **linear mode**, comments and state transitions don't write to disk —
 keep it `0`. `EXIT_SIGNAL` stays `false` — the harness will reinvoke
 you for the next task.
+
+### Read-only audit task
+
+You picked up a ticket emitted by `tapps_audit_campaign` — it carries
+the `audit-readonly` Linear label, or its body starts with
+`<!-- ralph: audit-readonly -->`. The flow:
+
+1. Run the tool sequence from `## Refs` of the ticket
+   (`tapps_session_start` → per-file `tapps_quick_check` /
+   `tapps_security_scan` / etc., then `tapps_impact_analysis` on
+   sub-60 scores).
+2. File P0/P1 findings as individual child Linear issues with
+   `parent_id` set to this session ticket; bundle P2/P3 into one
+   digest issue per session (also parented). Zero findings = post a
+   `no findings, session clean` comment instead of filing.
+3. **R1 is exempt** for audit work — no commit on `main` will exist
+   because nothing was edited. Skip the `git log` check entirely.
+4. Close the session ticket with a summary comment listing the filed
+   findings (or "no findings") and move it to **Done**.
+
+Status block:
+
+```
+---RALPH_STATUS---
+STATUS: COMPLETE
+TASKS_COMPLETED_THIS_LOOP: 1
+FILES_MODIFIED: 0
+TESTS_STATUS: NOT_RUN
+WORK_TYPE: AUDIT
+EXIT_SIGNAL: false
+LINEAR_ISSUE: TAP-<session-id>
+LINEAR_EPIC: TAP-<campaign-epic>
+LINEAR_EPIC_DONE: <N>
+LINEAR_EPIC_TOTAL: <total-sessions>
+RECOMMENDATION: Continue with next audit session under TAP-<campaign-epic>
+---END_RALPH_STATUS---
+```
+
+`FILES_MODIFIED` is `0` because audit work writes nothing to disk.
+`TASKS_COMPLETED_THIS_LOOP: 1` is what tells the harness this loop
+made progress — without it the no-progress counter would increment
+even though the session ticket moved to Done. `EXIT_SIGNAL` stays
+`false` until the campaign epic itself is complete (all session
+children Done).
 
 ### Epic boundary reached
 
