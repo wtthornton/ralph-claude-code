@@ -10,6 +10,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.16.1] — 2026-05-22
+
+Patch release bundling three post-2.16.0 changes from downstream feedback (tapps-mcp upgrade review + AgentForge campaign). No harness contract changes; no new config knobs.
+
+### Fixed
+
+- **TAP-2345 follow-up (PR [#42](https://github.com/wtthornton/ralph-claude-code/pull/42))** — coordinator's T4 consume step (`brief-next.json` → `brief.json`) now runs **before** the `claude-cmd` guard fires. Previously the order swallowed the prewarmed brief on cold-start sessions and forced a synchronous coordinator spawn on the next loop, defeating the T4 win.
+- **TAP-2344 (PR [#43](https://github.com/wtthornton/ralph-claude-code/pull/43))** — `HOOKS-5` eval now asserts that `.ralphrc` creation through `Write` is blocked by `protect-ralph-files.sh`. The assertion shape was off after the TAP-2345 Edit/Bash policy unification; test was passing for the wrong reason.
+
+### Changed
+
+- **`merge_ralphrc` upgrader log granularity.** [`ralph_upgrade_project.sh`](ralph_upgrade_project.sh#L664) now logs one line per appended section instead of joining section names with spaces. Section names containing parentheticals (e.g. `BRANCH HYGIENE (TAP-1878 / TAP-1880)`) made the old summary line ambiguous — a downstream operator running `ralph-upgrade-project` reported reading the trailing `PERIODIC PUSH (AgentForge feedback #1)` as two separate headings.
+- **`ralph-workflow` SKILL.md bumped 1.1.0 → 1.2.0** with a new `Revision history` section. The 1.1.0 stamp had been stretched across R0 ([#27](https://github.com/wtthornton/ralph-claude-code/pull/27), [#29](https://github.com/wtthornton/ralph-claude-code/pull/29)), F1+F2+F3 ([#32](https://github.com/wtthornton/ralph-claude-code/pull/32)), T3 sub-agent fan-out ([#37](https://github.com/wtthornton/ralph-claude-code/pull/37)), T4 brief lookahead ([#39](https://github.com/wtthornton/ralph-claude-code/pull/39)), T5 async PR merge ([#41](https://github.com/wtthornton/ralph-claude-code/pull/41)), the `linear-read` mandate ([#36](https://github.com/wtthornton/ralph-claude-code/pull/36)), and TAP-2256 (python-introspection). Downstream projects can now pin a known set of rules. The in-repo `.claude/skills/ralph-workflow/` and `.cursor/skills/ralph-workflow/` mirrors are also synced (they had been drifted, missing the [#36](https://github.com/wtthornton/ralph-claude-code/pull/36) linear-read text).
+
+### Documentation
+
+- **`RALPH_PUSH_EVERY_LOOP` × project-side pre-push hook interaction** documented in [CLAUDE.md](CLAUDE.md). `git push` is invoked *without* `--no-verify`, so any `.githooks/pre-push` gate runs every loop — failure mode is a silent backlog of locally-committed-but-un-pushable commits, mitigation is `tail -F .ralph/.push-failure.err` or `RALPH_PUSH_EVERY_LOOP=false`. Originated from a tapps-mcp upgrade review where the project's pre-push runs the full test suite + `bump-versions.py`.
+- **`.ralph/.upgrade-backups/` rollback procedure** documented in [docs/OPERATIONS.md](docs/OPERATIONS.md) under *Upgrading a managed project* — per-file `cp -a` restore is safe, the upgrader keeps no state ledger beyond the backup files themselves, and the directory rotates at `MAX_UPGRADE_BACKUPS=5` runs.
+
+---
+
 ## [2.16.0] — 2026-05-22
 
 ### Async PR-merge queue (T5, opt-in)
