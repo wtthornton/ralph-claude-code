@@ -10,6 +10,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.15.8] — 2026-05-22
+
+### Throughput improvements (post-AgentForge campaign feedback)
+
+Three coordinated changes targeting the 9.2 min avg per-PR ship time observed in the 2026-05-22 AgentForge campaign (41 PRs / 16 productive loops / 6.26 hr). Goal: route trivial PRs to Haiku, enforce the linear-read snapshot dance consistently, and curb sub-agent over-spawn. Soak campaign before further changes in 2.15.9.
+
+- **T1 (PR [#35](https://github.com/wtthornton/ralph-claude-code/pull/35)) — `RALPH_CURRENT_TASK_TEXT` wired from `brief.json` in OAuth-via-MCP Linear mode.** Every routing decision in the 2026-05-22 campaign logged `task_type:"none" / reason:"no_task_fallback"` (31/31) because `linear_get_in_progress_task` and `linear_get_next_task` early-return empty without `LINEAR_API_KEY`. `build_loop_context` now reads coordinator `brief.json` (`task_id + task_summary + affected_modules`) as the FIRST source for the routing classifier input, falling back to the legacy chain when no brief exists. Expected impact: ~20%+ of trivial docs/CHANGELOG/lint PRs route to Haiku (~1/5 sonnet cost). 5 BATS cases under `tests/unit/test_routing_task_text_wiring.bats`.
+
+- **T2 (PR [#36](https://github.com/wtthornton/ralph-claude-code/pull/36)) — `linear-read` skill mandatory for multi-issue reads.** PROMPT.md, agent contract, and ralph-workflow skill now direct Claude to use the `linear-read` skill (mandatory `tapps_linear_snapshot_get` → on-miss `list_issues` → `snapshot_put` cache-first dance) instead of calling `list_issues` directly. AGENTS.md operator note recommends flipping `linear_enforce_cache_gate: "block"` after a one-session soak shows zero entries in `.cache-gate-violations.jsonl`. The TAP-1224 cache layer is already enforced server-side; default `warn` only logs if Claude forgets — `block` makes the rule actual. Pure prompt/doc change; no code.
+
+- **T3 (PR [#37](https://github.com/wtthornton/ralph-claude-code/pull/37)) — sub-agent fan-out anti-patterns + monitor avg/loop warn.** Sub-agent spawn overhead (~10–30 s + fresh context) dominates several single-ticket loops. Four bright-line anti-patterns added to `.claude/agents/ralph.md` and `templates/skills-local/ralph-workflow/SKILL.md`: don't spawn for single-Bash ops, Linear writes, `ralph-explorer` when `brief.json` names files, or single Read/Grep. `ralph-monitor` soft-warns when session sub-agent avg/loop exceeds `RALPH_SUBAGENT_AVG_WARN` (default 5). The math reads existing `session_subagents` / `loop_count` fields in `status.json` — no new state plumbing. `--once` flag added to `ralph-monitor` for harness testing. 3 BATS cases under `tests/unit/test_subagent_fanout_warn.bats`.
+
+### Measurement campaign
+
+After running `ralph-upgrade-project --yes <consumer-repo>`, re-run `/tmp/loop_stats.py` and capture:
+
+- Avg PR ship time (target: <6 min from 9.2)
+- Haiku routing % via `.ralph/.model_routing.jsonl` (target: ≥20% from 0%)
+- Sub-agent count per loop (target: ≤4 from ~7)
+
+Soak before bundling T4 (brief lookahead, 2.15.9) and T5 (async PR merge, 2.16.0).
+
+---
+
 ## [2.15.6] — 2026-05-22
 
 ### Added
