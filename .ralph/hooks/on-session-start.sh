@@ -39,7 +39,10 @@ done_tasks=0
 FIX_PLAN="$RALPH_DIR/fix_plan.md"
 if [[ -f "$FIX_PLAN" ]]; then
   total_tasks=$(grep -c '^\- \[' "$FIX_PLAN" 2>/dev/null | tr -cd '0-9') || total_tasks=0
-  done_tasks=$(grep -c '^\- \[x\]' "$FIX_PLAN" 2>/dev/null | tr -cd '0-9') || done_tasks=0
+  # Match both `[x]` and `[X]`. The codebase otherwise treats both as completed
+  # (see lib/complexity.sh and lib/context_management.sh `[xX]`); a lowercase-
+  # only grep here silently undercounts done tasks and inflates "remaining".
+  done_tasks=$(grep -cE '^- \[[xX]\]' "$FIX_PLAN" 2>/dev/null | tr -cd '0-9') || done_tasks=0
   total_tasks=${total_tasks:-0}
   done_tasks=${done_tasks:-0}
 fi
