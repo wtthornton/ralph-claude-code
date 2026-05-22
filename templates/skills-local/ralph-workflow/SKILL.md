@@ -312,7 +312,21 @@ LINEAR_DONE_COUNT: <N>          (completed issues, via Linear MCP)
 LINEAR_EPIC: <ID>               (optional — only if working under an epic)
 LINEAR_EPIC_DONE: <N>           (optional — stories Done in the epic)
 LINEAR_EPIC_TOTAL: <N>          (optional — total stories in the epic)
+NEXT_INTENDED_ISSUE: <ID-or-NONE>  (T4 / 2.15.9 — see below)
 ```
+
+### T4 / 2.15.9 — `NEXT_INTENDED_ISSUE` (optional lookahead hint)
+
+Emit `NEXT_INTENDED_ISSUE: TAP-NNNN` when you have already decided which
+ticket you will pick on the next loop (e.g. the next story in an epic you
+are working through, or the next ticket the locality optimizer should
+prefer). The harness then pre-warms `.ralph/brief-next.json` in the
+background for that ticket, so the next loop's coordinator can skip its
+own spawn (saves ~5–15 s on the next loop's cold start).
+
+- If you don't know what's next, emit `NEXT_INTENDED_ISSUE: NONE` or omit the field — both are no-ops.
+- The pre-warmed brief is consumed only when its `task_id` matches the next loop's `.next_intended_issue`. A mismatch is silently dropped, so a wrong guess costs nothing beyond one wasted Haiku call.
+- If a `brief.json` arrives with a `task_id` that doesn't match the ticket you actually picked, ignore the brief — Linear is the source of truth.
 
 ## The EXIT_SIGNAL gate
 

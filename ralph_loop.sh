@@ -2667,6 +2667,33 @@ ralph_spawn_coordinator() {
         task_input=$(grep -m1 '^[[:space:]]*- \[ \]' "${RALPH_DIR}/fix_plan.md" 2>/dev/null) || task_input=""
     fi
 
+    # T4 / 2.15.9: brief-lookahead consume. If the previous loop emitted
+    # NEXT_INTENDED_ISSUE and the harness pre-warmed brief-next.json with a
+    # matching task_id, atomically promote it to brief.json and skip the
+    # spawn. The pre-warmed brief is the LLM's own claim about what's next,
+    # so a mismatch is rare; on mismatch we silently fall through to the
+    # cache → spawn chain so behavior degrades gracefully. brief-next.json
+    # is consumed (deleted) after promotion to avoid stale reuse.
+    local _brief_next="${RALPH_DIR}/brief-next.json"
+    local _nii_file="${RALPH_DIR}/.next_intended_issue"
+    if [[ "$task_source" == "linear" && -s "$_brief_next" && -s "$_nii_file" ]]; then
+        local _intended_id _brief_next_id
+        _intended_id=$(head -1 "$_nii_file" 2>/dev/null | tr -d '[:space:]')
+        _brief_next_id=$(jq -r '.task_id // ""' "$_brief_next" 2>/dev/null)
+        if [[ -n "$_intended_id" && "$_intended_id" == "$_brief_next_id" ]] \
+            && declare -F brief_validate >/dev/null 2>&1 \
+            && brief_validate "$_brief_next" 2>/dev/null; then
+            if mv -f "$_brief_next" "$brief_target" 2>/dev/null; then
+                rm -f "$_nii_file" 2>/dev/null
+                log_status "INFO" "coordinator: T4 lookahead hit for $_intended_id — using brief-next.json (skipping spawn)"
+                return 0
+            fi
+        fi
+        # Mismatch / invalid: drop the stale lookahead so it doesn't shadow
+        # later attempts. (The cache layer below still gets to fire.)
+        rm -f "$_brief_next" 2>/dev/null
+    fi
+
     # TAP-1682: cache lookup BEFORE clearing the prior brief. The cache key
     # is the Linear issue identifier — read from status.json (.linear_issue
     # is written by the on-stop hook from Claude's RALPH_STATUS block) or
@@ -2798,6 +2825,109 @@ ${coord_body}"
             "$_brain_task" \
             "coordinator-brief" >/dev/null 2>&1 || true
     fi
+}
+
+# T4 / 2.15.9: ralph_prewarm_next_brief — opportunistic background pre-warm of
+# .ralph/brief-next.json for whichever issue Claude advertised via
+# NEXT_INTENDED_ISSUE in the previous loop's RALPH_STATUS block.
+#
+# Designed to run in a backgrounded subshell — never returns non-zero, never
+# logs to the foreground log file, and self-suppresses if any precondition
+# is missing. The next loop's ralph_spawn_coordinator consumes brief-next.json
+# only when the cached task_id matches .next_intended_issue, so a wrong guess
+# degrades silently (file is dropped, fresh coordinator runs).
+#
+# Guards (silent return):
+#   - Not in Linear mode (file mode has no per-issue identity)
+#   - RALPH_COORDINATOR_DISABLED=true or DRY_RUN=true
+#   - RALPH_PREWARM_NEXT_BRIEF=false (operator opt-out)
+#   - No .next_intended_issue file or empty content
+#   - .next_intended_issue matches status.json.linear_issue (same ticket,
+#     existing brief cache will hit anyway — no need to re-spawn)
+#   - brief-next.json already exists and is younger than RALPH_BRIEF_NEXT_MAX_AGE_SECONDS
+ralph_prewarm_next_brief() {
+    [[ "${RALPH_PREWARM_NEXT_BRIEF:-true}" == "true" ]] || return 0
+    [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]] || return 0
+    [[ "${RALPH_COORDINATOR_DISABLED:-false}" != "true" ]] || return 0
+    [[ "${DRY_RUN:-false}" != "true" ]] || return 0
+
+    local nii_file="${RALPH_DIR}/.next_intended_issue"
+    [[ -s "$nii_file" ]] || return 0
+    local intended_id
+    intended_id=$(head -1 "$nii_file" 2>/dev/null | tr -d '[:space:]')
+    [[ -n "$intended_id" ]] || return 0
+    [[ "$intended_id" =~ ^[A-Z][A-Z0-9]*-[0-9]+$ ]] || return 0
+
+    # Same-ticket shortcut: the brief_cache will already hit; no value in
+    # pre-warming a separate file.
+    if [[ -f "${RALPH_DIR}/status.json" ]]; then
+        local current_id
+        current_id=$(jq -r '.linear_issue // empty' "${RALPH_DIR}/status.json" 2>/dev/null || echo "")
+        [[ "$current_id" != "$intended_id" ]] || return 0
+    fi
+
+    local brief_next="${RALPH_DIR}/brief-next.json"
+    local max_age="${RALPH_BRIEF_NEXT_MAX_AGE_SECONDS:-1800}"
+    if [[ -s "$brief_next" ]]; then
+        local now mtime age
+        now=$(date +%s 2>/dev/null) || return 0
+        mtime=$(stat -c '%Y' "$brief_next" 2>/dev/null || stat -f '%m' "$brief_next" 2>/dev/null || echo 0)
+        age=$((now - mtime))
+        [[ "$age" -gt "$max_age" ]] || return 0  # fresh enough already
+    fi
+
+    local claude_cmd="${CLAUDE_CODE_CMD:-claude}"
+    command -v "$claude_cmd" >/dev/null 2>&1 || return 0
+
+    # Invoke ralph-coordinator in brief mode with an explicit override
+    # writing to brief-next.json instead of brief.json. The body mirrors
+    # ralph_spawn_coordinator's contract but with the target file path
+    # parameterized via env so the coordinator agent emits the file at
+    # the right path.
+    local prompt
+    prompt="MODE=brief
+TASK_SOURCE=linear
+LOOP=prewarm
+TASK_INPUT: ${intended_id} (pre-warm — Claude advertised this as NEXT_INTENDED_ISSUE)
+
+REQUIRED ACTION (do this BEFORE returning the summary):
+  1. Use the Write tool to write the brief JSON to ${brief_next} (a single
+     Write call — atomic at the tool layer).
+  2. The JSON must include every required field from lib/brief.sh:brief_validate
+     (schema_version=1, task_id=${intended_id}, task_source=linear, task_summary,
+     risk_level LOW|MEDIUM|HIGH, affected_modules[], acceptance_criteria[],
+     qa_required, delegate_to ralph|ralph-architect,
+     coordinator_confidence in [0,1], created_at ISO-8601 UTC).
+  3. Return a ≤3-line summary AFTER the file is written.
+
+This is a PRE-WARM for next loop's ralph_spawn_coordinator. Failures are
+non-fatal and silent. Do NOT write brief.json — only brief-next.json."
+
+    # Best-effort. Pipe stderr/stdout to /dev/null so the backgrounded
+    # subshell never pollutes the foreground log. Cap the prewarm at
+    # 90 s (well under the foreground coordinator timeout) so a stuck
+    # prewarm does not pile up across loops.
+    local prewarm_timeout="${RALPH_PREWARM_TIMEOUT_SECONDS:-90}"
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$prewarm_timeout" "$claude_cmd" \
+            --agent ralph-coordinator \
+            --permission-mode bypassPermissions \
+            --append-system-prompt "$prompt" \
+            >/dev/null 2>&1 < /dev/null || true
+    else
+        "$claude_cmd" \
+            --agent ralph-coordinator \
+            --permission-mode bypassPermissions \
+            --append-system-prompt "$prompt" \
+            >/dev/null 2>&1 < /dev/null || true
+    fi
+
+    # Validate the prewarm output — wipe if malformed so the consume path
+    # doesn't promote garbage.
+    if [[ -s "$brief_next" ]] && declare -F brief_validate >/dev/null 2>&1; then
+        brief_validate "$brief_next" 2>/dev/null || rm -f "$brief_next" 2>/dev/null
+    fi
+    return 0
 }
 
 # TAP-917: ralph_debrief_coordinator — invoke ralph-coordinator (Haiku) at
@@ -4472,6 +4602,14 @@ execute_claude_code() {
         # AgentForge feedback #1: push any pending commits so origin reflects
         # the autonomous work in real time. No-op when ahead==0 or no upstream.
         ralph_push_pending_commits
+
+        # T4 / 2.15.9: opportunistic brief lookahead. If Claude emitted
+        # NEXT_INTENDED_ISSUE this loop (on-stop wrote .next_intended_issue),
+        # fork a coordinator in the background to pre-warm brief-next.json
+        # for that issue. The next loop's ralph_spawn_coordinator consumes
+        # the file on task_id match and skips its own spawn.
+        ralph_prewarm_next_brief &
+        disown 2>/dev/null || true
 
         return 0
     else
