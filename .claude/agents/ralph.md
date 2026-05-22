@@ -109,10 +109,14 @@ flips it on.
 1. Read .ralph/fix_plan.md — identify unchecked `- [ ]` items.
 <!--TASK_SOURCE:file:end-->
 <!--TASK_SOURCE:linear:start-->
-1. List open Linear issues in `RALPH_LINEAR_PROJECT` via
-   `mcp__plugin_linear_linear__list_issues` (or honor the `LOCALITY HINT`
-   injected at session start). Do NOT read .ralph/fix_plan.md — Linear is
-   the single source of truth in this mode.
+1. List open Linear issues in `RALPH_LINEAR_PROJECT` via the
+   **linear-read** skill (mandatory cache-first dance: `snapshot_get` →
+   on miss `list_issues` → `snapshot_put`). Do NOT call
+   `mcp__plugin_linear_linear__list_issues` directly. Honor the
+   `LOCALITY HINT` injected at session start when present. Single-issue
+   reads (you have the TAP-ID) go straight to `get_issue` — no skill,
+   no cache. Do NOT read .ralph/fix_plan.md — Linear is the single
+   source of truth in this mode.
 <!--TASK_SOURCE:linear:end-->
 2. Assess complexity of upcoming tasks and determine batch size (see Rules).
 3. Search the codebase for existing implementations before writing new code.
