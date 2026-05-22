@@ -209,10 +209,16 @@ run_protect_files() {
     [[ "$status" -eq 2 ]]
 }
 
-@test "FILE PROTECTION: allows creating new .ralphrc when absent (HOOKS-5)" {
+@test "FILE PROTECTION: blocks creating new .ralphrc when absent (HOOKS-5, TAP-2344)" {
+    # TAP-2344 closed the Write-when-absent hole that previously let the agent
+    # introduce a .ralphrc overriding model/auto-update/skill settings even
+    # though existing .ralphrc edits were blocked. Per the post-fix contract
+    # in .ralph/hooks/protect-ralph-files.sh, .ralphrc creation is blocked
+    # unconditionally — operators add .ralphrc out-of-band, never the agent.
     [[ ! -f .ralphrc ]] || rm -f .ralphrc
     run run_protect_files ".ralphrc"
-    assert_success
+    assert_failure
+    [[ "$status" -eq 2 ]]
 }
 
 @test "FILE PROTECTION: allows edit to .ralph/fix_plan.md (agent checks off tasks)" {
