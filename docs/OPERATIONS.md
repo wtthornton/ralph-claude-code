@@ -173,6 +173,41 @@ See [cli-reference.md](cli-reference.md#ralph-upgrade-project) for full `ralph-u
 
 Always run with `--dry-run` first to preview.
 
+#### Rolling back an upgrade
+
+Every run of `ralph-upgrade-project` writes a per-file backup of anything it
+touches to `.ralph/.upgrade-backups/<UTC-timestamp>/` *before* applying
+changes. The directory mirrors the project layout, so a hook that lived at
+`.ralph/hooks/on-stop.sh` is backed up to
+`.ralph/.upgrade-backups/<ts>/.ralph/hooks/on-stop.sh`.
+
+To roll back a specific file:
+
+```bash
+cd /path/to/project
+ls .ralph/.upgrade-backups/        # pick the timestamp you want to revert to
+cp -a .ralph/.upgrade-backups/<ts>/.ralph/hooks/on-stop.sh .ralph/hooks/
+```
+
+The upgrader keeps **no state ledger** beyond the file copies themselves —
+no manifest, no checksum journal — and rotates the backup directory to
+`MAX_UPGRADE_BACKUPS=5` runs (oldest evicted). Per-file `cp -a` restore is
+safe and will not desync future upgrade runs; the next upgrade re-compares
+hashes from scratch. You may also delete the entire backup tree (`rm -rf
+.ralph/.upgrade-backups/`) once you're confident the upgrade is stable —
+the absence of backups doesn't break anything, it just removes the
+rollback path for that run.
+
+If you want to roll back *everything* the upgrade touched:
+
+```bash
+cp -a .ralph/.upgrade-backups/<ts>/. .
+```
+
+Note the trailing `/.` — that copies the contents of the backup tree
+(preserving the relative project layout) over your working tree. Diff
+afterwards (`git diff`) to confirm the result before committing.
+
 ---
 
 ## Secrets Management

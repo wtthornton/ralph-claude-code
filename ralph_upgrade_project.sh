@@ -661,7 +661,10 @@ merge_ralphrc() {
         } >> "$project_rc"
     done
 
-    log SUCCESS "Appended ${#missing_sections[@]} sections to .ralphrc: ${missing_sections[*]}"
+    log SUCCESS "Appended ${#missing_sections[@]} section(s) to .ralphrc:"
+    for s in "${missing_sections[@]}"; do
+        log SUCCESS "  + $s"
+    done
     PROJ_UPDATED=$((PROJ_UPDATED + 1))
 }
 
