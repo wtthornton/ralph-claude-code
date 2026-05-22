@@ -2668,12 +2668,6 @@ ralph_spawn_coordinator() {
         return 0
     fi
 
-    local claude_cmd="${CLAUDE_CODE_CMD:-claude}"
-    if ! command -v "$claude_cmd" >/dev/null 2>&1; then
-        log_status "WARN" "coordinator: claude CLI not on PATH — continuing without brief"
-        return 0
-    fi
-
     # Build task input from current source. linear_get_next_task is
     # tolerated to fail silently — the coordinator can still work with an
     # empty TASK_INPUT (it'll write a brief flagged with low confidence).
@@ -2687,13 +2681,14 @@ ralph_spawn_coordinator() {
         task_input=$(grep -m1 '^[[:space:]]*- \[ \]' "${RALPH_DIR}/fix_plan.md" 2>/dev/null) || task_input=""
     fi
 
-    # T4 / 2.15.9: brief-lookahead consume. If the previous loop emitted
-    # NEXT_INTENDED_ISSUE and the harness pre-warmed brief-next.json with a
-    # matching task_id, atomically promote it to brief.json and skip the
-    # spawn. The pre-warmed brief is the LLM's own claim about what's next,
-    # so a mismatch is rare; on mismatch we silently fall through to the
-    # cache → spawn chain so behavior degrades gracefully. brief-next.json
-    # is consumed (deleted) after promotion to avoid stale reuse.
+    # T4 / 2.15.9: brief-lookahead consume. Runs BEFORE the claude-cmd guard
+    # because consume is a pure file-rename — it doesn't need the CLI. If the
+    # previous loop emitted NEXT_INTENDED_ISSUE and the harness pre-warmed
+    # brief-next.json with a matching task_id, atomically promote it to
+    # brief.json and skip the spawn. The pre-warmed brief is the LLM's own
+    # claim about what's next, so a mismatch is rare; on mismatch we silently
+    # fall through to the cache → spawn chain so behavior degrades gracefully.
+    # brief-next.json is consumed (deleted) after promotion to avoid stale reuse.
     local _brief_next="${RALPH_DIR}/brief-next.json"
     local _nii_file="${RALPH_DIR}/.next_intended_issue"
     if [[ "$task_source" == "linear" && -s "$_brief_next" && -s "$_nii_file" ]]; then
@@ -2736,6 +2731,16 @@ ralph_spawn_coordinator() {
                 return 0
             fi
         fi
+    fi
+
+    # claude-cmd guard. Moved AFTER the T4 consume + cache lookup (which only
+    # need local files) so a CI / test environment without the CLI installed
+    # can still exercise those paths. The rest of this function — the actual
+    # coordinator spawn — does need claude.
+    local claude_cmd="${CLAUDE_CODE_CMD:-claude}"
+    if ! command -v "$claude_cmd" >/dev/null 2>&1; then
+        log_status "WARN" "coordinator: claude CLI not on PATH — continuing without brief"
+        return 0
     fi
 
     # Drop any stale brief from a previous loop so a coordinator failure
