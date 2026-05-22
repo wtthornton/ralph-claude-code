@@ -68,6 +68,11 @@ Run in one of three modes determined by your task input:
      content:   <the JSON object below, no surrounding prose, no markdown fence>
    ```
 
+   The file_path is literal: `.ralph/brief.json` (slash, under `.ralph/`).
+   Never write `.ralph-brief.json` (dash, repo root) or any other path —
+   only `.ralph/brief.json`. The harness reads only the canonical path;
+   any other location leaks into the project's git working tree (TAP-2349).
+
    The JSON body MUST contain every required field defined in
    `lib/brief.sh:brief_validate` — `brief_validate` rejects briefs that
    are missing fields, have the wrong types, or use disallowed enum

@@ -239,6 +239,40 @@ EOF
     ! grep -qxF '.ralph/status.json' "$TEMPLATE_GITIGNORE"
 }
 
+@test "templates/.gitignore: contains .ralph-brief.json defensive entry (TAP-2349)" {
+    # Wrong-path coordinator brief that leaked into AgentForge during the
+    # 2026-05-22 AOS campaign. The canonical brief path is .ralph/brief.json
+    # (covered by the .ralph/* allowlist). The dash-prefixed root-level
+    # variant is a stray-write target that the allowlist does NOT cover, so
+    # it gets an explicit entry. Belt-and-suspenders against agents writing
+    # to the wrong path — no Ralph code path produces .ralph-brief.json.
+    grep -qxF '.ralph-brief.json' "$TEMPLATE_GITIGNORE"
+}
+
+@test "merge_gitignore_block: backfills .ralph-brief.json into stale project gitignores (TAP-2349)" {
+    # The line lives in the shipped template — verify merge_gitignore_block
+    # picks it up for backfill into existing managed projects via
+    # ralph-upgrade-project. Uses the real template (not the fixture) so the
+    # test catches drift if the line is ever removed.
+    cat > .gitignore <<'EOF'
+.ralph/.call_count
+EOF
+
+    run merge_gitignore_block .gitignore "$TEMPLATE_GITIGNORE"
+    [ "$status" -eq 0 ]
+
+    grep -qxF '.ralph-brief.json' .gitignore
+
+    # Second run is a no-op (idempotent)
+    local first_hash
+    first_hash=$(sha256sum .gitignore | awk '{print $1}')
+    run merge_gitignore_block .gitignore "$TEMPLATE_GITIGNORE"
+    [ "$status" -eq 0 ]
+    local second_hash
+    second_hash=$(sha256sum .gitignore | awk '{print $1}')
+    [ "$first_hash" = "$second_hash" ]
+}
+
 # -----------------------------------------------------------------------------
 # Dry-run mode (TAP-1883 — used by ralph_upgrade_project.sh to log diff
 # without writing when DRY_RUN=true)

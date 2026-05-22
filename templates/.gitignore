@@ -7,6 +7,9 @@
 !.ralph/hooks/**
 !.ralph/.gitkeep
 
+# Stray wrong-path coordinator brief (canonical is .ralph/brief.json). TAP-2349.
+.ralph-brief.json
+
 # General logs
 *.log
 
