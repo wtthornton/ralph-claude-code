@@ -10,6 +10,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.15.4] — 2026-05-21
+
+### Added
+
+- **ralph-workflow skill 1.0.0 → 1.1.0 — read-only audit-session support.** Native handling for tickets emitted by `tapps_audit_campaign` so Ralph no longer needs a per-project `PROMPT.md` shim to run them. Closes the AgentForge feedback bundle's "Repo 1" items (TAP-2258 campaign with 34 children TAP-2259..TAP-2292 was the field driver):
+  - **WORK_TYPE enum gains `AUDIT`** — distinct from `VERIFICATION` so telemetry / circuit-breaker logic can tell "scanned code and filed findings" apart from "verified prior fix is still in place."
+  - **R1 exemption clause** inserted after the Hard Rules block in linear mode. When `WORK_TYPE` is `AUDIT` and `FILES_MODIFIED` is `0`, the `git log main --grep=<TICKET>` check is skipped — audit work is by-design non-mutating, so no commit on `main` will exist and that is correct. Detection via **either** an `audit-readonly` Linear label **or** a `<!-- ralph: audit-readonly -->` body marker in the first 500 characters (belt-and-suspenders so a missing label doesn't break the contract).
+  - **Step 5 of the execution contract** carries the AUDIT short-circuit — if the signal is present, close with summary comment + Linear → Done without R1.
+  - **New "Read-only audit task" scenario block** with full status-block example: `STATUS: COMPLETE`, `TASKS_COMPLETED_THIS_LOOP: 1`, `FILES_MODIFIED: 0`, `WORK_TYPE: AUDIT`, `EXIT_SIGNAL: false`. The `TASKS_COMPLETED_THIS_LOOP: 1` is load-bearing — it's what tells the harness this loop made progress so `consecutive_no_progress` resets even though zero files changed.
+  - **New "Linear writes — delegation pattern" section** documenting the canonical `Task` subagent route for Linear mutations. The main Ralph agent's `tools:` list intentionally omits `mcp__plugin_linear_linear__*` so `.claude/rules/agent-scope.md` stays enforceable; this section names the workaround (route through `linear-issue` / `linear-read` skills, spawn `general-purpose` subagent for the write).
+
+  Replicated byte-identical across all three skill copies — `templates/skills-local/ralph-workflow/SKILL.md` (template / source of truth for `ralph-upgrade-project`), `.claude/skills/ralph-workflow/SKILL.md` (repo dev), `.cursor/skills/ralph-workflow/SKILL.md` (Cursor IDE mirror).
+
+- **`ralph-upgrade-project` 1.0.0 → 1.1.0 — audit-campaign shim deprecation detector.** New `detect_audit_campaign_workaround()` scans the unmanaged region of `.ralph/PROMPT.md` (everything outside the `RALPH:START`/`RALPH:END` markers, since user content lives there) after every PROMPT.md merge. Fires a WARN when it finds the legacy R1-skip wording paired with audit-campaign keywords, or an explicit `audit-readonly` reference. No auto-removal — users may have customized the workaround region, so the prompt only surfaces it. Pairs with the skill change: once the consumer relabels existing audit tickets with `audit-readonly`, the shim becomes safe to remove and this warning makes the decommission explicit.
+
+### Tests
+
+- ralph-claude-code unit suite still 100% pass on `npm test`. tapps-mcp counterpart (the emit-side label + body marker + closure-language change in `audit_session_template.py`) ships separately on the tapps-mcp release train; this release does not depend on tapps-mcp version.
+
+---
+
 ## [2.15.2] — 2026-05-17
 
 ### Fixed
