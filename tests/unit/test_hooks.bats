@@ -409,11 +409,15 @@ _tap624_run() {
     [[ "$status" -eq 2 ]]
 }
 
-@test "HOOKS-5: protect-ralph-files.sh allows creating a new .ralphrc when absent" {
-    # Initial-bootstrap case: a fresh project must be able to create .ralphrc.
-    # Existing .ralphrc files stay protected (see test above).
+@test "HOOKS-5: protect-ralph-files.sh blocks creating a new .ralphrc (TAP-XXXX: agent cannot override settings via bootstrap)" {
+    # 724a00e removed the `[[ -f $FILE_PATH ]]` guard on the .ralphrc
+    # pattern: previously a missing file slipped past, so the agent could
+    # Write a brand-new .ralphrc overriding model/skill/auto-update
+    # settings. The new contract: any .ralphrc write — create or edit —
+    # is blocked. Bootstrap is the human's job (setup.sh / ralph-enable),
+    # not the agent's. This test enforces the new contract.
     run bash -c 'echo "{\"tool_input\": {\"file_path\": \"'"$TEST_DIR"'/.ralphrc\"}}" | CLAUDE_PROJECT_DIR="'"$TEST_DIR"'" bash "'"$PROJECT_ROOT"'/templates/hooks/protect-ralph-files.sh"'
-    assert_success
+    [[ "$status" -eq 2 ]]
 }
 
 @test "HOOKS-5: protect-ralph-files.sh allows normal file edits" {

@@ -33,8 +33,15 @@ if [[ "$FILE_PATH" == */.ralph/* ]] || [[ "$FILE_PATH" == .ralph/* ]]; then
   exit 2
 fi
 
-# Block .ralphrc modifications
-if [[ "$FILE_PATH" == *".ralphrc"* ]] && [[ -f "$FILE_PATH" ]]; then
+# Block .ralphrc modifications. Two prior bugs fixed here:
+#   1. The pattern `*".ralphrc"*` was substring-match, so it also matched
+#      adjacent paths like `notmy.ralphrc.bak` or `vendor/foo.ralphrc-old`.
+#      Anchor to a path boundary (`*/.ralphrc` or bare `.ralphrc`).
+#   2. The `[[ -f "$FILE_PATH" ]]` guard let the Write tool *create* a new
+#      `.ralphrc` (file did not yet exist → guard false → allow). The agent
+#      could thus introduce a `.ralphrc` overriding model/auto-update/skill
+#      settings even though existing `.ralphrc` edits were blocked.
+if [[ "$FILE_PATH" == */.ralphrc ]] || [[ "$FILE_PATH" == .ralphrc ]]; then
   echo "BLOCKED: Cannot modify Ralph configuration: $FILE_PATH" >&2
   exit 2
 fi

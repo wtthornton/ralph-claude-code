@@ -802,21 +802,37 @@ fi
 _nsb_threshold="${RALPH_HALT_NO_STATUS_BLOCK_THRESHOLD:-3}"
 _nsb_count_file="$RALPH_DIR/.no_status_block_count"
 if [[ -z "$_status_block" ]]; then
-  _nsb_prev=0
-  if [[ -f "$_nsb_count_file" ]]; then
-    read -r _nsb_prev < "$_nsb_count_file" 2>/dev/null || _nsb_prev=0
-    [[ "$_nsb_prev" =~ ^[0-9]+$ ]] || _nsb_prev=0
-  fi
-  _nsb_new=$((_nsb_prev + 1))
-  printf '%s\n' "$_nsb_new" > "$_nsb_count_file" 2>/dev/null || true
-  if [[ "$_nsb_new" -ge "$_nsb_threshold" && ! -f "$RALPH_DIR/.harness_halt_reason" ]]; then
-    _resp_len=${#response_text}
-    printf 'no_status_block_%sx loop=%s response_bytes=%s\n' \
-      "$_nsb_new" "$loop_count" "$_resp_len" > "$RALPH_DIR/.harness_halt_reason" 2>/dev/null || true
+  # TAP-1899: productivity guard. A truncated-but-productive response (e.g.
+  # the 30-min adaptive-timeout case observed in AgentForge 2026-05-21) has
+  # no RALPH_STATUS footer because the stream was killed before Claude
+  # emitted it — but `.files_modified_this_loop` (maintained by the
+  # PreToolUse hook) records the real work. Treat that as progress and
+  # reset the counter, same way TAP-1683 (USYNC-2) resets its own counter
+  # on tasks_done/files_modified at line 859 below. Without this guard,
+  # productive timeouts trip no_status_block_3x after 3 long-running loops
+  # and halt the campaign mid-flight.
+  if [[ "$files_modified" -ge 1 || "$tasks_done" -ge 1 ]]; then
+    rm -f "$_nsb_count_file" 2>/dev/null || true
     if [[ -f "$_ralph_log" ]]; then
-      echo "[$_ts] [FATAL] on-stop: $_nsb_new consecutive responses with no RALPH_STATUS block — halting (loop=$loop_count, response_bytes=$_resp_len)" >> "$_ralph_log"
+      echo "[$_ts] [INFO] on-stop: no RALPH_STATUS block but loop was productive (files=$files_modified tasks=$tasks_done) — counter reset (TAP-1899)" >> "$_ralph_log"
     fi
-    echo "FATAL: $_nsb_new consecutive responses with no RALPH_STATUS block — halting" >&2
+  else
+    _nsb_prev=0
+    if [[ -f "$_nsb_count_file" ]]; then
+      read -r _nsb_prev < "$_nsb_count_file" 2>/dev/null || _nsb_prev=0
+      [[ "$_nsb_prev" =~ ^[0-9]+$ ]] || _nsb_prev=0
+    fi
+    _nsb_new=$((_nsb_prev + 1))
+    printf '%s\n' "$_nsb_new" > "$_nsb_count_file" 2>/dev/null || true
+    if [[ "$_nsb_new" -ge "$_nsb_threshold" && ! -f "$RALPH_DIR/.harness_halt_reason" ]]; then
+      _resp_len=${#response_text}
+      printf 'no_status_block_%sx loop=%s response_bytes=%s\n' \
+        "$_nsb_new" "$loop_count" "$_resp_len" > "$RALPH_DIR/.harness_halt_reason" 2>/dev/null || true
+      if [[ -f "$_ralph_log" ]]; then
+        echo "[$_ts] [FATAL] on-stop: $_nsb_new consecutive responses with no RALPH_STATUS block — halting (loop=$loop_count, response_bytes=$_resp_len)" >> "$_ralph_log"
+      fi
+      echo "FATAL: $_nsb_new consecutive responses with no RALPH_STATUS block — halting" >&2
+    fi
   fi
 else
   # Successful parse — reset counter

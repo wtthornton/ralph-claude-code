@@ -10,6 +10,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.15.5] — 2026-05-22
+
+### Fixed
+
+- **TAP-1899 — `no_status_block_3x` halt fires on productive timeouts.** Field driver: AgentForge 2026-05-21 19:35 UTC — Ralph shipped TAP-2294/2295/2296 to `main` over a 30-minute adaptive-timeout window (`Files Changed: 15`, `Recorded productive timeout latency: 1803s`), but the inner `claude` CLI was killed by `portable_timeout` before it could emit the `---RALPH_STATUS---` footer. The `on-stop.sh` hook saw an empty `_status_block`, incremented `.no_status_block_count`, and tripped `no_status_block_3x` at the start of the next loop — halting the campaign on a response the harness had **already classified as productive** one log line earlier. Root cause: the halt detector at [templates/hooks/on-stop.sh:802-824](templates/hooks/on-stop.sh#L802-L824) only checked `_status_block`; it did not consult `$files_modified` / `$tasks_done` even though both vars were in scope (set at lines [188](templates/hooks/on-stop.sh#L188), [248-255](templates/hooks/on-stop.sh#L248-L255), and used 35 lines later by the USYNC-2 counter at [line 859](templates/hooks/on-stop.sh#L859)). Fix: when `_status_block` is empty AND (`files_modified >= 1` OR `tasks_done >= 1`), the counter is reset rather than incremented — same treatment USYNC-2 already gives its own counter. Stalls with zero file/task progress still increment + trip on schedule, so the halt detector retains its original purpose (catch the tapps-brain-style hot loop where Claude asks questions forever with no work output). One new INFO log line per productive-no-block loop: `on-stop: no RALPH_STATUS block but loop was productive (files=N tasks=M) — counter reset (TAP-1899)`. 4 new BATS cases in `tests/unit/test_on_stop_halt_productivity.bats`.
+
+- **TAP-1900 — coordinator `--resume` retries forever on a dead session id.** Same AgentForge incident, separate signal: `.ralph/.coordinator-debrief.err` showed `No conversation found with session ID: f40dca1e-83af-4538-a18d-b5ad91f72e69` — the stored coordinator session_id had aged past Claude's session-store TTL. `coordinator_session_read` at [lib/coordinator_session.sh:46-58](lib/coordinator_session.sh#L46-L58) only checks file mtime against `COORDINATOR_SESSION_MAX_AGE_SECONDS` (default 3600); it cannot know Claude has already evicted the conversation. The failure path at [ralph_loop.sh:2495-2500](ralph_loop.sh#L2495-L2500) WARN'd and returned non-zero, but never **cleared** the dead id — so the next loop's debrief re-tried the same ghost, re-failed, and burned another ~1s + a WARN line per loop until a successful capture happened to overwrite the file. Did **not** cause the halt (TAP-1530's `RALPH_COORDINATOR_INVOCATION=1` guard prevents the coordinator response from counting against `.no_status_block_count`), but it's a per-loop reliability tax in long campaigns. Fix: after `_rc != 0` with `--resume` in `_continue_args`, grep the stream for the "No conversation found" sentinel and call `coordinator_session_clear` so the next invocation cold-starts. Logged at DEBUG: `coordinator: cleared dead session id after --resume failure`.
+
+### Propagation
+
+These fixes need to reach every Ralph-managed project to take effect:
+
+1. **`./install.sh`** in this repo — syncs the patched `templates/hooks/on-stop.sh` into `~/.ralph/templates/hooks/` and refreshes `~/.ralph/ralph_loop.sh`.
+2. **`ralph-upgrade-project`** in each managed repo — pulls the updated `on-stop.sh` from `~/.ralph/templates/hooks/` into the project's `.ralph/hooks/`.
+
+`ralph-doctor` already drift-checks `.ralph/hooks/*.sh` against `~/.ralph/templates/hooks/*.sh`, so any project still on the old hook will surface a WARN until step 2 runs.
+
+---
+
 ## [2.15.4] — 2026-05-21
 
 ### Added

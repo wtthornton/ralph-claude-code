@@ -159,7 +159,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.15.4"
+RALPH_VERSION="2.15.5"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -2497,6 +2497,21 @@ _coordinator_invoke_claude() {
     _coord_duration=$(( _coord_end_ts - _coord_start_ts ))
     if declare -F ralph_record_coordinator_timing >/dev/null 2>&1; then
         ralph_record_coordinator_timing "$_coord_duration" "$_rc"
+    fi
+
+    # TAP-1900: if --resume failed because Claude's session store has dropped
+    # the conversation ("No conversation found with session ID: …"), clear
+    # the stored coordinator session_id so the next invocation cold-starts
+    # instead of re-failing on the same ghost id. Observed in AgentForge
+    # 2026-05-21: every debrief after the 24-hour session TTL retried the
+    # same dead id, burning ~1s + a WARN per loop. The successful-capture
+    # path below eventually overwrites the file, but only if the cold-start
+    # succeeds — which isn't guaranteed on the same loop.
+    if [[ $_rc -ne 0 && ${#_continue_args[@]} -gt 0 && -n "$_stream_file" && -s "$_stream_file" ]] \
+       && grep -q "No conversation found with session ID" "$_stream_file" 2>/dev/null \
+       && declare -F coordinator_session_clear >/dev/null 2>&1; then
+        coordinator_session_clear
+        log_status "DEBUG" "coordinator: cleared dead session id after --resume failure"
     fi
 
     # Always try to extract session_id, even on timeout/failure — partial
