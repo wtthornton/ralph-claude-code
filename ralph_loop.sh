@@ -32,6 +32,7 @@ source "$SCRIPT_DIR/lib/exec_helpers.sh" || { echo "FATAL: Failed to source lib/
 [[ -f "$SCRIPT_DIR/lib/linear_optimizer.sh" ]] && source "$SCRIPT_DIR/lib/linear_optimizer.sh"
 [[ -f "$SCRIPT_DIR/lib/skill_retro.sh" ]] && source "$SCRIPT_DIR/lib/skill_retro.sh"
 [[ -f "$SCRIPT_DIR/lib/branch_cleanup.sh" ]] && source "$SCRIPT_DIR/lib/branch_cleanup.sh"
+[[ -f "$SCRIPT_DIR/lib/pending_merges.sh" ]] && source "$SCRIPT_DIR/lib/pending_merges.sh"
 # BRAIN-PHASE-B1: memory writes from on-stop hook. Sourced here so the main
 # loop also has access if we later want to write outside hook context.
 [[ -f "$SCRIPT_DIR/lib/brain_client.sh" ]] && source "$SCRIPT_DIR/lib/brain_client.sh"
@@ -159,7 +160,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.15.9"
+RALPH_VERSION="2.16.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -2302,6 +2303,25 @@ build_loop_context() {
         if [[ "$prev_asking_questions" == "true" ]]; then
             context+="IMPORTANT: You asked questions in the previous loop. This is a headless automation loop with no human to answer. Do NOT ask questions. Choose the most conservative/safe default and proceed autonomously. "
             log_status "INFO" "Injecting question-corrective guidance (previous loop asked questions)"
+        fi
+    fi
+
+    # T5 / 2.16.0: surface async-merge queue state. Only fires when
+    # RALPH_ASYNC_MERGE=true; otherwise the queue file doesn't exist and
+    # the helpers no-op. Two pieces of context land in the prompt:
+    #   - merged-but-Linear-pending: tickets whose PR landed on main but
+    #     whose Linear state still needs the agent to move it to Done
+    #   - failed: PRs whose CI failed or whose merge call errored
+    if declare -F pending_merges_enabled >/dev/null 2>&1 && pending_merges_enabled; then
+        local _merged_tickets
+        _merged_tickets=$(pending_merges_get_merged 2>/dev/null | paste -sd, - || echo "")
+        if [[ -n "$_merged_tickets" ]]; then
+            context+="PENDING LINEAR CLEANUP: PRs for ${_merged_tickets} are merged on main — move each ticket to Done via the linear-issue skill, then run \`echo <pr_number> | python3 -c \"import sys; from pathlib import Path; ...\"\` (or just edit \`.ralph/pending-merges.json\` to drop the entry). "
+        fi
+        local _failed_summary
+        _failed_summary=$(pending_merges_surface_failed 2>/dev/null || echo "")
+        if [[ -n "$_failed_summary" ]]; then
+            context+="${_failed_summary}. Fix the cause and re-open the PR (or delete the failed entry from .ralph/pending-merges.json). "
         fi
     fi
 
@@ -5274,6 +5294,14 @@ main() {
             dry_run_simulate "" "$loop_count"
             log_status "INFO" "[DRY-RUN] Loop #$loop_count complete. Exiting after single dry-run iteration."
             break
+        fi
+
+        # T5 / 2.16.0: poll the async PR-merge queue before the coordinator
+        # so any newly-green PRs land on main and the agent's next-loop
+        # context sees them in `git log`. Silent no-op when RALPH_ASYNC_MERGE
+        # is false. Failed entries get surfaced via build_loop_context.
+        if declare -F pending_merges_poll >/dev/null 2>&1; then
+            pending_merges_poll
         fi
 
         # TAP-915: spawn coordinator to populate .ralph/brief.json before the

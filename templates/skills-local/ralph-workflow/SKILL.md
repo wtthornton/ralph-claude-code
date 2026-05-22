@@ -94,6 +94,35 @@ Ralph reads tasks from one of two backends, set by `RALPH_TASK_SOURCE` in
     `audit-readonly` Linear label, or (b) the ticket body contains the
     marker `<!-- ralph: audit-readonly -->` in the first 500
     characters. If neither signal is present, R1 still applies.
+
+    **R1 async-merge mode — `RALPH_ASYNC_MERGE=true` (T5 / 2.16.0,
+    opt-in).** When the harness is running with async-merge enabled,
+    the per-PR flow changes: open the PR with `gh pr create`, append it
+    to `.ralph/pending-merges.json` (the harness provides a small
+    helper; see below), and **immediately stop the loop without
+    waiting for the merge**. Do NOT call `gh pr merge` yourself. The
+    harness polls pending PRs at the next loop boundary; when CI is
+    green it merges them. The Linear "Done" transition still happens
+    *from this skill* — but on the loop AFTER the merge actually
+    lands. At each loop start, the harness will surface a
+    `PENDING LINEAR CLEANUP: TAP-N1,TAP-N2,...` line in your context
+    listing tickets whose PR is on `main` but whose Linear state is
+    still `In Progress`. Move each one to Done via the `linear-issue`
+    skill, then drop the entry by deleting it from
+    `.ralph/pending-merges.json`. The harness will also surface
+    `PENDING-MERGE FAILURES: ...` for any PR whose CI failed — fix the
+    cause, re-open the PR, and the queue picks it up.
+
+    To append to the queue, source `lib/pending_merges.sh` from a Bash
+    snippet and call `pending_merges_add <pr_number> <ticket_id>
+    <branch_name>` — the helper is idempotent and bounded by
+    `RALPH_ASYNC_MERGE_MAX_PENDING` (default 5). If the queue is at
+    cap (`pending_merges_add` returns 2), the helper signals "force
+    drain" — at that point fall back to the synchronous flow for the
+    current ticket so the queue can recover.
+
+    When `RALPH_ASYNC_MERGE` is false (the default), use the standard
+    synchronous flow above.
   - **R2 — In Review is for hard blockers only.** Use it only when work
     cannot proceed AND the blocker matches one of: missing credentials
     Claude cannot generate, explicit budget/spend cap reached,
