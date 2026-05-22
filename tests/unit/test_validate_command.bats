@@ -311,6 +311,74 @@ EOF
     fi
 }
 
+# ---- TAP-2344: global ~/.ralph/ is no longer blocked (Bash redirect side) ---
+# F3 of the AgentForge 2026-05-22 campaign: the unanchored `*/.ralph/*` glob
+# blocked global hotfix workflows. _is_protected_path now anchors .ralph/ to
+# $RALPH_DIR. .claude/ stays globally blocked by design (its global state
+# affects every Claude Code session).
+
+@test "TAP-2344: redirect to project .ralph/foo BLOCKS" {
+    run_hook "echo x > $CLAUDE_PROJECT_DIR/.ralph/foo.md"
+    [[ "$status" -eq 2 ]] \
+        || fail "project .ralph/foo redirect must be blocked, got $status: $output"
+}
+
+@test "TAP-2344: redirect to relative .ralph/foo BLOCKS" {
+    run_hook "echo x > .ralph/foo.md"
+    [[ "$status" -eq 2 ]] \
+        || fail "relative .ralph/foo redirect must be blocked, got $status: $output"
+}
+
+@test "TAP-2344: redirect to ~/.ralph/lib/foo.sh is ALLOWED (outside project)" {
+    # Use a tmpdir simulating ~/ that is OUTSIDE CLAUDE_PROJECT_DIR.
+    mkdir -p "$TEST_DIR/global_home/.ralph/lib"
+    run_hook "echo x > $TEST_DIR/global_home/.ralph/lib/foo.sh"
+    [[ "$status" -eq 0 ]] \
+        || fail "global ~/.ralph/lib redirect must be allowed, got $status: $output"
+}
+
+@test "TAP-2344: cp to project .ralph/foo BLOCKS" {
+    run_hook "cp /tmp/x $CLAUDE_PROJECT_DIR/.ralph/foo"
+    [[ "$status" -eq 2 ]] \
+        || fail "cp into project .ralph/ must be blocked, got $status: $output"
+}
+
+@test "TAP-2344: cp to ~/.ralph/foo from inside a project is ALLOWED" {
+    mkdir -p "$TEST_DIR/global_home/.ralph"
+    run_hook "cp /tmp/x $TEST_DIR/global_home/.ralph/foo"
+    [[ "$status" -eq 0 ]] \
+        || fail "cp into global ~/.ralph must be allowed, got $status: $output"
+}
+
+@test "TAP-2344: mv into ~/.ralph/lib/ is ALLOWED from inside a project" {
+    mkdir -p "$TEST_DIR/global_home/.ralph/lib"
+    run_hook "mv /tmp/foo $TEST_DIR/global_home/.ralph/lib/foo"
+    [[ "$status" -eq 0 ]] \
+        || fail "mv into global ~/.ralph/lib must be allowed, got $status: $output"
+}
+
+@test "TAP-2344: redirect to .claude/anything (relative) is STILL blocked" {
+    # .claude/ stays blocked at the relative-path layer per the F3 ticket's
+    # "Why" note — mutating ~/.claude/settings.json from inside one project
+    # would affect every Claude Code session. Absolute-path redirects to
+    # .claude/ are a pre-existing gap NOT in F3 scope.
+    run_hook "echo x > .claude/settings.json"
+    [[ "$status" -eq 2 ]] \
+        || fail ".claude/* relative redirect must still be blocked, got $status: $output"
+}
+
+@test "TAP-2344: project .ralphrc redirect BLOCKS" {
+    run_hook "echo x > $CLAUDE_PROJECT_DIR/.ralphrc"
+    [[ "$status" -eq 2 ]] \
+        || fail "project .ralphrc redirect must be blocked, got $status: $output"
+}
+
+@test "TAP-2344: relative .ralphrc redirect BLOCKS" {
+    run_hook "echo x > .ralphrc"
+    [[ "$status" -eq 2 ]] \
+        || fail "relative .ralphrc redirect must be blocked, got $status: $output"
+}
+
 # ---- byte parity guard (TAP-1876 amendment to the TAP-624 parity rule) -------
 
 @test "TAP-1876: .ralph/hooks/validate-command.sh is byte-identical to template" {

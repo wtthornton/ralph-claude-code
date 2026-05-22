@@ -595,6 +595,20 @@ If a cleanup/refactor task seems to require modifying any of these, stop
 and re-read the task — almost always the task means code under `src/`, not
 the harness itself.
 
+## Python introspection — use snippet files, never `-c`
+
+The Bash PreToolUse hook (`validate-command.sh`) blocks `python3 -c '…'`
+(and the equivalent `-c` / `-e` flag in `python`, `node`, `ruby`, `perl`,
+`bash`, `sh`, `zsh`) as a security gate against arbitrary in-loop code
+execution. For ad-hoc introspection — parsing JSON tool output,
+sanity-checking an import, measuring a string — write the snippet to
+`/tmp/snippet.py` and run `python3 /tmp/snippet.py`. The hook allow-lists
+`python3 <path>` because the path is auditable. Re-trying `python3 -c`
+after a denial just burns another tool call: the block message itself
+names the workaround, and the hook tokenizes argv so wrapping in `env`,
+`bash -lc`, `uv run`, etc. does not bypass it. Full recipe (including
+sibling interpreters) lives in the `python-introspection` skill.
+
 ## What not to do
 
 - Don't run tests after every task (see epic-boundary rules).
