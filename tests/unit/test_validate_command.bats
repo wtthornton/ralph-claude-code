@@ -158,6 +158,91 @@ run_hook() {
         || fail "uv run with file-based python must be allowed, got $status: $output"
 }
 
+# ---- R0-harness: refuse direct push to main / master ------------------------
+# AgentForge 2026-05-21 had 13/20 commits push direct to main. The skill's R0
+# rule (prose) was added in the prior PR; this is the harness-side enforcement
+# that catches the case Claude's prose discipline misses.
+
+@test "R0-harness: git push origin main BLOCKS" {
+    run_hook 'git push origin main'
+    [[ "$status" -eq 2 ]] \
+        || fail "git push origin main must be blocked, got $status: $output"
+    [[ "$output" == *"direct push to main forbidden"* ]] \
+        || fail "expected R0 BLOCKED line, got: $output"
+    [[ "$output" == *"feature branch"* ]] \
+        || fail "remediation must mention feature branch: $output"
+}
+
+@test "R0-harness: git push origin master BLOCKS" {
+    run_hook 'git push origin master'
+    [[ "$status" -eq 2 ]] \
+        || fail "git push origin master must be blocked, got $status: $output"
+}
+
+@test "R0-harness: git push origin HEAD:main BLOCKS" {
+    run_hook 'git push origin HEAD:main'
+    [[ "$status" -eq 2 ]] \
+        || fail "HEAD:main refspec must be blocked, got $status: $output"
+}
+
+@test "R0-harness: git push origin <branch>:main BLOCKS" {
+    run_hook 'git push origin fix/foo:main'
+    [[ "$status" -eq 2 ]] \
+        || fail "branch:main refspec must be blocked, got $status: $output"
+}
+
+@test "R0-harness: git push --tags origin main BLOCKS" {
+    run_hook 'git push --tags origin main'
+    [[ "$status" -eq 2 ]] \
+        || fail "push with flags before main must still be blocked, got $status: $output"
+}
+
+@test "R0-harness: git push -u origin <feature-branch> is allowed" {
+    run_hook 'git push -u origin fix/feature-x'
+    [[ "$status" -eq 0 ]] \
+        || fail "feature-branch push must be allowed, got $status: $output"
+}
+
+@test "R0-harness: git push origin --delete <branch> is allowed" {
+    run_hook 'git push origin --delete fix/old-branch'
+    [[ "$status" -eq 0 ]] \
+        || fail "branch delete must be allowed, got $status: $output"
+}
+
+@test "R0-harness: git push origin <branch>:<branch> (same name) is allowed" {
+    run_hook 'git push origin fix/foo:fix/foo'
+    [[ "$status" -eq 0 ]] \
+        || fail "same-name refspec must be allowed, got $status: $output"
+}
+
+@test "R0-harness: git push with no args is allowed" {
+    run_hook 'git push'
+    [[ "$status" -eq 0 ]] \
+        || fail "bare git push must be allowed, got $status: $output"
+}
+
+@test "R0-harness: git fetch / pull main is NOT blocked (read-only)" {
+    run_hook 'git fetch origin main'
+    [[ "$status" -eq 0 ]] \
+        || fail "git fetch must be allowed, got $status: $output"
+    run_hook 'git pull origin main'
+    [[ "$status" -eq 0 ]] \
+        || fail "git pull must be allowed, got $status: $output"
+}
+
+@test "R0-harness: RALPH_ALLOW_PUSH_MAIN=1 bypasses the block" {
+    # Re-invoke the hook with the env var set (run_hook doesn't propagate
+    # arbitrary env vars, so we use bash -c directly).
+    local payload
+    payload=$(jq -cn '{tool_input:{command:"git push origin main"}}')
+    run bash -c '
+        echo "$1" | RALPH_ALLOW_PUSH_MAIN=1 CLAUDE_PROJECT_DIR="$2" \
+            bash "$3/templates/hooks/validate-command.sh"
+    ' bash "$payload" "$CLAUDE_PROJECT_DIR" "$PROJECT_ROOT"
+    [[ "$status" -eq 0 ]] \
+        || fail "RALPH_ALLOW_PUSH_MAIN=1 should bypass, got $status: $output"
+}
+
 # ---- python-introspection skill ships with the templates ---------------------
 
 @test "TAP-1876: python-introspection SKILL.md exists in templates/skills/global/" {
