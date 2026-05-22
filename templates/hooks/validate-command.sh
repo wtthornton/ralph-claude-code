@@ -10,7 +10,12 @@
 
 set -euo pipefail
 
-RALPH_DIR="${CLAUDE_PROJECT_DIR:-.}/.ralph"
+# TAP-2344: anchor the project's .ralph/ to an absolute prefix so the
+# `*/.ralph/*` glob below only matches the project-scoped install, not
+# the global `~/.ralph/`. Bash redirect patterns at the end of this file
+# also branch on this prefix.
+_proj_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+RALPH_DIR="$_proj_dir/.ralph"
 [[ -d "$RALPH_DIR" ]] || exit 0
 
 INPUT=$(cat)
@@ -201,11 +206,20 @@ _is_protected_path() {
     # layer we can't prove the write is a narrow checkbox update the way the
     # Edit-tool hook (protect-ralph-files.sh) can. If Ralph wants to tick off
     # fix_plan.md it must go through the Edit tool.
+    #
+    # TAP-2344: .ralph/ and .ralphrc are anchored to the project root so the
+    # global `~/.ralph/` install is allowed to be edited from inside a Ralph
+    # project (the hotfix workflow). .claude/ remains globally blocked
+    # because mutating `~/.claude/settings.json` from inside a project
+    # would affect every Claude Code session — that gate stays closed
+    # until a separate ticket lands proper carve-outs.
     local p="$1"
     p="${p%\"}"; p="${p#\"}"; p="${p%\'}"; p="${p#\'}"
     case "$p" in
-        .ralph|.ralph/*|./.ralph/*|*/.ralph/*) return 0 ;;
-        .ralphrc|./.ralphrc|*/.ralphrc) return 0 ;;
+        "$RALPH_DIR"|"$RALPH_DIR"/*) return 0 ;;
+        .ralph|.ralph/*|./.ralph/*) return 0 ;;
+        "$_proj_dir"/.ralphrc) return 0 ;;
+        .ralphrc|./.ralphrc) return 0 ;;
         .claude|.claude/*|./.claude/*|*/.claude/*) return 0 ;;
     esac
     return 1
@@ -228,7 +242,12 @@ esac
 # ---- 6. Shell redirects into protected paths ---------------------------------
 # Even if the leading command is benign (echo, cat, printf), a redirect can
 # clobber a protected file.
+#
+# TAP-2344: anchor .ralph/ redirects to the project prefix so the global
+# `~/.ralph/` install isn't caught. .claude/ remains globally blocked
+# (see _is_protected_path above for the rationale).
 case "$NORM" in
+    *" > $RALPH_DIR/"*|*" >> $RALPH_DIR/"*) block "redirect into project .ralph/" ;;
     *" > .ralph/"*|*" >> .ralph/"*|*" > ./.ralph/"*|*" >> ./.ralph/"*)
         block "redirect into .ralph/" ;;
 esac
@@ -237,6 +256,7 @@ case "$NORM" in
         block "redirect into .claude/" ;;
 esac
 case "$NORM" in
+    *" > $_proj_dir/.ralphrc"*|*" >> $_proj_dir/.ralphrc"*) block "redirect into project .ralphrc" ;;
     *" > .ralphrc"*|*" >> .ralphrc"*) block "redirect into .ralphrc" ;;
 esac
 

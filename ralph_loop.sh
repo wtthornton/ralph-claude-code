@@ -2476,25 +2476,35 @@ _coordinator_invoke_claude() {
     # TAP-1682: record coordinator wall-clock so ralph_compute_coordinator_timeout
     # can adapt P95×2. Recorded regardless of success / failure / timeout so
     # the distribution reflects real ops (slow MCP cold starts and all).
+    #
+    # TAP-2343: inner helper so the dead-session-clear path can retry cold-
+    # start in the same call. Reads _claude_cmd / _coord_timeout / _continue_args
+    # / _fmt_args / input / _stdout_target via dynamic scoping; the caller
+    # mutates _continue_args between the first call and the retry to drop
+    # --resume <dead_id>.
+    _do_run_coord_claude() {
+        if [[ "$_coord_timeout" == "0" ]]; then
+            RALPH_COORDINATOR_INVOCATION=1 "$claude_cmd" \
+                --agent ralph-coordinator \
+                --permission-mode bypassPermissions \
+                "${_continue_args[@]}" \
+                "${_fmt_args[@]}" \
+                -p "$input" \
+                >"$_stdout_target" 2>&1
+        else
+            RALPH_COORDINATOR_INVOCATION=1 timeout "$_coord_timeout" "$claude_cmd" \
+                --agent ralph-coordinator \
+                --permission-mode bypassPermissions \
+                "${_continue_args[@]}" \
+                "${_fmt_args[@]}" \
+                -p "$input" \
+                >"$_stdout_target" 2>&1
+        fi
+    }
+
     local _coord_start_ts _coord_end_ts _coord_duration
     _coord_start_ts=$(date -u +%s)
-    if [[ "$_coord_timeout" == "0" ]]; then
-        RALPH_COORDINATOR_INVOCATION=1 "$claude_cmd" \
-            --agent ralph-coordinator \
-            --permission-mode bypassPermissions \
-            "${_continue_args[@]}" \
-            "${_fmt_args[@]}" \
-            -p "$input" \
-            >"$_stdout_target" 2>&1
-    else
-        RALPH_COORDINATOR_INVOCATION=1 timeout "$_coord_timeout" "$claude_cmd" \
-            --agent ralph-coordinator \
-            --permission-mode bypassPermissions \
-            "${_continue_args[@]}" \
-            "${_fmt_args[@]}" \
-            -p "$input" \
-            >"$_stdout_target" 2>&1
-    fi
+    _do_run_coord_claude
     local _rc=$?
     _coord_end_ts=$(date -u +%s)
     _coord_duration=$(( _coord_end_ts - _coord_start_ts ))
@@ -2502,30 +2512,54 @@ _coordinator_invoke_claude() {
         ralph_record_coordinator_timing "$_coord_duration" "$_rc"
     fi
 
-    # TAP-1900: if --resume failed because Claude's session store has dropped
-    # the conversation ("No conversation found with session ID: …"), clear
-    # the stored coordinator session_id so the next invocation cold-starts
-    # instead of re-failing on the same ghost id. Observed in AgentForge
-    # 2026-05-21: every debrief after the 24-hour session TTL retried the
-    # same dead id, burning ~1s + a WARN per loop. The successful-capture
-    # path below eventually overwrites the file, but only if the cold-start
-    # succeeds — which isn't guaranteed on the same loop.
+    # TAP-1900 / TAP-2343: if --resume failed because Claude's session store
+    # has dropped the conversation ("No conversation found with session ID: …"),
+    # clear the stored coordinator session_id AND retry cold-start in the SAME
+    # call. The original TAP-1900 fix only cleared the id and returned the
+    # failure; the next loop's call had to cold-start, which it would have —
+    # except the error response itself carries a fresh session_id that the
+    # capture branch below would persist, propagating the same --resume
+    # failure forward. Cold-start retrying here also fixes the current
+    # debrief so brain_learn_* actually runs.
     if [[ $_rc -ne 0 && ${#_continue_args[@]} -gt 0 && -n "$_stream_file" && -s "$_stream_file" ]] \
        && grep -q "No conversation found with session ID" "$_stream_file" 2>/dev/null \
        && declare -F coordinator_session_clear >/dev/null 2>&1; then
         coordinator_session_clear
-        log_status "DEBUG" "coordinator: cleared dead session id after --resume failure"
+        log_status "DEBUG" "coordinator: cleared dead session id after --resume failure — retrying cold-start"
+        _continue_args=()
+        : > "$_stream_file" 2>/dev/null || true
+        local _retry_start_ts _retry_end_ts _retry_duration
+        _retry_start_ts=$(date -u +%s)
+        _do_run_coord_claude
+        _rc=$?
+        _retry_end_ts=$(date -u +%s)
+        _retry_duration=$(( _retry_end_ts - _retry_start_ts ))
+        _coord_duration=$(( _coord_duration + _retry_duration ))
+        if declare -F ralph_record_coordinator_timing >/dev/null 2>&1; then
+            ralph_record_coordinator_timing "$_retry_duration" "$_rc"
+        fi
+        log_status "DEBUG" "coordinator: cold-start retry rc=$_rc duration=${_retry_duration}s"
     fi
 
     # Always try to extract session_id, even on timeout/failure — partial
     # output usually still carries the system/init line with the session_id.
+    # TAP-2343 exception: when the stream is an `error_during_execution`
+    # response, the embedded session_id is from the failed call and is NOT a
+    # real resumable conversation. Capturing it would propagate the same
+    # --resume failure to the next loop (the symptom that prompted the
+    # AgentForge 2026-05-22 ticket).
     if [[ -n "$_stream_file" && -s "$_stream_file" ]] \
        && declare -F coordinator_session_extract_from_stream >/dev/null 2>&1; then
-        local _new_sid
-        _new_sid=$(coordinator_session_extract_from_stream "$_stream_file" 2>/dev/null)
-        if [[ -n "$_new_sid" ]]; then
-            coordinator_session_write "$_new_sid" 2>/dev/null && \
-                log_status "DEBUG" "coordinator: session captured (${_new_sid:0:8}…)"
+        if declare -F coordinator_session_stream_is_error_response >/dev/null 2>&1 \
+           && coordinator_session_stream_is_error_response "$_stream_file"; then
+            log_status "DEBUG" "coordinator: skipping session capture (error_during_execution response)"
+        else
+            local _new_sid
+            _new_sid=$(coordinator_session_extract_from_stream "$_stream_file" 2>/dev/null)
+            if [[ -n "$_new_sid" ]]; then
+                coordinator_session_write "$_new_sid" 2>/dev/null && \
+                    log_status "DEBUG" "coordinator: session captured (${_new_sid:0:8}…)"
+            fi
         fi
     fi
 

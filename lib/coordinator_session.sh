@@ -114,3 +114,25 @@ coordinator_session_extract_from_stream() {
         | head -1 \
         | sed -E 's/.*"([^"]+)"$/\1/'
 }
+
+# Return 0 (true) when the JSONL stream contains a result-line marking
+# the response as an error_during_execution — that response carries its
+# own `session_id`, but that id is the failed call's, not a real
+# resumable conversation. Capturing it propagates the same --resume
+# failure to the next loop (AgentForge 2026-05-22, F2 / TAP-2343).
+# Returns 1 when the stream is absent, empty, or carries a non-error
+# result.
+coordinator_session_stream_is_error_response() {
+    local stream_file="$1"
+    [[ -s "$stream_file" ]] || return 1
+    if grep -q '"subtype"[[:space:]]*:[[:space:]]*"error_during_execution"' "$stream_file" 2>/dev/null; then
+        return 0
+    fi
+    # Defensive secondary signal — a `result` line with `is_error:true`
+    # is the same thing in different shape. Earlier Claude CLI versions
+    # used this form before subtype was added.
+    if grep -q '"type"[[:space:]]*:[[:space:]]*"result"[^}]*"is_error"[[:space:]]*:[[:space:]]*true' "$stream_file" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
