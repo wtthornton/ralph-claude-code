@@ -84,14 +84,23 @@ project code. Deleting them halts the loop.
    fix_plan.md is the single source of truth for tasks in file mode.
 <!--TASK_SOURCE:file:end-->
 <!--TASK_SOURCE:linear:start-->
-2. List open Linear issues in your project via
-   `mcp__plugin_linear_linear__list_issues` with `limit: 100` and pick the
-   highest-priority unblocked one. Do NOT read `.ralph/fix_plan.md` —
-   Linear is the single source of truth in this mode. The full workflow
-   lives in the **ralph-workflow** skill (linear-mode contract); the
-   **linear-read** skill covers the cache-first dance, the
-   `MAX_MCP_OUTPUT_TOKENS` env-var fix, and the dumped-result handling
-   for any page that ends up over the (default 25k-token) MCP ceiling.
+2. Pick a Linear ticket via the **linear-read** skill — do NOT call
+   `mcp__plugin_linear_linear__list_issues` directly. The skill runs the
+   mandatory cache-first dance (`tapps_linear_snapshot_get` → on miss
+   `list_issues` → `snapshot_put`), reuses the cached snapshot for the
+   rest of the loop, and handles the `MAX_MCP_OUTPUT_TOKENS` ceiling for
+   pages dumped to a file. Single-issue lookups go straight to
+   `mcp__plugin_linear_linear__get_issue` (no skill, no cache). Do NOT
+   read `.ralph/fix_plan.md` — Linear is the single source of truth in
+   this mode. The full per-loop workflow lives in the **ralph-workflow**
+   skill (linear-mode contract).
+
+   **Operator note:** at high/medium engagement the harness only **warns**
+   on a missed cache (logged to `.tapps-mcp/.cache-gate-violations.jsonl`);
+   set `linear_enforce_cache_gate: "block"` in `.tapps-mcp.yaml` to hard-
+   fail any `list_issues` call lacking a matching `snapshot_get` sentinel
+   within 300 s. Recommended once a campaign has soaked one full session
+   without legitimate violations.
 <!--TASK_SOURCE:linear:end-->
 3. **Verify the task is still needed** before writing code: re-read the
    acceptance criteria and search the codebase for prior work. If the

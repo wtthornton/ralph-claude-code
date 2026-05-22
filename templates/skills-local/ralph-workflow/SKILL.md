@@ -39,12 +39,16 @@ Ralph reads tasks from one of two backends, set by `RALPH_TASK_SOURCE` in
 - **`linear`** — tasks are open issues in the Linear project named by
   `RALPH_LINEAR_PROJECT`. The state machine is `Backlog/Todo →
   In Progress → Done`. Claude moves the ticket between these states
-  in real time as it works. Use `mcp__plugin_linear_linear__list_issues`
-  to discover, `mcp__plugin_linear_linear__save_issue` with
-  `state: "In Progress"` on pickup, and `state: "Done"` on
-  completion (only after R1 below is satisfied). The full state-machine
-  spec lives in `docs/LINEAR-WORKFLOW.md`; the must-know rules are
-  inline below.
+  in real time as it works. Use the **`linear-read`** skill to discover
+  issues — it runs the mandatory `tapps_linear_snapshot_get` cache-first
+  dance before any `mcp__plugin_linear_linear__list_issues` call, and
+  reuses the cached snapshot for the rest of the loop. Single-issue
+  reads (you have the TAP-ID) go straight to
+  `mcp__plugin_linear_linear__get_issue` — no skill, no cache. Use
+  `mcp__plugin_linear_linear__save_issue` with `state: "In Progress"`
+  on pickup, and `state: "Done"` on completion (only after R1 below is
+  satisfied). The full state-machine spec lives in
+  `docs/LINEAR-WORKFLOW.md`; the must-know rules are inline below.
 
   **Hard rules (linear mode) — these are not optional**:
 
