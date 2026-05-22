@@ -10,6 +10,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.15.6] — 2026-05-22
+
+### Added
+
+- **TAP-2340 — Harness-side R0 enforcement: block `git push origin main`.** `templates/hooks/validate-command.sh` now rejects any `git push` whose refspec targets `main` or `master`, regardless of shape (bare `main`, `HEAD:main`, `<branch>:main`, with leading `--tags` or other flags). Pairs with the prose-side R0 rule shipped in TAP-2339 below — prose covers the agent's contract, the hook covers the case Claude races past the contract. Allow-list preserved: feature-branch pushes, `git push origin --delete <branch>`, same-name `<branch>:<branch>` refspecs, bare `git push` (defaults to upstream), and read-only `git fetch` / `git pull` all pass through. Escape hatch: `RALPH_ALLOW_PUSH_MAIN=1` env var bypasses for legitimate cases (reverting a botched merge, operator-authorized hotfix). 11 new BATS cases under the `R0-harness:` prefix in `tests/unit/test_validate_command.bats`. Merged in PR [#29](https://github.com/wtthornton/ralph-claude-code/pull/29) at commit `8c0b12b`.
+
+### Fixed
+
+- **TAP-2339 — R0 branch-first rule + python `-c` hardening + emit-always RALPH_STATUS directive.** Three coordinated workflow fixes prompted by the AgentForge AOS-pivot campaign on 2026-05-21:
+
+  1. **R0 in `templates/skills-local/ralph-workflow/SKILL.md`** mandates `git checkout -b <branch>` before the first commit on a ticket, sanity-checked via `git rev-parse --abbrev-ref HEAD`. R1 (Done requires `main`) was strengthened to additionally require the ` (#NNN)` PR-merge suffix on the main commit — without it, R1 was satisfied equally well by direct-to-main pushes, which is exactly how the AgentForge campaign accumulated 13 of 20 recent commits without going through review. R0 is now the *mechanism* by which R1 is satisfied. Execution-contract step 3.5 enforces branch creation up-front; new step 8 verifies R0 was honored at loop end by running `git log -1 --format='%H %s' main` and flagging missing `(#NNN)` suffixes in `RECOMMENDATION`.
+
+  2. **`validate-command.sh` interpreter `-c`/`-e` block (TAP-1876) hardened against three bypass shapes** observed in production: absolute paths (`/usr/bin/python3 -c '…'`), versioned binaries (`python3.12 -c '…'`, `pypy3.10 -c '…'`), and wrapper commands (`uv run python -c '…'`, `poetry run python -c '…'`, `pipx run python -c '…'`). Fix: normalize `CMD0` to its basename via `${CMD0##*/}`, strip leading `uv|pipx|poetry run` wrappers when followed by an interpreter, and match interpreter family via a new `_interp_family` helper that handles `python3.*`, `python2.*`, `pypy3.*`, `perl5.*`, `node[0-9]*`, `ruby[0-9]*`. Snippet-path remediation (the carrot that points at `/tmp/snippet.py`) unchanged.
+
+  3. **Emit-always directive in the ralph-workflow skill's execution contract** (step 9). The contract now explicitly enumerates the four loop shapes — productive / no-op / early-exit / error — and the correct status block for each, with the reminder that *three consecutive missing blocks trip the `no_status_block_3x` halt detector and stop the campaign*. The TAP-1899 productivity guard (shipped in 2.15.5) handles truncated-but-productive responses; this directive closes the prose-discipline side for the truly-no-op-without-a-block case that triggered the AgentForge halt at `loop=6 response_bytes=385`. References the actual harness-parsed schema (`STATUS`, `TASKS_COMPLETED_THIS_LOOP`, `FILES_MODIFIED`, `TESTS_STATUS`, `WORK_TYPE`, `EXIT_SIGNAL`, `RECOMMENDATION`) — not a redesigned one.
+
+  Merged in PR [#27](https://github.com/wtthornton/ralph-claude-code/pull/27) at commit `a4b5eb0`. 6 new BATS cases under the `TAP-2336:` prefix.
+
+### Follow-up
+
+- **TAP-2341 — Track R0 adoption.** After this release ships and `ralph-upgrade-project --yes` propagates the new template + hook to AgentForge, the next autonomous campaign should produce **zero direct-to-main commits**. Verify via `git -C /home/wtthornton/code/AgentForge log main --oneline -30 | awk '/\(#[0-9]+\)$/ {pr++} !/\(#[0-9]+\)$/ {direct++} END {print "PR:", pr, "Direct:", direct}'`. If any direct pushes appear, characterize the specific shape that bypassed both layers and file a follow-up.
+
+### Propagation
+
+These fixes need to reach every Ralph-managed project to take effect:
+
+1. **`./install.sh upgrade`** in this repo — syncs the patched `templates/hooks/validate-command.sh` + `templates/skills-local/ralph-workflow/SKILL.md` into `~/.ralph/templates/` and refreshes `~/.ralph/ralph_loop.sh`.
+2. **`ralph-upgrade-project`** in each managed repo — pulls the updated `validate-command.sh` from `~/.ralph/templates/hooks/` into the project's `.ralph/hooks/`, and refreshes the local copy of the ralph-workflow skill.
+
+The byte-identity unit test (`test_validate_command.bats:231`) verifies `.ralph/hooks/validate-command.sh` matches the template at every commit, so the repo's own runtime copy cannot drift.
+
+---
+
 ## [2.15.5] — 2026-05-22
 
 ### Fixed
