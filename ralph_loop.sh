@@ -2216,12 +2216,28 @@ build_loop_context() {
             context+="Next issue: ${next_task}. "
         fi
         # Per-task model routing input (lib/complexity.sh).
-        # Prefer in-progress > next ticket; in OAuth-via-MCP mode (no
-        # LINEAR_API_KEY), both are empty by design — `linear_get_*` early-
-        # returns 1 without an API key. Fall back to the previous loop's
-        # status.json (linear_issue + recommendation) so the classifier sees
-        # task-shaped text instead of routing no_task_fallback every iteration.
-        RALPH_CURRENT_TASK_TEXT="${in_progress_task:-$next_task}"
+        # Source priority:
+        #   1. coordinator brief.json (T1: task_id + task_summary + affected_modules)
+        #      — most accurate signal in OAuth-via-MCP mode where Linear keys are absent
+        #   2. in_progress_task / next_task (legacy; populated only when LINEAR_API_KEY is set)
+        #   3. status.json carryover (.linear_issue + .recommendation)
+        # Without (1), OAuth-via-MCP loops always routed `no_task_fallback`
+        # because (2) is empty by design — every routing decision in the
+        # AgentForge 2026-05-22 campaign was task_type=none.
+        local _brief_path="${RALPH_DIR}/brief.json"
+        local _brief_task_text=""
+        if [[ -s "$_brief_path" ]] && command -v jq &>/dev/null; then
+            _brief_task_text=$(jq -r '
+                [(.task_id // ""), (.task_summary // ""), ((.affected_modules // []) | join(" "))]
+                | map(select(. != ""))
+                | join(": ")
+                | .[0:500]
+            ' "$_brief_path" 2>/dev/null) || _brief_task_text=""
+            if [[ -n "$_brief_task_text" ]]; then
+                _brief_task_text=$(printf '%s' "$_brief_task_text" | ralph_sanitize_prompt_text 500)
+            fi
+        fi
+        RALPH_CURRENT_TASK_TEXT="${_brief_task_text:-${in_progress_task:-$next_task}}"
         if [[ -z "$RALPH_CURRENT_TASK_TEXT" && -f "$RALPH_DIR/status.json" ]]; then
             local _prev_task
             _prev_task=$(jq -r '
