@@ -152,6 +152,11 @@ if [[ -n "$_status_block" ]]; then
   linear_open_count=$(echo "$_status_block" | grep -E "^[[:space:]]*LINEAR_OPEN_COUNT:" | tail -1 | sed -E 's/^[[:space:]]*LINEAR_OPEN_COUNT:[[:space:]]*//' | tr -d '[:space:]' || echo "")
   linear_done_count=$(echo "$_status_block" | grep -E "^[[:space:]]*LINEAR_DONE_COUNT:" | tail -1 | sed -E 's/^[[:space:]]*LINEAR_DONE_COUNT:[[:space:]]*//' | tr -d '[:space:]' || echo "")
   tests_status=$(echo "$_status_block" | grep -E "^[[:space:]]*TESTS_STATUS:" | tail -1 | sed -E 's/^[[:space:]]*TESTS_STATUS:[[:space:]]*//' | tr -d '[:space:]' || echo "")
+  # T4 / 2.15.9: optional NEXT_INTENDED_ISSUE field for brief-lookahead.
+  # Claude emits this when it knows which ticket it will pick on the next
+  # loop. Used by ralph_spawn_coordinator to consume a pre-warmed
+  # brief-next.json instead of cold-spawning. Optional — graceful absence.
+  next_intended_issue=$(echo "$_status_block" | grep -E "^[[:space:]]*NEXT_INTENDED_ISSUE:" | tail -1 | sed -E 's/^[[:space:]]*NEXT_INTENDED_ISSUE:[[:space:]]*//' | tr -d '[:space:]' || echo "")
 else
   # No structured status block found — extract from full text
   exit_signal="false"
@@ -168,6 +173,7 @@ else
   linear_open_count=""
   linear_done_count=""
   tests_status=""
+  next_intended_issue=""
 fi
 
 # LINEAR-DASH: sanitize Linear fields; empty strings become JSON null
@@ -181,6 +187,19 @@ fi
 
 # Normalize TESTS_STATUS to upper-case for comparison
 tests_status="${tests_status^^}"
+
+# T4 / 2.15.9: persist NEXT_INTENDED_ISSUE for the harness lookahead.
+# Accept TAP-NNNN-style identifiers only; "none" / empty / non-matching → remove.
+[[ "$next_intended_issue" =~ ^[Nn]one$ ]] && next_intended_issue=""
+if [[ "$next_intended_issue" =~ ^[A-Z][A-Z0-9]*-[0-9]+$ ]]; then
+    _nii_file="$RALPH_DIR/.next_intended_issue"
+    _nii_tmp="${_nii_file}.tmp.$$.${RANDOM}"
+    printf '%s\n' "$next_intended_issue" > "$_nii_tmp" 2>/dev/null \
+        && mv -f "$_nii_tmp" "$_nii_file" 2>/dev/null \
+        || rm -f "$_nii_tmp" 2>/dev/null
+else
+    rm -f "$RALPH_DIR/.next_intended_issue" 2>/dev/null
+fi
 
 # Defaults for empty values
 exit_signal="${exit_signal:-false}"
