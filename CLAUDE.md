@@ -249,6 +249,47 @@ Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 
 Environment variables override `.ralphrc` settings.
 
+### `.ralphrc.local` — operator-only override surface
+
+`.ralphrc.local` is an optional sibling of `.ralphrc` for **operator-set
+per-repo overrides that the agent must not be able to self-unlock**.
+
+- **Where it's sourced:** `load_ralphrc()` in `ralph_loop.sh` sources it
+  immediately after `.ralphrc`, wrapped in `set -a` / `set +a` so every
+  variable auto-exports to the Claude CLI invocation and downstream hook
+  subprocesses. **Caveat:** `load_ralphrc()` returns early when `.ralphrc`
+  is absent — `.ralphrc.local` is only sourced when a base `.ralphrc`
+  also exists. Operators who want overrides without a base `.ralphrc`
+  must `touch .ralphrc` first.
+- **Precedence:** CLI flag > env var > `.ralphrc.local` > `.ralphrc` > script default.
+- **Edit protection:** `protect-ralph-files.sh` blocks the agent from
+  editing `.ralphrc.local` with the same anchoring rules as `.ralphrc`
+  (project root + bare path; sibling-repo files are not caught).
+- **Gitignored:** the `.ralphrc.local` entry in `templates/.gitignore` and
+  the repo's own `.gitignore` keeps the override file out of commits.
+
+**Primary motivator: R0 bypass for direct-to-main workflows.** The
+`validate-command.sh` hook refuses `git push origin main` unless
+`RALPH_ALLOW_PUSH_MAIN=1` is in the agent's environment. Setting that var
+inside `.ralphrc` would not work — `.ralphrc` is also agent-blocked, AND
+without `set -a` the value would not export to the hook subprocess. The
+documented `RALPH_ALLOW_PUSH_MAIN=1 ralph` escape requires re-exporting on
+every harness restart. `.ralphrc.local` exists so the operator writes
+`RALPH_ALLOW_PUSH_MAIN=1` **once** and the agent inside the harness can
+never erase or rewrite it.
+
+Example for a direct-to-main repo (run as the operator, outside Claude
+Code, since the protect hook will block this from inside the harness):
+
+```bash
+cat > .ralphrc.local <<'EOF'
+# Direct-to-master workflow — bypass R0 push-to-main block in
+# templates/hooks/validate-command.sh. Agent cannot modify this file
+# (protect-ralph-files.sh blocks it), so the bypass cannot be self-unlocked.
+RALPH_ALLOW_PUSH_MAIN=1
+EOF
+```
+
 ## Plan Mode for HIGH-risk tasks (TAP-1686)
 
 When the coordinator writes `.ralph/brief.json` with `risk_level: HIGH`,
