@@ -10,6 +10,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.16.0] — 2026-05-22
+
+### Async PR-merge queue (T5, opt-in)
+
+- **T5 — async PR-merge queue behind `RALPH_ASYNC_MERGE=true` (default OFF).** Decouples the agent's "ticket done" decision from the GitHub merge actually landing. Today's flow waits ~2–4 min per PR for CI green; with this queue the agent opens the PR, records the pending merge, and immediately picks the next ticket. The harness polls pending PRs at loop boundaries and merges any that are green; CI failures surface to the next loop's prompt.
+
+  New module: [`lib/pending_merges.sh`](lib/pending_merges.sh) with `pending_merges_{enabled,init,add,count,poll,get_merged,surface_failed,drop,force_drain}`. State file: `.ralph/pending-merges.json` (schema v1). Wired into `main()` BEFORE the coordinator each loop. `build_loop_context` surfaces `PENDING LINEAR CLEANUP: ...` (PRs merged but Linear still In Progress) and `PENDING-MERGE FAILURES: ...` lines for the agent to act on. Envelope: `RALPH_ASYNC_MERGE_MAX_PENDING` (default 5), `RALPH_ASYNC_MERGE_DRAIN_RETRIES` (default 6, sleeps `RALPH_ASYNC_MERGE_DRAIN_SLEEP_SECONDS` between, default 30). When the queue hits cap, `pending_merges_add` returns 2 and the caller should `pending_merges_force_drain` synchronously. The semver bump to 2.16.0 reflects the workflow change even though the default is off.
+
+  Agent contract (ralph-workflow skill, R1 async-merge mode section): in async mode, **open PR → `pending_merges_add` → stop**, do NOT call `gh pr merge` yourself. Move Linear to Done on the NEXT loop after seeing the PENDING LINEAR CLEANUP surface.
+
+  Soak plan: ship with `RALPH_ASYNC_MERGE=false` (default) through 2.16.0. Flip default to `true` in 2.16.1 after one campaign with operators voluntarily setting the flag shows zero stranded PRs.
+
+  12 BATS cases in `tests/unit/test_pending_merges.bats`. Background and design context in [ADR-0007](docs/decisions/0007-async-pr-merge-via-pending-queue-vs-github-merge-queue.md) (why custom queue over GitHub Merge Queue).
+
+### Design ADRs
+
+- **[ADR-0007](docs/decisions/0007-async-pr-merge-via-pending-queue-vs-github-merge-queue.md) — async PR merge via custom pending queue, not GitHub Merge Queue.** Decision rationale for T5. Three decisive factors: Linear coupling (the harness owns the Done transition directly, no webhook bridge), zero-setup deployability across N managed projects (vs per-repo Merge Queue config), and the March 2026 GitHub `--auto` 422 change is a small handler not a structural problem.
+
+- **[ADR-0008](docs/decisions/0008-parallel-tickets-via-teammates-not-coordinator-fanout.md) — parallel ticket execution stays under the teammate flow, not a new coordinator fan-out.** Decision against the post-AgentForge-review proposal of a `parallel_safe` field on `brief.json` + main-loop fan-out. The existing teammate concept (`.claude/agents/ralph.md:260-299`, `.ralph/hooks/on-teammate-idle.sh`) already handles parallel ticket execution with file-ownership-scope isolation. Adding a second path would create two failure surfaces and double the cognitive load. Future enhancement: surface `affected_modules` to the teammate-assignment hint instead.
+
+---
+
 ## [2.15.9] — 2026-05-22
 
 ### Coordinator brief lookahead (T4)
