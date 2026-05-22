@@ -85,6 +85,34 @@ if [[ "$CMD0" == "git" ]]; then
             esac
         done
         (( has_force == 1 && has_lease == 0 )) && block "destructive git push"
+
+        # Harness-side R0 enforcement: refuse direct pushes to main. The
+        # ralph-workflow skill mandates feature branches + squash-merge; this
+        # is the hook that catches the case Claude's prose discipline misses.
+        # AgentForge 2026-05-21 campaign shipped 13/20 commits direct to main
+        # because R1's commit-on-main check accepted them as valid. R0 (in
+        # the skill) added prose discipline; this is the harness-side net.
+        #
+        # Detect:
+        #   git push origin main
+        #   git push origin HEAD:main
+        #   git push origin <branch>:main
+        #   git push --tags origin main      (flags ignored; only refspec matters)
+        # Allow:
+        #   git push -u origin <branch>      (feature branches)
+        #   git push origin --delete <branch>
+        #   git push origin <branch>:<branch>  (same-name on both sides, non-main)
+        #
+        # Bypass via RALPH_ALLOW_PUSH_MAIN=1 (logged to .ralph/.bypass-log.jsonl
+        # in a future iteration; for now, the env var is the escape hatch).
+        if [[ "${RALPH_ALLOW_PUSH_MAIN:-}" != "1" ]]; then
+            for arg in "${ARGV[@]:2}"; do
+                case "$arg" in
+                    main|master) block "direct push to ${arg} forbidden (R0). Use a feature branch + gh pr merge --squash" ;;
+                    *:main|*:master|HEAD:main|HEAD:master) block "direct push to refs/heads/${arg##*:} forbidden (R0). Use a feature branch + gh pr merge --squash" ;;
+                esac
+            done
+        fi
     fi
 
     # `git reset --hard`, `git clean -f*`, `git rm`
