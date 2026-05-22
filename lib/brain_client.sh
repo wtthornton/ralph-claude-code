@@ -156,7 +156,15 @@ _brain_client_post() {
 
     local start_ms end_ms code
     # Millisecond-resolution timing that works on bash 4+ and macOS.
+    # BSD/macOS `date` does NOT fail on the `%N` format specifier — it emits
+    # the literal `%3N` in the output (e.g. `1779460947%3N`). The original
+    # `||` fallback chain never triggered, and the literal value crashed the
+    # `$((end_ms - start_ms))` arithmetic on macOS. Mirror the pattern from
+    # lib/linear_optimizer.sh (`_optimizer_elapsed_ms`): always strip non-digits
+    # after capture so a literal `%3N` is reduced to a clean integer prefix.
     start_ms=$(date +%s%3N 2>/dev/null || python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo "0")
+    start_ms=$(printf '%s' "$start_ms" | tr -cd '0-9')
+    [[ -z "$start_ms" ]] && start_ms=0
 
     code=$(curl -sS -o /dev/null --max-time 3 -w "%{http_code}" \
         -X POST "$url" \
@@ -167,6 +175,8 @@ _brain_client_post() {
         --data-raw "$body" 2>/dev/null || echo "000")
 
     end_ms=$(date +%s%3N 2>/dev/null || python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo "0")
+    end_ms=$(printf '%s' "$end_ms" | tr -cd '0-9')
+    [[ -z "$end_ms" ]] && end_ms=0
     local elapsed=$((end_ms - start_ms))
     [[ "$elapsed" -lt 0 ]] && elapsed=0
 

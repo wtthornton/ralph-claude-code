@@ -495,7 +495,17 @@ if [[ -n "$_transcript" && -f "$_transcript" ]]; then
     _proj_dir="${CLAUDE_PROJECT_DIR%/}"
     _proj_dir_escaped="${_proj_dir//\\/\\\\}"
     _proj_dir_escaped="${_proj_dir_escaped//|/\\|}"
-    sed -i "s|^${_proj_dir_escaped}/||" "$_lcf_tmp" 2>/dev/null || true
+    # `sed -i` syntax differs between GNU (Linux) and BSD (macOS): BSD requires
+    # an explicit backup-extension argument (empty string for in-place). Use a
+    # tmp + mv instead to stay portable across both — silent failure here on
+    # macOS would have left CLAUDE_PROJECT_DIR-prefixed absolute paths in the
+    # file, breaking lib/linear_optimizer.sh Jaccard scoring (which compares
+    # against repo-relative paths).
+    if sed "s|^${_proj_dir_escaped}/||" "$_lcf_tmp" > "${_lcf_tmp}.new" 2>/dev/null; then
+      mv -f "${_lcf_tmp}.new" "$_lcf_tmp" 2>/dev/null || rm -f "${_lcf_tmp}.new" 2>/dev/null
+    else
+      rm -f "${_lcf_tmp}.new" 2>/dev/null
+    fi
     # Re-sort+dedupe in case normalization produced collisions.
     sort -u -o "$_lcf_tmp" "$_lcf_tmp" 2>/dev/null || true
   fi

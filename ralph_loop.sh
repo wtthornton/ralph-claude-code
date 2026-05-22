@@ -2063,7 +2063,10 @@ dry_run_simulate() {
         local task_count
         task_count=$(grep -c '^\- \[ \]' "$RALPH_DIR/fix_plan.md" 2>/dev/null) || task_count=0
         local done_count
-        done_count=$(grep -c '^\- \[x\]' "$RALPH_DIR/fix_plan.md" 2>/dev/null) || done_count=0
+        # Match both `[x]` and `[X]` (consistent with lib/complexity.sh and
+        # lib/context_management.sh, which both use `[xX]`). A lowercase-only
+        # grep here silently undercounts done tasks in the dry-run summary.
+        done_count=$(grep -cE '^- \[[xX]\]' "$RALPH_DIR/fix_plan.md" 2>/dev/null) || done_count=0
         log_status "INFO" "[DRY-RUN]   Tasks: $task_count open, $done_count done"
     fi
 
