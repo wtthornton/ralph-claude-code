@@ -2230,6 +2230,44 @@ build_loop_context() {
         if [[ -n "${RALPH_LINEAR_TEAM:-}" ]]; then
             context+="TASK TEAM: '${RALPH_LINEAR_TEAM}'. ALWAYS pass team='${RALPH_LINEAR_TEAM}' to Linear MCP calls (list_issues, get_issue, save_issue, list_projects). NEVER guess the team name from the project. "
         fi
+        # TAP-2444: pre-warm the deferred-tool surface. Without an explicit
+        # name list the agent burns 4-6 keyword ToolSearch calls per loop
+        # (30-60s wall-clock) discovering tool surfaces that are stable
+        # across loops. Listing the canonical names lets Claude pre-load
+        # schemas in ONE ToolSearch(select:...) call. Placed inside the
+        # Linear branch BEFORE the giant prose so the 1500-char truncation
+        # at the function tail cannot drop it.
+        local _canonical_tools=(
+            "mcp__plugin_linear_linear__list_issues"
+            "mcp__plugin_linear_linear__get_issue"
+            "mcp__plugin_linear_linear__save_issue"
+            "mcp__plugin_linear_linear__list_projects"
+            "mcp__plugin_linear_linear__list_users"
+        )
+        if [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]]; then
+            _canonical_tools+=(
+                "mcp__tapps-mcp__tapps_session_start"
+                "mcp__tapps-mcp__tapps_linear_snapshot_get"
+                "mcp__tapps-mcp__tapps_lookup_docs"
+                "mcp__tapps-mcp__tapps_quality_gate"
+            )
+        fi
+        if [[ "${RALPH_MCP_BRAIN_AVAILABLE:-false}" == "true" ]]; then
+            _canonical_tools+=(
+                "mcp__tapps-brain__brain_recall"
+                "mcp__tapps-brain__brain_remember"
+            )
+        fi
+        if [[ "${RALPH_MCP_DOCS_AVAILABLE:-false}" == "true" ]] && ralph_task_is_docs_related; then
+            _canonical_tools+=(
+                "mcp__docs-mcp__docs_generate_adr"
+                "mcp__docs-mcp__docs_generate_story"
+                "mcp__docs-mcp__docs_validate_linear_issue"
+            )
+        fi
+        local _canon
+        _canon=$(IFS=,; echo "${_canonical_tools[*]}")
+        context+="CANONICAL MCP TOOLS (TAP-2444): pre-load schemas in ONE call — ToolSearch query=\"select:${_canon}\". Then call these tools by name; do NOT keyword-search for surfaces you already know. "
         if [[ -n "$next_task" ]]; then
             next_task=$(printf '%s' "$next_task" | ralph_sanitize_prompt_text 300)
             context+="Next issue: ${next_task}. "
@@ -2282,6 +2320,35 @@ build_loop_context() {
         _next_unchecked=$(grep -m1 -E "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null \
             | sed -E 's/^[[:space:]]*- \[ \][[:space:]]*//' | head -c 300)
         RALPH_CURRENT_TASK_TEXT="$_next_unchecked"
+        # TAP-2444: same canonical-tools block as the Linear branch, minus
+        # the Linear plugin entries (file-mode projects do not use them).
+        local _canonical_tools_fm=()
+        if [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]]; then
+            _canonical_tools_fm+=(
+                "mcp__tapps-mcp__tapps_session_start"
+                "mcp__tapps-mcp__tapps_lookup_docs"
+                "mcp__tapps-mcp__tapps_quality_gate"
+                "mcp__tapps-mcp__tapps_score_file"
+            )
+        fi
+        if [[ "${RALPH_MCP_BRAIN_AVAILABLE:-false}" == "true" ]]; then
+            _canonical_tools_fm+=(
+                "mcp__tapps-brain__brain_recall"
+                "mcp__tapps-brain__brain_remember"
+            )
+        fi
+        if [[ "${RALPH_MCP_DOCS_AVAILABLE:-false}" == "true" ]] && ralph_task_is_docs_related; then
+            _canonical_tools_fm+=(
+                "mcp__docs-mcp__docs_generate_adr"
+                "mcp__docs-mcp__docs_generate_story"
+                "mcp__docs-mcp__docs_validate_linear_issue"
+            )
+        fi
+        if [[ ${#_canonical_tools_fm[@]} -gt 0 ]]; then
+            local _canon_fm
+            _canon_fm=$(IFS=,; echo "${_canonical_tools_fm[*]}")
+            context+="CANONICAL MCP TOOLS (TAP-2444): pre-load schemas in ONE call — ToolSearch query=\"select:${_canon_fm}\". Then call these tools by name; do NOT keyword-search for surfaces you already know. "
+        fi
     fi
 
     # PERF: Read circuit breaker state and previous summary in single jq call (was: 2 separate jq spawns)
