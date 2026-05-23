@@ -50,7 +50,50 @@ jobs:
         npm install
         sudo apt-get update
         # gawk is required for PLANOPT-2 array-capture syntax (mawk lacks it).
-        sudo apt-get install -y jq gawk
+        # shellcheck for TAP-2439 (informational shell lint).
+        sudo apt-get install -y jq gawk shellcheck
+
+    # TAP-2439: bash -n on every tracked *.sh — cheapest possible blocking gate
+    # (< 1 s wall-clock, no LLM). Closes the "host had a corrupt script" failure
+    # mode that AgentForge 2026-05-22 hit at loop #6 startup (claim verified
+    # false against source, but the defensive guard belongs upstream regardless).
+    - name: Shell syntax check (bash -n)
+      run: |
+        set -e
+        fail=0
+        while IFS= read -r f; do
+          if ! bash -n "$f" 2>&1; then
+            echo "::error file=$f::bash -n syntax error"
+            fail=1
+          fi
+        done < <(git ls-files '*.sh')
+        if [[ $fail -ne 0 ]]; then
+          echo "::error::One or more shell scripts failed bash -n"
+          exit 1
+        fi
+        echo "All tracked *.sh files pass bash -n"
+
+    # TAP-2439: shellcheck as informational (mirrors kcov pattern below).
+    # Captures stderr to a logged artifact so a real regression cannot be
+    # silenced — but does not block until the existing warning backlog is
+    # cleaned up. Ratchet to blocking in a follow-up once the count is zero.
+    - name: Shellcheck (informational)
+      run: |
+        mkdir -p coverage
+        log=coverage/shellcheck.stderr.log
+        : > "$log"
+        count=0
+        while IFS= read -r f; do
+          if ! shellcheck -S warning "$f" >> "$log" 2>&1; then
+            count=$((count + 1))
+          fi
+        done < <(git ls-files '*.sh')
+        if [[ $count -gt 0 ]]; then
+          echo "::warning::shellcheck flagged $count file(s) — see coverage/shellcheck.stderr.log artifact"
+          tail -40 "$log" || true
+        else
+          echo "shellcheck: all clean"
+        fi
 
     - name: Run unit tests
       run: npm run test:unit
