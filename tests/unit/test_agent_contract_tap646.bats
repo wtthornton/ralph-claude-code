@@ -33,8 +33,11 @@ PROJECT_ROOT="${BATS_TEST_DIRNAME}/../.."
     # The canonical tool set as of the CLAUDE.md contract. After the
     # legacy-mode deletion (ADR 0006), MCP tool allowlists moved out of
     # .ralphrc ALLOWED_TOOLS into the agent file's tools: block, so this
-    # regex now also accepts the MCP namespaces Ralph relies on.
-    local allowed='^(Read|Write|Edit|Glob|Grep|Bash|Task|TodoWrite|WebFetch|WebSearch|NotebookEdit|ExitPlanMode|mcp__docs-mcp__\*|mcp__tapps-mcp__\*|mcp__tapps-brain__brain_(recall|remember|forget|learn_success|learn_failure)|Bash\([^)]*\))$'
+    # regex now also accepts the MCP namespaces Ralph relies on. The
+    # Linear plugin entry was added when ralph-coordinator MODE=brief step 4
+    # (locality hint) shipped — see CLAUDE.md "Linear cache-locality
+    # optimizer (LINOPT epic)" paragraph.
+    local allowed='^(Read|Write|Edit|Glob|Grep|Bash|Task|TodoWrite|WebFetch|WebSearch|NotebookEdit|ExitPlanMode|mcp__docs-mcp__\*|mcp__tapps-mcp__\*|mcp__tapps-brain__brain_(recall|remember|forget|learn_success|learn_failure)|mcp__plugin_linear_linear__list_issues|Bash\([^)]*\))$'
     local unknown=0
     for f in "$PROJECT_ROOT/.claude/agents/"*.md; do
         # Parse tools: block — lines "  - <name>" between "^tools:$" and next unindented key
