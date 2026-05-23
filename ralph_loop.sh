@@ -5116,6 +5116,14 @@ main() {
             linear_optimizer_run 2>>"${LOG_DIR}/ralph.log" &
         fi
 
+        # TAP-2442: pre-seed status.json from the tapps-mcp snapshot cache so
+        # iteration 1's exit-gate has authoritative counts instead of abstaining
+        # for the entire first loop. No-op when the cache is empty or stale —
+        # TAP-536 fail-loud semantics preserved.
+        if declare -F linear_seed_counts_from_snapshot_cache >/dev/null 2>&1; then
+            linear_seed_counts_from_snapshot_cache || true
+        fi
+
         # TAP-536: API failure here defaults to "1 incomplete" (the safe answer
         # — never pre-seeds completion_indicators on failure, so we don't get a
         # zombie 1-loop verification cycle when Linear is down at startup).
