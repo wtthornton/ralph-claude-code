@@ -150,3 +150,69 @@ setup() {
     grep -qiE 'best-effort|valid skip conditions' "$AGENT_FILE" \
         || fail "locality step must be marked best-effort so its failure does not trip the brief detector"
 }
+
+# =============================================================================
+# TAP-2472: locality-hint list_issues call is state-narrowed to started+unstarted
+#
+# Pre-TAP-2472 prescription: `limit=15`, no state filter, client-side filter.
+# Post-TAP-2472 prescription: `state="started"` first (limit=50), fall back to
+# `state="unstarted"` (limit=50) only if started returned <3 candidates.
+#
+# Reason: in all 3 sibling projects on 2026-05-22/23 the coordinator MODE=brief
+# call hit the 126s adaptive timeout. Narrowing keeps the response small.
+#
+# The agent file is blocked from agent edits by protect-ralph-files.sh, so
+# this change ships as docs/specs/tap-2472-coordinator-narrowing.patch which
+# the operator git-applies after the PR merges. Until then these tests skip
+# with a pointer; once the patch is applied they become hard assertions.
+# =============================================================================
+
+_tap2472_agent_is_pre_patch() {
+    # Pre-patch sentinel: the obsolete `limit=15` line still present.
+    grep -qE '`limit=15`' "$AGENT_FILE"
+}
+
+@test "TAP-2472: locality call uses state=started with limit=50" {
+    if _tap2472_agent_is_pre_patch; then
+        skip "agent file pre-patch; run: git apply docs/specs/tap-2472-coordinator-narrowing.patch"
+    fi
+    grep -qE 'state="started"' "$AGENT_FILE" \
+        || fail "MODE=brief step 4(b) must prescribe state=\"started\" for the first list_issues call"
+    grep -qE '`limit=50`|limit=50' "$AGENT_FILE" \
+        || fail "MODE=brief step 4(b) must prescribe limit=50 (not the pre-TAP-2472 limit=15)"
+}
+
+@test "TAP-2472: locality call has unstarted fallback when started returns <3" {
+    if _tap2472_agent_is_pre_patch; then
+        skip "agent file pre-patch; run: git apply docs/specs/tap-2472-coordinator-narrowing.patch"
+    fi
+    grep -qE 'state="unstarted"' "$AGENT_FILE" \
+        || fail "MODE=brief step 4(b) must declare the state=\"unstarted\" fallback"
+    grep -qiE 'fewer than 3|<[[:space:]]?3 candidates' "$AGENT_FILE" \
+        || fail "MODE=brief step 4(b) must document the <3-candidates trigger for the unstarted fallback"
+}
+
+@test "TAP-2472: locality call still uses orderBy=updatedAt" {
+    if _tap2472_agent_is_pre_patch; then
+        skip "agent file pre-patch; run: git apply docs/specs/tap-2472-coordinator-narrowing.patch"
+    fi
+    grep -qE 'orderBy="updatedAt"' "$AGENT_FILE" \
+        || fail "MODE=brief step 4(b) must preserve orderBy=\"updatedAt\" (locality scoring orders by recency)"
+}
+
+@test "TAP-2472: no third state call (latency-budget guard)" {
+    if _tap2472_agent_is_pre_patch; then
+        skip "agent file pre-patch; run: git apply docs/specs/tap-2472-coordinator-narrowing.patch"
+    fi
+    # Explicit guard: the new prescription says "Do NOT issue a third call".
+    # This stops future drift from re-adding a third state (e.g. backlog,
+    # triage) that would re-blow the timeout budget.
+    grep -qE 'Do NOT issue a third call|no third call|do not.*third.*call' "$AGENT_FILE" \
+        || fail "MODE=brief step 4(b) must explicitly prohibit a third state call"
+}
+
+@test "TAP-2472: patch file exists in docs/specs/" {
+    local patch_file="$BATS_TEST_DIRNAME/../../docs/specs/tap-2472-coordinator-narrowing.patch"
+    [[ -f "$patch_file" ]] \
+        || fail "docs/specs/tap-2472-coordinator-narrowing.patch missing — operator-apply mechanism gone"
+}
