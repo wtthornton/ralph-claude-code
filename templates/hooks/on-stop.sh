@@ -787,6 +787,38 @@ if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
   rm -f "$local_tmp" 2>/dev/null  # WSL-1: catch cross-fs orphans
 fi
 
+# =============================================================================
+# TAP-2443: Clear stale locality hint when the agent finished the hinted issue.
+#
+# linear_optimizer_run writes .ralph/.linear_next_issue at session start; the
+# agent is told (ralph_loop.sh:2220) to `rm -f` it after honoring the hint.
+# When the agent forgets, the stale hint biases the next loop's selection
+# back onto an already-Done ticket — observed in AgentForge 2026-05-22:
+# Loop #2's coordinator brief keyed off Loop #1's just-completed TAP-2435.
+#
+# Rule: if the cached hint matches the just-worked issue AND the loop made
+# real progress on it (status=COMPLETE OR tasks_done>=1), drop the file.
+# IN_PROGRESS+match preserved (agent is still on it). Mismatch preserved
+# (next loop may still want the hint). USYNC-2 advance path at line ~954
+# continues to clear independently for the question-loop case.
+# =============================================================================
+_locality_hint_file="$RALPH_DIR/.linear_next_issue"
+if [[ -f "$_locality_hint_file" && -n "$linear_issue" ]]; then
+  # Extract first non-comment line, strip to alphanumeric+dash (matches the
+  # sanitization in ralph_loop.sh:2218).
+  _cached_hint=$(grep -v '^#' "$_locality_hint_file" 2>/dev/null \
+    | head -1 | tr -cd 'A-Z0-9a-z-')
+  if [[ -n "$_cached_hint" && "$_cached_hint" == "$linear_issue" ]]; then
+    if [[ "$status" == "COMPLETE" || "$tasks_done" -ge 1 ]]; then
+      rm -f "$_locality_hint_file" 2>/dev/null || true
+      if [[ -f "$RALPH_DIR/logs/ralph.log" ]]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] on-stop: TAP-2443 cleared stale locality hint ${_cached_hint} (status=$status, tasks_done=$tasks_done)" \
+          >> "$RALPH_DIR/logs/ralph.log"
+      fi
+    fi
+  fi
+fi
+
 # Log for monitoring
 log_line="[$(date '+%H:%M:%S')] Loop $loop_count: status=$status exit=$exit_signal tasks=$tasks_done files=$files_modified type=$work_type"
 [[ "$asking_questions" == "true" ]] && log_line+=" questions=$question_count"
