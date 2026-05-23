@@ -156,6 +156,99 @@ run_hook() {
         || fail ".claude/skills/* must be allowed via Edit, got $status: $output"
 }
 
+# ---- TAP-2471: coordinator-owned .ralph/ paths -----------------------------
+# The coordinator agent (.claude/agents/ralph-coordinator.md MODE=brief) writes
+# brief.json and .linear_next_issue via the Claude Write tool, which fires this
+# hook. Pre-TAP-2471 the only allowed paths were fix_plan.md + status.json, so
+# every coordinator Write hit exit 2 — silently masked by the TAP-1875
+# retry-once + WARN-and-clear path. Sibling evidence (2026-05-22/23): the
+# tapps-mcp coordinator-brief.err captured Claude's own thinking diagnosing
+# the issue ("caught in a circular dependency").
+
+@test "TAP-2471: .ralph/brief.json is ALLOWED (project)" {
+    run_hook "$TEST_DIR/.ralph/brief.json"
+    [[ "$status" -eq 0 ]] \
+        || fail ".ralph/brief.json must be allowed for the coordinator, got $status: $output"
+}
+
+@test "TAP-2471: .ralph/brief.json is ALLOWED (relative)" {
+    run_hook ".ralph/brief.json"
+    [[ "$status" -eq 0 ]] \
+        || fail "relative .ralph/brief.json must be allowed, got $status: $output"
+}
+
+@test "TAP-2471: .ralph/.linear_next_issue is ALLOWED (project)" {
+    run_hook "$TEST_DIR/.ralph/.linear_next_issue"
+    [[ "$status" -eq 0 ]] \
+        || fail ".linear_next_issue must be allowed for the coordinator, got $status: $output"
+}
+
+@test "TAP-2471: .ralph/.linear_next_issue is ALLOWED (relative)" {
+    run_hook ".ralph/.linear_next_issue"
+    [[ "$status" -eq 0 ]] \
+        || fail "relative .linear_next_issue must be allowed, got $status: $output"
+}
+
+@test "TAP-2471: .ralph/.last_completed_files is ALLOWED" {
+    run_hook ".ralph/.last_completed_files"
+    [[ "$status" -eq 0 ]] \
+        || fail ".last_completed_files must be allowed, got $status: $output"
+}
+
+@test "TAP-2471: .ralph/.brief_cache/TAP-1234.json is ALLOWED (project)" {
+    mkdir -p "$TEST_DIR/.ralph/.brief_cache"
+    run_hook "$TEST_DIR/.ralph/.brief_cache/TAP-1234.json"
+    [[ "$status" -eq 0 ]] \
+        || fail ".brief_cache/*.json must be allowed, got $status: $output"
+}
+
+@test "TAP-2471: .ralph/.brief_cache/TAP-1234.json is ALLOWED (relative)" {
+    run_hook ".ralph/.brief_cache/TAP-1234.json"
+    [[ "$status" -eq 0 ]] \
+        || fail "relative .brief_cache/*.json must be allowed, got $status: $output"
+}
+
+# ---- TAP-2471: still-blocked guard -----------------------------------------
+# Widening the allowlist must NOT widen the blocked set. Sample every other
+# .ralph/* file the agent might be tempted to touch — they all must still
+# hit exit 2 (regression guard).
+
+@test "TAP-2471: .ralph/PROMPT.md is STILL BLOCKED" {
+    run_hook "$TEST_DIR/.ralph/PROMPT.md"
+    [[ "$status" -eq 2 ]] \
+        || fail "PROMPT.md must remain blocked, got $status: $output"
+}
+
+@test "TAP-2471: .ralph/AGENT.md is STILL BLOCKED" {
+    run_hook "$TEST_DIR/.ralph/AGENT.md"
+    [[ "$status" -eq 2 ]] \
+        || fail "AGENT.md must remain blocked, got $status: $output"
+}
+
+@test "TAP-2471: .ralph/hooks/on-stop.sh is STILL BLOCKED" {
+    run_hook "$TEST_DIR/.ralph/hooks/on-stop.sh"
+    [[ "$status" -eq 2 ]] \
+        || fail ".ralph/hooks/* must remain blocked, got $status: $output"
+}
+
+@test "TAP-2471: .ralph/.circuit_breaker_state is STILL BLOCKED" {
+    run_hook ".ralph/.circuit_breaker_state"
+    [[ "$status" -eq 2 ]] \
+        || fail ".circuit_breaker_state must remain blocked, got $status: $output"
+}
+
+@test "TAP-2471: .ralphrc is STILL BLOCKED (regression guard)" {
+    run_hook ".ralphrc"
+    [[ "$status" -eq 2 ]] \
+        || fail ".ralphrc must remain blocked, got $status: $output"
+}
+
+@test "TAP-2471: .claude/agents/ralph.md is STILL BLOCKED (regression guard)" {
+    run_hook ".claude/agents/ralph.md"
+    [[ "$status" -eq 2 ]] \
+        || fail ".claude/agents/* must remain blocked, got $status: $output"
+}
+
 # ---- byte parity guard ---------------------------------------------------
 
 @test "TAP-2344: .ralph/hooks/protect-ralph-files.sh is byte-identical to template" {
