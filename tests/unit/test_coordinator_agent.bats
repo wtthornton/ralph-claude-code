@@ -113,3 +113,40 @@ setup() {
     grep -q 'MODE=brief' "$AGENT_FILE" || fail "body must reference MODE=brief"
     grep -q 'MODE=debrief' "$AGENT_FILE" || fail "body must reference MODE=debrief"
 }
+
+# Coordinator-driven Linear locality hint — the OAuth-via-MCP equivalent of
+# the bash-side linear_optimizer (which is a no-op when LINEAR_API_KEY is
+# unset). The coordinator's MODE=brief step 4 fills the same role.
+@test "coordinator-locality: tools list includes Linear MCP list_issues" {
+    local block
+    block=$(extract_yaml_block "$AGENT_FILE" "tools")
+    echo "$block" | grep -qE 'mcp__plugin_linear_linear__list_issues\b' \
+        || fail "tools list must include mcp__plugin_linear_linear__list_issues for locality scoring"
+}
+
+@test "coordinator-locality: body documents the .linear_next_issue write" {
+    grep -q '\.ralph/\.linear_next_issue\|\.linear_next_issue' "$AGENT_FILE" \
+        || fail "body must reference .ralph/.linear_next_issue as the locality hint target"
+}
+
+@test "coordinator-locality: body references .last_completed_files as set A source" {
+    grep -q '\.last_completed_files' "$AGENT_FILE" \
+        || fail "body must reference .ralph/.last_completed_files as the locality-scoring input"
+}
+
+@test "coordinator-locality: locality step gated on task_source=linear" {
+    # Step 4 must declare the linear gate so a file-mode project's
+    # coordinator does not waste an MCP call. Match the explicit gate
+    # phrasing, not the unrelated `"task_source": "linear"` JSON snippet
+    # that appears in the brief.json schema example.
+    grep -qE 'task_source[[:space:]]*!=[[:space:]]*"?linear|Linear mode only' "$AGENT_FILE" \
+        || fail "locality step must declare the task_source=linear gate"
+}
+
+@test "coordinator-locality: locality step explicitly best-effort (does not trip brief regression)" {
+    # Defense against future drift that would make the locality write a
+    # hard requirement — only brief.json is required, per the existing
+    # 'coordinator: brief missing or invalid' detector contract.
+    grep -qiE 'best-effort|valid skip conditions' "$AGENT_FILE" \
+        || fail "locality step must be marked best-effort so its failure does not trip the brief detector"
+}
