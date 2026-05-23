@@ -51,9 +51,12 @@ setup() {
 
     # Extract just the helper body from ralph_loop.sh and eval it. TAP-2473
     # adds the _ralph_push_log_failure sibling helper — pick that up too so
-    # the rebase-failure branch has its failure-log writer.
+    # the rebase-failure branch has its failure-log writer. TAP-2485 adds
+    # _ralph_push_clear_failure_marker — pick that up too so the success
+    # paths can clear the marker.
     eval "$(awk '/^ralph_push_pending_commits\(\) \{$/,/^\}$/' "$REPO_ROOT/ralph_loop.sh")"
     eval "$(awk '/^_ralph_push_log_failure\(\) \{$/,/^\}$/' "$REPO_ROOT/ralph_loop.sh")"
+    eval "$(awk '/^_ralph_push_clear_failure_marker\(\) \{$/,/^\}$/' "$REPO_ROOT/ralph_loop.sh")"
 }
 
 teardown() {
@@ -308,4 +311,78 @@ _advance_origin() {
     ! _has_log "push:" || fail "disabled knob must suppress everything"
     [[ ! -s "$RALPH_DIR/.push-failure.err" ]] \
         || fail "disabled knob must not write .push-failure.err"
+}
+
+# =============================================================================
+# TAP-2485: auto-clear .push-failure.err on push success (initial OR retry).
+#
+# Pre-TAP-2485 the marker survived across loops indefinitely. The agent can't
+# rm it (validate-command.sh blanket-blocks rm against .ralph/*), and the hook
+# allowlist is intentionally narrow — so the writer must clear it itself.
+# =============================================================================
+
+@test "TAP-2485: seeded .push-failure.err is cleared on happy-path push success" {
+    # Seed a stale marker from a prior loop's failure
+    printf 'stale\n' > "$RALPH_DIR/.push-failure.err"
+    [[ -s "$RALPH_DIR/.push-failure.err" ]] || fail "test setup: marker should exist"
+
+    # Stage one unpushed commit; push should succeed with no rejection
+    echo "happy work" > happy.txt
+    git add happy.txt && git commit -m "happy commit" >/dev/null 2>&1
+
+    ralph_push_pending_commits
+
+    [[ ! -e "$RALPH_DIR/.push-failure.err" ]] \
+        || fail "stale .push-failure.err must be cleared on push success (got: $(cat "$RALPH_DIR/.push-failure.err" 2>/dev/null))"
+}
+
+@test "TAP-2485: seeded .push-failure.err is cleared on rebase-recovery success" {
+    # Seed a stale marker
+    printf 'stale-from-yesterday\n' > "$RALPH_DIR/.push-failure.err"
+    [[ -s "$RALPH_DIR/.push-failure.err" ]] || fail "test setup: marker should exist"
+
+    # Set up the rebase-recovery scenario (local commit + advanced origin)
+    echo "local work" > local-only.txt
+    git add local-only.txt && git commit -m "local commit" >/dev/null 2>&1
+    _advance_origin "side-content"
+
+    ralph_push_pending_commits
+
+    _has_log "retry succeeded" || fail "expected retry-success log line — scenario setup wrong?"
+    [[ ! -e "$RALPH_DIR/.push-failure.err" ]] \
+        || fail "stale .push-failure.err must be cleared after rebase-recovery push success (got: $(cat "$RALPH_DIR/.push-failure.err" 2>/dev/null))"
+}
+
+@test "TAP-2485: .push-failure.err is PRESERVED (overwritten) on push failure" {
+    # Seed an old marker
+    printf 'old failure\n' > "$RALPH_DIR/.push-failure.err"
+
+    # Stage a commit + break the remote so the push fails entirely
+    echo "more" >> README.md
+    git add README.md && git commit -m "needs push" >/dev/null 2>&1
+    git remote set-url origin "$TEST_DIR/nonexistent-bare.git"
+
+    run ralph_push_pending_commits
+    [[ "$status" -eq 0 ]] || fail "helper must return 0 on failure"
+
+    # Marker must still exist AND have the new diagnostic (not the old text)
+    [[ -s "$RALPH_DIR/.push-failure.err" ]] \
+        || fail "marker must be preserved on failure"
+    grep -q "git push failed" "$RALPH_DIR/.push-failure.err" \
+        || fail "marker must carry the new diagnostic header, not stale content"
+    ! grep -q "^old failure$" "$RALPH_DIR/.push-failure.err" \
+        || fail "marker must be overwritten with current failure, not appended to"
+}
+
+@test "TAP-2485: no allowlist widening — hook still blocks .push-failure.err writes" {
+    # Belt-and-suspenders: TAP-2485 must NOT have added .push-failure.err to
+    # protect-ralph-files.sh's allowlist. The whole point is to leave the
+    # surface narrow. If a future change widens the allowlist for this marker,
+    # this test fires.
+    local hook="$REPO_ROOT/templates/hooks/protect-ralph-files.sh"
+    ! grep -qE 'push-failure' "$hook" \
+        || fail "templates/hooks/protect-ralph-files.sh must NOT mention push-failure (TAP-2485: clear is loop-side, not hook-side)"
+    local vhook="$REPO_ROOT/templates/hooks/validate-command.sh"
+    ! grep -qE 'push-failure' "$vhook" \
+        || fail "templates/hooks/validate-command.sh must NOT carve out push-failure (TAP-2485: clear is loop-side, not hook-side)"
 }

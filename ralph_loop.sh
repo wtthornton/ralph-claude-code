@@ -2700,27 +2700,44 @@ _coordinator_invoke_claude() {
         fi
     fi
 
-    # AgentForge feedback #5: persist last 4KB of merged stdout+stderr on
-    # failure so the WARN line in ralph_{spawn,debrief}_coordinator has
-    # something to point at. Without this, `coordinator: debrief failed
-    # (exit 1) — continuing` is unobservable: intermittent (~30% of
-    # transitions in the field), and the underlying error (MCP timeout,
-    # permission denial, brain-side hiccup) is lost. Mode is extracted
-    # from the MODE= line that ralph_coordinator_invoke prepended.
+    # AgentForge feedback #5 + TAP-2485: record outcome to
+    # .coordinator-${mode}.err on failure, clear it on success. See
+    # _coordinator_record_outcome for the colocated write-and-clear rationale.
+    local _mode_label="unknown"
+    if [[ "$input" =~ ^MODE=([a-z]+) ]]; then
+        _mode_label="${BASH_REMATCH[1]}"
+    fi
+    _coordinator_record_outcome "$_rc" "$_mode_label" "$_stream_file" "$_coord_timeout" "$_coord_duration"
+    [[ -n "$_stream_file" ]] && rm -f -- "$_stream_file" 2>/dev/null
+    return $_rc
+}
+
+# AgentForge feedback #5 / TAP-2485: write-on-failure + clear-on-success for
+# the coordinator outcome marker at .ralph/.coordinator-${mode}.err. Same
+# colocation principle as _ralph_push_log_failure / _ralph_push_clear_failure_marker:
+# the agent can't rm under .ralph/ (validate-command.sh blanket-blocks it,
+# intentional per TAP-2344), and protect-ralph-files.sh's allowlist stays
+# narrow on purpose, so the writer is the only place that can clear stale
+# markers. Without the clear path, a 2026-05-22T23:52 failure survives every
+# subsequent success and looks like an ongoing failure to anyone reading
+# the working tree.
+#
+# Failure path: write last 4KB of merged stdout+stderr so the WARN line in
+# ralph_{spawn,debrief}_coordinator has something to point at.
+# Success path: idempotently remove any previously-stranded marker.
+# Stream-file argument may be empty / nonexistent — guarded.
+_coordinator_record_outcome() {
+    local _rc="$1" _mode_label="$2" _stream_file="$3" _coord_timeout="$4" _coord_duration="$5"
+    local _err_path="${RALPH_DIR:-.ralph}/.coordinator-${_mode_label}.err"
     if [[ $_rc -ne 0 && -n "$_stream_file" && -s "$_stream_file" ]]; then
-        local _mode_label="unknown"
-        if [[ "$input" =~ ^MODE=([a-z]+) ]]; then
-            _mode_label="${BASH_REMATCH[1]}"
-        fi
-        local _err_path="${RALPH_DIR:-.ralph}/.coordinator-${_mode_label}.err"
         {
             echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] coordinator ${_mode_label} failed (exit ${_rc}) timeout=${_coord_timeout}s duration=${_coord_duration}s"
             echo "--- last 4KB of merged stdout+stderr ---"
             tail -c 4096 "$_stream_file" 2>/dev/null
         } > "$_err_path" 2>/dev/null || true
+    elif [[ $_rc -eq 0 ]]; then
+        rm -f -- "$_err_path" 2>/dev/null || true
     fi
-    [[ -n "$_stream_file" ]] && rm -f -- "$_stream_file" 2>/dev/null
-    return $_rc
 }
 
 # TAP-921: ralph_coordinator_invoke — public, mode-aware entry point that
@@ -4521,6 +4538,7 @@ ralph_push_pending_commits() {
     _push_out=$(git -C "$_git_root" push 2>&1) || _push_rc=$?
     if [[ "$_push_rc" -eq 0 ]]; then
         log_status "INFO" "push: succeeded ($_ahead commit(s) to $_upstream)"
+        _ralph_push_clear_failure_marker
         return 0
     fi
 
@@ -4568,6 +4586,7 @@ ralph_push_pending_commits() {
         local _ahead_after
         _ahead_after=$(git -C "$_git_root" rev-list --count "@{u}..HEAD" 2>/dev/null || echo "$_ahead")
         log_status "INFO" "push: retry succeeded after fetch+rebase ($_ahead initial commits, $_behind upstream commits incorporated)"
+        _ralph_push_clear_failure_marker
     else
         log_status "WARN" "push: retry failed (exit $_push2_rc) after successful rebase — logging both failures"
         _ralph_push_log_failure "$_push2_rc" "$_ahead" "$_upstream" "$_push2_out" "$_rebase_out"
@@ -4589,6 +4608,17 @@ _ralph_push_log_failure() {
             echo "$_rebase_out" | tail -c 1024
         fi
     } > "${RALPH_DIR:-.ralph}/.push-failure.err" 2>/dev/null || true
+}
+
+# TAP-2485: clear .push-failure.err on push success so a stranded marker from
+# an earlier failure doesn't look like an ongoing one. The agent can't `rm`
+# under .ralph/ (validate-command.sh blanket-blocks it, intentional per
+# TAP-2344), and widening the hook allowlist would weaken the invariant —
+# so the writer is the only place this can happen. Called from both push
+# success paths in ralph_push_pending_commits (initial happy path AND
+# retry-after-rebase). Idempotent: missing file is fine.
+_ralph_push_clear_failure_marker() {
+    rm -f -- "${RALPH_DIR:-.ralph}/.push-failure.err" 2>/dev/null || true
 }
 
 # Main execution function
