@@ -186,7 +186,7 @@ USE_TMUX=false
 RALPH_SERVICE=""           # Monorepo service scope (Issue #163)
 RALPH_TASK_SOURCE="file"   # Task backend: "file" (fix_plan.md) or "linear"
 RALPH_LINEAR_PROJECT=""    # Linear project name (required when RALPH_TASK_SOURCE=linear)
-RALPH_LINEAR_TEAM=""       # Linear team name (optional, used in log messages)
+RALPH_LINEAR_TEAM=""       # Linear team name (required when team name != project name prefix; TAP-2440)
 
 # TAP-1103: CLI-flag values get a parallel `_cli_*` capture so they survive
 # `.ralphrc` and `ralph.config.json` sourcing. Final precedence after
@@ -2224,6 +2224,12 @@ build_loop_context() {
         local next_task
         next_task=$(linear_get_next_task) || next_task=""
         context+="TASK SOURCE: Linear project '${RALPH_LINEAR_PROJECT}'. "
+        # TAP-2440: when team name does NOT prefix project name, Claude guesses
+        # wrong and the Linear plugin silently returns []. Inject the team
+        # explicitly so the agent has a server-authoritative value to pass.
+        if [[ -n "${RALPH_LINEAR_TEAM:-}" ]]; then
+            context+="TASK TEAM: '${RALPH_LINEAR_TEAM}'. ALWAYS pass team='${RALPH_LINEAR_TEAM}' to Linear MCP calls (list_issues, get_issue, save_issue, list_projects). NEVER guess the team name from the project. "
+        fi
         if [[ -n "$next_task" ]]; then
             next_task=$(printf '%s' "$next_task" | ralph_sanitize_prompt_text 300)
             context+="Next issue: ${next_task}. "
