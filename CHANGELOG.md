@@ -10,6 +10,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.17.1] — 2026-05-23
+
+Patch release — cross-project harness reliability fixes from the 2026-05-22/23 sibling-repo audit. Root cause for all five fixes was the same architectural pattern: the harness wrote state under `.ralph/` but the agent surface (protect-hook allowlist + validate-command rm-block) couldn't reach it to clear or recover. **Operators running Ralph against `tapps-mcp` / `AgentForge` / `NLTlabsPE` should `ralph-upgrade` then `ralph-upgrade-project` in each sibling repo** to pick up these fixes.
+
+### Fixed
+
+- **TAP-2471: `protect-ralph-files.sh` allows coordinator-owned `.ralph/` paths** ([templates/hooks/protect-ralph-files.sh:38-60](templates/hooks/protect-ralph-files.sh#L38-L60)). Adds `brief.json`, `.linear_next_issue`, `.last_completed_files`, and `.brief_cache/*` to the Edit-side allowlist. Pre-TAP-2471 every coordinator Write tool call to `.ralph/brief.json` exited 2 — silently masked by the TAP-1875 retry-once + WARN-and-clear path. Evidence: `tapps-mcp/.ralph/.coordinator-brief.err` captured Claude's own thinking — "caught in a circular dependency." This is also the root cause of the MODE=brief 126s timeouts observed in all 3 sibling projects.
+- **TAP-2472: coordinator MODE=brief narrows `list_issues`** ([.claude/agents/ralph-coordinator.md:104-129](.claude/agents/ralph-coordinator.md#L104-L129)). Replaces `limit=15` + no state filter + client-side discard with `state="started"` first (`limit=50`), falling back to `state="unstarted"` if the started set returns <3 candidates. Defense-in-depth against the 126s timeout even after TAP-2471 fixes the root cause. Shipped as `docs/specs/tap-2472-coordinator-narrowing.patch` in PR #49 because the agent file is blocked from agent edits (TAP-623); applied as a separate operator commit in PR #50.
+- **TAP-2473: `ralph_push_pending_commits` fetches + rebases on rejected push** ([ralph_loop.sh:4490-4624](ralph_loop.sh#L4490-L4624)). When `git push` is rejected with "fetch first" / "cannot lock ref", the helper now runs `git fetch origin` + `git rebase --autostash origin/<branch>` + retry once. Rebase conflict → `git rebase --abort` + log to `.push-failure.err` as today. **Hard rule: no `--force` / `--force-with-lease`** — the R0 push-to-main block in `validate-command.sh` stays effective. Cross-project audit 2026-05-22/23 found 7 stranded commits from rejected pushes (tapps-mcp 3, NLTlabsPE 2, AgentForge 2); this prevents future stranding (does not recover the existing 7 — operator must `git pull --rebase && git push` once in each sibling).
+- **TAP-2485: auto-clear `.push-failure.err` + `.coordinator-{brief,debrief,consult}.err` on writer success** ([ralph_loop.sh:_ralph_push_clear_failure_marker, _coordinator_record_outcome](ralph_loop.sh)). Stale failure markers under `.ralph/` were stranded forever — the agent can't `rm` them (`validate-command.sh` blanket-blocks rm against `.ralph/*`, intentional per TAP-2344) and the protect-hook allowlist stays narrow on purpose. Now the writer clears its own marker on next success. Failure semantics unchanged; mode-isolated (a `brief` success only clears `.coordinator-brief.err`). Surfaces from a well-evidenced ticket filed by a sibling-project Claude session during post-TAP-2470 cleanup.
+
+### Changed
+
+- **CLAUDE.md "Linear cache-locality optimizer (LINOPT epic)"** updated to document the TAP-2472 state-narrowed call shape ([CLAUDE.md:194](CLAUDE.md#L194)).
+
+### Test coverage added
+
+- 13 new BATS cases in `tests/unit/test_protect_ralph_files.bats` (6 new-allowed paths + 6 still-blocked regression guards + 1 patch-mechanism check).
+- 5 new BATS cases in `tests/unit/test_coordinator_agent.bats` (self-detect pre-patch state via the obsolete `limit=15` sentinel, skip-then-pass after operator apply).
+- 5 new BATS cases in `tests/unit/test_push_pending_commits.bats` (clean rebase + retry succeeds, rebase conflict → abort + .push-failure.err, force-push regression guard, DRY_RUN short-circuit, RALPH_PUSH_EVERY_LOOP=false short-circuit).
+- 4 new BATS cases in `tests/unit/test_push_pending_commits.bats` for TAP-2485 (clear on happy path, clear on rebase-recovery, preserve on failure, no allowlist widening regression guard).
+- 9 new BATS cases in `tests/unit/test_coordinator_record_outcome.bats` for `_coordinator_record_outcome` (failure write + success clear + mode isolation + per-mode marker names + no allowlist widening).
+
+Total: 2000+ unit tests pass (1986 baseline + 36 new TAP-2470-bundle cases).
+
+### Notes for operators
+
+- After upgrading, the **post-merge sibling-cleanup prompt is shorter** — no more `rm -f .ralph/...` instructions (TAP-2485 makes them obsolete + invalid).
+- The TAP-1875 retry-once + WARN-and-clear "regression detector" path may be dead code after this release. Watch sibling `.coordinator-brief.err` files for 24h post-upgrade; if they stay empty, file a cleanup ticket.
+- **Free-rider:** `tests/unit/test_agent_contract_tap646.bats` regex was updated to recognize `mcp__plugin_linear_linear__list_issues` (pre-existing test failure from PR #48 that would have blocked CI).
+
+---
+
 ## [2.17.0] — 2026-05-22
 
 Minor release adding `.ralphrc.local` — the operator-only override surface that closes the "R0 escape hatch is agent-unreachable" gap surfaced by the tapps-mcp upgrade review (every Ralph-managed repo with `protect-ralph-files.sh` could neither bypass the R0 push-to-main block from inside the harness nor land the bypass without an out-of-band shell ritual).
