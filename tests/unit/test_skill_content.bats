@@ -9,7 +9,7 @@ load '../helpers/test_helper'
 
 SKILLS_ROOT="${BATS_TEST_DIRNAME}/../../templates/skills/global"
 
-TIER_S_SKILLS=(search-first tdd-workflow simplify context-audit agentic-engineering)
+TIER_S_SKILLS=(search-first tdd-workflow simplify context-audit agentic-engineering ralph-runner)
 
 setup() {
     [[ -d "$SKILLS_ROOT" ]] || skip "templates/skills/global not present"

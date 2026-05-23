@@ -1040,6 +1040,58 @@ upgrade_gitignore() {
 # Single-project orchestrator
 # =============================================================================
 
+# =============================================================================
+# Tier S: Global Claude skills — sync ~/.ralph/templates/skills/global/ into
+#         ~/.claude/skills/ once per ralph-upgrade-project invocation.
+# =============================================================================
+# Host-wide install, not per-project: the destination is $HOME/.claude/skills.
+# Idempotent — lib/skills_install.sh uses a .ralph-managed sidecar manifest
+# so user-authored skills and user-modified files are never touched.
+# Failure here is WARN-only — we don't want a missing global-skills source to
+# block the per-project Tier 1/2 upgrade work that's the user's main intent.
+upgrade_global_skills_tier_s() {
+    local src="$RALPH_TEMPLATES/skills/global"
+    local dst="$HOME/.claude/skills"
+    local lib="$RALPH_HOME/lib/skills_install.sh"
+
+    if [[ ! -d "$src" ]]; then
+        log SKIP "No $src — run 'ralph-upgrade' first to populate global templates"
+        return 0
+    fi
+    if [[ ! -f "$lib" ]]; then
+        log WARN "Missing $lib — global skill sync skipped"
+        return 0
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log DRY "Would sync global Claude skills: $src → $dst"
+        return 0
+    fi
+
+    # shellcheck disable=SC1090
+    source "$lib"
+
+    # Use Ralph's installed version (RALPH_VERSION in ~/.ralph/ralph_loop.sh)
+    # for the sidecar manifest, NOT this script's own $VERSION. install.sh's
+    # install_global_skills uses Ralph's version; we match that so the
+    # ralph_version field is consistent regardless of which install path
+    # populated the sidecar.
+    local ralph_ver=""
+    if [[ -f "$RALPH_HOME/ralph_loop.sh" ]]; then
+        ralph_ver=$(grep -m1 '^RALPH_VERSION=' "$RALPH_HOME/ralph_loop.sh" \
+            | sed 's/.*RALPH_VERSION="\{0,1\}\([^"]*\)"\{0,1\}/\1/' \
+            | tr -d '[:space:]')
+    fi
+    [[ -z "$ralph_ver" ]] && ralph_ver="unknown"
+
+    log INFO "Syncing global Claude skills into $dst (ralph_version=$ralph_ver)"
+    if skills_install_global "$src" "$dst" "$ralph_ver"; then
+        log SUCCESS "Global skills synced"
+    else
+        log WARN "Global skill sync reported an error — continuing"
+    fi
+}
+
 upgrade_single_project() {
     local project="$1"
     reset_project_counters
@@ -1301,6 +1353,10 @@ main() {
     echo ""
 
     preflight
+
+    # Tier S: host-wide global Claude skills (~/.claude/skills/). Runs once
+    # per invocation, regardless of single vs --all mode. Idempotent.
+    upgrade_global_skills_tier_s
 
     case "$mode" in
         single) upgrade_single_project "$target_path" ;;

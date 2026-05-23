@@ -25,7 +25,7 @@ extract_frontmatter() {
 
 # List every Tier S skill dir that must be present. Hard-coding the set
 # means a future drop of a skill without updating the test is caught.
-TIER_S_SKILLS=(search-first tdd-workflow simplify context-audit agentic-engineering)
+TIER_S_SKILLS=(search-first tdd-workflow simplify context-audit agentic-engineering ralph-runner)
 
 setup() {
     [[ -d "$SKILLS_ROOT" ]] || skip "templates/skills/global not present"
