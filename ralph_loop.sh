@@ -4478,13 +4478,25 @@ ralph_compute_coordinator_timeout() {
 # perms), commits sit local and Linear says "Done" while origin is unaware
 # — operator-visible state drift.
 #
+# TAP-2473: when the first push is rejected ("fetch first" or "cannot lock
+# ref"), fetch origin and attempt `git rebase --autostash origin/<branch>`
+# once before logging the failure. If the rebase succeeds, retry the push.
+# If the rebase conflicts OR the second push fails, abort the rebase and
+# write to .push-failure.err as today. Cross-project audit 2026-05-22/23
+# found 7 stranded commits across tapps-mcp / AgentForge / NLTlabsPE from
+# this exact "fetch first" rejection — Linear ticked Done, origin lagged.
+#
+# Hard rule: no --force / --force-with-lease. The R0 push-to-main block in
+# templates/hooks/validate-command.sh must remain effective. Recovery is
+# via fast-forward / clean rebase only.
+#
 # Safety envelope:
 #   - No upstream branch (detached HEAD, brand-new local branch) → silent skip
 #   - Not in a git repo → silent skip
 #   - Zero unpushed commits → silent skip
-#   - Push failure → WARN with tail of git output to .ralph/.push-failure.err,
-#     never propagate failure / never trip CB. Operator gets visibility
-#     without the loop dying on a transient auth/network blip.
+#   - Push failure (after fetch+rebase retry) → WARN with tail of git output
+#     to .ralph/.push-failure.err, never propagate failure / never trip CB.
+#     Operator gets visibility without the loop dying on a transient blip.
 #
 # Disable knob: RALPH_PUSH_EVERY_LOOP=false (default true). Honors DRY_RUN.
 ralph_push_pending_commits() {
@@ -4509,15 +4521,74 @@ ralph_push_pending_commits() {
     _push_out=$(git -C "$_git_root" push 2>&1) || _push_rc=$?
     if [[ "$_push_rc" -eq 0 ]]; then
         log_status "INFO" "push: succeeded ($_ahead commit(s) to $_upstream)"
+        return 0
+    fi
+
+    # TAP-2473: rejected push — attempt one fetch + autostash-rebase + retry
+    # before logging the failure. _upstream looks like `origin/main`; split
+    # on the first `/` to get remote + branch.
+    local _remote="${_upstream%%/*}"
+    local _ref="${_upstream#*/}"
+    log_status "INFO" "push: rejected (exit $_push_rc) — attempting fetch+rebase recovery against $_upstream"
+
+    local _fetch_out _fetch_rc=0
+    _fetch_out=$(git -C "$_git_root" fetch "$_remote" "$_ref" 2>&1) || _fetch_rc=$?
+    if [[ "$_fetch_rc" -ne 0 ]]; then
+        log_status "WARN" "push: fetch failed (exit $_fetch_rc) — skipping rebase, logging original push failure"
+        _ralph_push_log_failure "$_push_rc" "$_ahead" "$_upstream" "$_push_out"
+        return 0
+    fi
+
+    local _behind
+    _behind=$(git -C "$_git_root" rev-list --count "HEAD..$_upstream" 2>/dev/null || echo 0)
+    if [[ "${_behind:-0}" -eq 0 ]]; then
+        # Remote did not move; the original push failure was something else
+        # (auth, ref-lock-during-flight, network). Don't rebase — log and exit.
+        log_status "WARN" "push: rejected but no new upstream commits found — not a fetch-first case; logging original failure"
+        _ralph_push_log_failure "$_push_rc" "$_ahead" "$_upstream" "$_push_out"
+        return 0
+    fi
+
+    log_status "INFO" "push: $_behind commit(s) on $_upstream ahead of HEAD — rebasing"
+    local _rebase_out _rebase_rc=0
+    _rebase_out=$(git -C "$_git_root" rebase --autostash "$_upstream" 2>&1) || _rebase_rc=$?
+    if [[ "$_rebase_rc" -ne 0 ]]; then
+        # Conflict (or any other rebase failure) — abort and log.
+        git -C "$_git_root" rebase --abort >/dev/null 2>&1 || true
+        log_status "WARN" "push: rebase against $_upstream failed (exit $_rebase_rc) — aborted; logging original push failure"
+        _ralph_push_log_failure "$_push_rc" "$_ahead" "$_upstream" "$_push_out" "$_rebase_out"
+        return 0
+    fi
+
+    log_status "INFO" "push: rebase succeeded — retrying push"
+    local _push2_out _push2_rc=0
+    _push2_out=$(git -C "$_git_root" push 2>&1) || _push2_rc=$?
+    if [[ "$_push2_rc" -eq 0 ]]; then
+        # Recompute ahead because the rebase may have changed the count.
+        local _ahead_after
+        _ahead_after=$(git -C "$_git_root" rev-list --count "@{u}..HEAD" 2>/dev/null || echo "$_ahead")
+        log_status "INFO" "push: retry succeeded after fetch+rebase ($_ahead initial commits, $_behind upstream commits incorporated)"
     else
-        log_status "WARN" "push: failed (exit $_push_rc) — $_ahead commit(s) still local on HEAD; see ${RALPH_DIR:-.ralph}/.push-failure.err"
-        {
-            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] git push failed (exit $_push_rc) ahead=$_ahead upstream=$_upstream"
-            echo "--- git output ---"
-            echo "$_push_out" | tail -c 1024
-        } > "${RALPH_DIR:-.ralph}/.push-failure.err" 2>/dev/null || true
+        log_status "WARN" "push: retry failed (exit $_push2_rc) after successful rebase — logging both failures"
+        _ralph_push_log_failure "$_push2_rc" "$_ahead" "$_upstream" "$_push2_out" "$_rebase_out"
     fi
     return 0
+}
+
+# TAP-2473: shared failure-log writer for ralph_push_pending_commits. Keeps
+# the call sites tight while preserving the original .push-failure.err shape
+# (operators may grep / tail this file).
+_ralph_push_log_failure() {
+    local _rc="$1" _ahead="$2" _upstream="$3" _push_out="$4" _rebase_out="${5:-}"
+    {
+        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] git push failed (exit $_rc) ahead=$_ahead upstream=$_upstream"
+        echo "--- git output ---"
+        echo "$_push_out" | tail -c 1024
+        if [[ -n "$_rebase_out" ]]; then
+            echo "--- rebase output ---"
+            echo "$_rebase_out" | tail -c 1024
+        fi
+    } > "${RALPH_DIR:-.ralph}/.push-failure.err" 2>/dev/null || true
 }
 
 # Main execution function
