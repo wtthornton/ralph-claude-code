@@ -77,7 +77,13 @@ RALPH_TASK_SOURCE="file"
 # Must exactly match the project name in your Linear workspace.
 # RALPH_LINEAR_PROJECT="Ralph Continuous Coding"
 
-# Linear team name (optional — used in log messages only)
+# Linear team name (TAP-2440)
+# REQUIRED when the team name does NOT prefix the project name.
+# Example: project "AgentForge Platform" lives under team "TappsCodingAgents",
+# so Claude cannot infer "TappsCodingAgents" from the project string and the
+# Linear plugin silently returns no issues. Set this and the harness injects
+# `TASK TEAM: '<value>'` into every loop's prompt context.
+# Safe to omit when the project name already starts with the team name.
 # RALPH_LINEAR_TEAM="TappsCodingAgents"
 
 # =============================================================================

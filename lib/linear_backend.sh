@@ -189,6 +189,161 @@ _linear_read_hook_count() {
 }
 
 # =============================================================================
+# TAP-2442: Snapshot-cache read for startup pre-seed.
+#
+# On iteration 1 of an OAuth-via-MCP run, .ralph/status.json has no
+# linear_open_count / linear_done_count entry (the on-stop hook has not
+# run yet), so _linear_read_hook_count abstains and every call site logs
+# "Linear count (op) unavailable — skipping exit gate this iteration".
+# AgentForge 2026-05-22: 4× in 5 loops.
+#
+# The tapps-mcp snapshot cache at .tapps-mcp-cache/linear-snapshots/ already
+# stores recent list_issues responses (invalidated by every Linear write via
+# tapps_linear_snapshot_invalidate). Reading it at boot is free relative to a
+# fresh list_issues round-trip and gives the gate authoritative counts from
+# loop 1. TAP-536 fail-loud semantics preserved: no cache file / expired
+# entry / non-numeric → exit 1 (abstain), never fabricate a zero.
+#
+# Args:
+#   $1 state         — Linear state group ("open" or "completed")
+#   $2 [team]        — team name; defaults to ${RALPH_LINEAR_TEAM:-}
+#   $3 [project]     — project name; defaults to ${RALPH_LINEAR_PROJECT:-}
+#   $4 [cache_dir]   — override cache root; defaults to .tapps-mcp-cache/linear-snapshots
+#
+# Stdout: integer count on success.
+# Exit:   0 on success, 1 on miss / expired / unreadable / non-array.
+# =============================================================================
+_linear_count_from_snapshot_cache() {
+    local state="$1"
+    local team="${2:-${RALPH_LINEAR_TEAM:-}}"
+    local project="${3:-${RALPH_LINEAR_PROJECT:-}}"
+    local cache_dir="${4:-${RALPH_LINEAR_SNAPSHOT_CACHE_DIR:-.tapps-mcp-cache/linear-snapshots}}"
+
+    [[ -n "$state" ]] || { _linear_log_error "snapshot_${state}" "no_state"; return 1; }
+    [[ -n "$team" && -n "$project" ]] || {
+        _linear_log_error "snapshot_${state}" "no_team_or_project"
+        return 1
+    }
+    [[ -d "$cache_dir" ]] || {
+        _linear_log_error "snapshot_${state}" "no_cache_dir"
+        return 1
+    }
+
+    # Snapshot files are named "<team>__<project>__<state>__<hash>.json".
+    # team/project may contain spaces — match by glob, not by literal.
+    # Use shopt nullglob so the loop is skipped (rather than running once with
+    # the literal pattern) when no files match.
+    local _candidates=()
+    local f
+    local _restore_nullglob="$(shopt -p nullglob)"
+    shopt -s nullglob
+    for f in "$cache_dir"/"${team}__${project}__${state}__"*.json; do
+        _candidates+=("$f")
+    done
+    eval "$_restore_nullglob"
+
+    [[ ${#_candidates[@]} -gt 0 ]] || {
+        _linear_log_error "snapshot_${state}" "no_cache_file"
+        return 1
+    }
+
+    # Pick most-recently-modified candidate (in case multiple slices coexist).
+    local _newest=""
+    local _newest_mtime=0
+    for f in "${_candidates[@]}"; do
+        local _mt
+        _mt=$(stat -c '%Y' "$f" 2>/dev/null || stat -f '%m' "$f" 2>/dev/null || echo "0")
+        if [[ "$_mt" -gt "$_newest_mtime" ]]; then
+            _newest_mtime="$_mt"
+            _newest="$f"
+        fi
+    done
+    [[ -n "$_newest" ]] || { _linear_log_error "snapshot_${state}" "no_cache_file"; return 1; }
+
+    # Expiry: snapshot includes expires_at as a Unix epoch (float). If absent or
+    # < now, treat as stale. Operators tolerate "stale but recent" — pull the
+    # max-age override from the same env var as the hook-count path so both
+    # caches share a single staleness contract.
+    local _expires _now
+    _expires=$(jq -r '.expires_at // 0' "$_newest" 2>/dev/null || echo "0")
+    _now=$(date -u +%s)
+    # _expires may be a float — strip the decimal for integer comparison.
+    _expires=${_expires%.*}
+    [[ "$_expires" =~ ^[0-9]+$ ]] || _expires=0
+    if [[ "$_expires" -lt "$_now" ]]; then
+        _linear_log_error "snapshot_${state}" "cache_expired"
+        return 1
+    fi
+
+    local _count
+    _count=$(jq -r '.issues // [] | length' "$_newest" 2>/dev/null)
+    if ! [[ "$_count" =~ ^[0-9]+$ ]]; then
+        _linear_log_error "snapshot_${state}" "parse"
+        return 1
+    fi
+
+    printf '%s\n' "$_count"
+    return 0
+}
+
+# TAP-2442: One-shot writer used by the startup pre-seed in ralph_loop.sh
+# main(). Reads open + completed counts from snapshot cache and merges
+# them into $RALPH_DIR/status.json with a linear_counts_at timestamp so
+# the existing _linear_read_hook_count path returns the cached value on
+# iteration 1 instead of abstaining.
+#
+# No-op (returns 0) when:
+#   - The status file's path is unset
+#   - jq is unavailable
+#   - Both cache reads fail (no fresh snapshot in either state)
+#
+# Always returns 0 so a missing/stale cache never blocks startup.
+linear_seed_counts_from_snapshot_cache() {
+    local ralph_dir="${RALPH_DIR:-.ralph}"
+    local status_file="$ralph_dir/status.json"
+
+    command -v jq >/dev/null 2>&1 || return 0
+
+    local _open _done
+    _open=$(_linear_count_from_snapshot_cache "open" 2>/dev/null) || _open=""
+    _done=$(_linear_count_from_snapshot_cache "completed" 2>/dev/null) || _done=""
+
+    # Nothing to seed — preserve TAP-536 abstain semantics by writing nothing.
+    [[ -n "$_open" || -n "$_done" ]] || return 0
+
+    mkdir -p "$ralph_dir" 2>/dev/null || return 0
+    local _ts
+    _ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
+    local _tmp
+    _tmp=$(mktemp "${status_file}.XXXXXX" 2>/dev/null) || return 0
+
+    if [[ -f "$status_file" ]] && jq -e 'type == "object"' "$status_file" >/dev/null 2>&1; then
+        jq \
+            --arg loc "${_open}" \
+            --arg ldc "${_done}" \
+            --arg ts "$_ts" \
+            '
+              (if $loc != "" then .linear_open_count = ($loc|tonumber) else . end)
+            | (if $ldc != "" then .linear_done_count = ($ldc|tonumber) else . end)
+            | (if ($loc != "" or $ldc != "") and $ts != "" then .linear_counts_at = $ts else . end)
+            ' "$status_file" > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$status_file"
+    else
+        jq -n \
+            --arg loc "${_open}" \
+            --arg ldc "${_done}" \
+            --arg ts "$_ts" \
+            '
+              {}
+            | (if $loc != "" then .linear_open_count = ($loc|tonumber) else . end)
+            | (if $ldc != "" then .linear_done_count = ($ldc|tonumber) else . end)
+            | (if ($loc != "" or $ldc != "") and $ts != "" then .linear_counts_at = $ts else . end)
+            ' > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$status_file"
+    fi
+    rm -f "$_tmp" 2>/dev/null
+    return 0
+}
+
+# =============================================================================
 # Public functions
 # =============================================================================
 

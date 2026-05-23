@@ -186,7 +186,7 @@ USE_TMUX=false
 RALPH_SERVICE=""           # Monorepo service scope (Issue #163)
 RALPH_TASK_SOURCE="file"   # Task backend: "file" (fix_plan.md) or "linear"
 RALPH_LINEAR_PROJECT=""    # Linear project name (required when RALPH_TASK_SOURCE=linear)
-RALPH_LINEAR_TEAM=""       # Linear team name (optional, used in log messages)
+RALPH_LINEAR_TEAM=""       # Linear team name (required when team name != project name prefix; TAP-2440)
 
 # TAP-1103: CLI-flag values get a parallel `_cli_*` capture so they survive
 # `.ralphrc` and `ralph.config.json` sourcing. Final precedence after
@@ -1081,6 +1081,22 @@ ralph_extract_result_from_stream() {
         if [[ ! -f "$_backup" ]]; then
             cp "$output_file" "$_backup"
             log_status "INFO" "Created stream backup: $_backup"
+        fi
+        # TAP-2441: forensic guard for the capture-pipeline truncation pattern
+        # that hit AgentForge 2026-05-22 loop #5 (29 files modified, but the
+        # extracted result was 385 bytes — clear evidence the stream-to-result
+        # extraction dropped the body). Compare the extracted result against
+        # the original stream byte-count; warn if the result is < 10% of the
+        # source, which strongly indicates a truncated extraction even when
+        # the result happens to be valid JSON.
+        local _stream_bytes _result_bytes _ratio_pct
+        _stream_bytes=$(wc -c < "$_backup" 2>/dev/null | tr -cd '0-9' || echo "0")
+        _result_bytes=${#_extracted_result}
+        if [[ "$_stream_bytes" -gt 1024 && "$_result_bytes" -gt 0 ]]; then
+            _ratio_pct=$(( _result_bytes * 100 / _stream_bytes ))
+            if [[ "$_ratio_pct" -lt 10 ]]; then
+                log_status "WARN" "TAP-2441 stream extraction suspicious: result=${_result_bytes}B is ${_ratio_pct}% of stream=${_stream_bytes}B (capture pipeline may have dropped the body — backup at $_backup)"
+            fi
         fi
         echo "$_extracted_result" > "$output_file"
         log_status "INFO" "Stream extraction: isolated result object from JSONL stream (extraction_method=stream)"
@@ -2224,6 +2240,50 @@ build_loop_context() {
         local next_task
         next_task=$(linear_get_next_task) || next_task=""
         context+="TASK SOURCE: Linear project '${RALPH_LINEAR_PROJECT}'. "
+        # TAP-2440: when team name does NOT prefix project name, Claude guesses
+        # wrong and the Linear plugin silently returns []. Inject the team
+        # explicitly so the agent has a server-authoritative value to pass.
+        if [[ -n "${RALPH_LINEAR_TEAM:-}" ]]; then
+            context+="TASK TEAM: '${RALPH_LINEAR_TEAM}'. ALWAYS pass team='${RALPH_LINEAR_TEAM}' to Linear MCP calls (list_issues, get_issue, save_issue, list_projects). NEVER guess the team name from the project. "
+        fi
+        # TAP-2444: pre-warm the deferred-tool surface. Without an explicit
+        # name list the agent burns 4-6 keyword ToolSearch calls per loop
+        # (30-60s wall-clock) discovering tool surfaces that are stable
+        # across loops. Listing the canonical names lets Claude pre-load
+        # schemas in ONE ToolSearch(select:...) call. Placed inside the
+        # Linear branch BEFORE the giant prose so the 1500-char truncation
+        # at the function tail cannot drop it.
+        local _canonical_tools=(
+            "mcp__plugin_linear_linear__list_issues"
+            "mcp__plugin_linear_linear__get_issue"
+            "mcp__plugin_linear_linear__save_issue"
+            "mcp__plugin_linear_linear__list_projects"
+            "mcp__plugin_linear_linear__list_users"
+        )
+        if [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]]; then
+            _canonical_tools+=(
+                "mcp__tapps-mcp__tapps_session_start"
+                "mcp__tapps-mcp__tapps_linear_snapshot_get"
+                "mcp__tapps-mcp__tapps_lookup_docs"
+                "mcp__tapps-mcp__tapps_quality_gate"
+            )
+        fi
+        if [[ "${RALPH_MCP_BRAIN_AVAILABLE:-false}" == "true" ]]; then
+            _canonical_tools+=(
+                "mcp__tapps-brain__brain_recall"
+                "mcp__tapps-brain__brain_remember"
+            )
+        fi
+        if [[ "${RALPH_MCP_DOCS_AVAILABLE:-false}" == "true" ]] && ralph_task_is_docs_related; then
+            _canonical_tools+=(
+                "mcp__docs-mcp__docs_generate_adr"
+                "mcp__docs-mcp__docs_generate_story"
+                "mcp__docs-mcp__docs_validate_linear_issue"
+            )
+        fi
+        local _canon
+        _canon=$(IFS=,; echo "${_canonical_tools[*]}")
+        context+="CANONICAL MCP TOOLS (TAP-2444): pre-load schemas in ONE call — ToolSearch query=\"select:${_canon}\". Then call these tools by name; do NOT keyword-search for surfaces you already know. "
         if [[ -n "$next_task" ]]; then
             next_task=$(printf '%s' "$next_task" | ralph_sanitize_prompt_text 300)
             context+="Next issue: ${next_task}. "
@@ -2276,6 +2336,35 @@ build_loop_context() {
         _next_unchecked=$(grep -m1 -E "^[[:space:]]*- \[ \]" "$RALPH_DIR/fix_plan.md" 2>/dev/null \
             | sed -E 's/^[[:space:]]*- \[ \][[:space:]]*//' | head -c 300)
         RALPH_CURRENT_TASK_TEXT="$_next_unchecked"
+        # TAP-2444: same canonical-tools block as the Linear branch, minus
+        # the Linear plugin entries (file-mode projects do not use them).
+        local _canonical_tools_fm=()
+        if [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]]; then
+            _canonical_tools_fm+=(
+                "mcp__tapps-mcp__tapps_session_start"
+                "mcp__tapps-mcp__tapps_lookup_docs"
+                "mcp__tapps-mcp__tapps_quality_gate"
+                "mcp__tapps-mcp__tapps_score_file"
+            )
+        fi
+        if [[ "${RALPH_MCP_BRAIN_AVAILABLE:-false}" == "true" ]]; then
+            _canonical_tools_fm+=(
+                "mcp__tapps-brain__brain_recall"
+                "mcp__tapps-brain__brain_remember"
+            )
+        fi
+        if [[ "${RALPH_MCP_DOCS_AVAILABLE:-false}" == "true" ]] && ralph_task_is_docs_related; then
+            _canonical_tools_fm+=(
+                "mcp__docs-mcp__docs_generate_adr"
+                "mcp__docs-mcp__docs_generate_story"
+                "mcp__docs-mcp__docs_validate_linear_issue"
+            )
+        fi
+        if [[ ${#_canonical_tools_fm[@]} -gt 0 ]]; then
+            local _canon_fm
+            _canon_fm=$(IFS=,; echo "${_canonical_tools_fm[*]}")
+            context+="CANONICAL MCP TOOLS (TAP-2444): pre-load schemas in ONE call — ToolSearch query=\"select:${_canon_fm}\". Then call these tools by name; do NOT keyword-search for surfaces you already know. "
+        fi
     fi
 
     # PERF: Read circuit breaker state and previous summary in single jq call (was: 2 separate jq spawns)
@@ -5025,6 +5114,14 @@ main() {
         # consultation, so blocking startup is unnecessary.
         if declare -F linear_optimizer_run >/dev/null 2>&1; then
             linear_optimizer_run 2>>"${LOG_DIR}/ralph.log" &
+        fi
+
+        # TAP-2442: pre-seed status.json from the tapps-mcp snapshot cache so
+        # iteration 1's exit-gate has authoritative counts instead of abstaining
+        # for the entire first loop. No-op when the cache is empty or stale —
+        # TAP-536 fail-loud semantics preserved.
+        if declare -F linear_seed_counts_from_snapshot_cache >/dev/null 2>&1; then
+            linear_seed_counts_from_snapshot_cache || true
         fi
 
         # TAP-536: API failure here defaults to "1 incomplete" (the safe answer
