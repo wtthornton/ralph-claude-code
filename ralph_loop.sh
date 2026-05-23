@@ -1082,6 +1082,22 @@ ralph_extract_result_from_stream() {
             cp "$output_file" "$_backup"
             log_status "INFO" "Created stream backup: $_backup"
         fi
+        # TAP-2441: forensic guard for the capture-pipeline truncation pattern
+        # that hit AgentForge 2026-05-22 loop #5 (29 files modified, but the
+        # extracted result was 385 bytes — clear evidence the stream-to-result
+        # extraction dropped the body). Compare the extracted result against
+        # the original stream byte-count; warn if the result is < 10% of the
+        # source, which strongly indicates a truncated extraction even when
+        # the result happens to be valid JSON.
+        local _stream_bytes _result_bytes _ratio_pct
+        _stream_bytes=$(wc -c < "$_backup" 2>/dev/null | tr -cd '0-9' || echo "0")
+        _result_bytes=${#_extracted_result}
+        if [[ "$_stream_bytes" -gt 1024 && "$_result_bytes" -gt 0 ]]; then
+            _ratio_pct=$(( _result_bytes * 100 / _stream_bytes ))
+            if [[ "$_ratio_pct" -lt 10 ]]; then
+                log_status "WARN" "TAP-2441 stream extraction suspicious: result=${_result_bytes}B is ${_ratio_pct}% of stream=${_stream_bytes}B (capture pipeline may have dropped the body — backup at $_backup)"
+            fi
+        fi
         echo "$_extracted_result" > "$output_file"
         log_status "INFO" "Stream extraction: isolated result object from JSONL stream (extraction_method=stream)"
     else

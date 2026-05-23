@@ -876,6 +876,35 @@ fi
 # =============================================================================
 _nsb_threshold="${RALPH_HALT_NO_STATUS_BLOCK_THRESHOLD:-3}"
 _nsb_count_file="$RALPH_DIR/.no_status_block_count"
+
+# TAP-2441: forensics. AgentForge 2026-05-22 loop #5 reported
+# files_modified=29 in its agent-visible RALPH_STATUS but the hook recorded
+# response_bytes=385 and halted on no_status_block_3x — a 29-file response
+# cannot be 385 bytes, so the capture pipeline lost the body. These fields
+# (response_bytes, .files_modified_this_loop presence + actual count, first
+# 100 chars of response) make the next occurrence diagnosable from the log
+# alone instead of requiring a transcript replay.
+_resp_bytes=${#response_text}
+_fmtl_file="$RALPH_DIR/.files_modified_this_loop"
+_fmtl_present="false"
+_fmtl_count=0
+if [[ -f "$_fmtl_file" ]]; then
+  _fmtl_present="true"
+  _fmtl_count=$(sort -u "$_fmtl_file" 2>/dev/null | wc -l | tr -cd '0-9' || echo "0")
+  [[ -n "$_fmtl_count" ]] || _fmtl_count=0
+fi
+_resp_sample=${response_text:0:100}
+# Collapse newlines to spaces so the diagnostic stays on one log line.
+_resp_sample=${_resp_sample//$'\n'/ }
+
+_nsb_log_diag() {
+  local _branch="$1"
+  if [[ -f "$_ralph_log" ]]; then
+    echo "[$_ts] [INFO] on-stop: TAP-2441 nsb-${_branch} response_bytes=${_resp_bytes} files_modified_this_loop_present=${_fmtl_present} actual_files=${_fmtl_count} reported_files=${files_modified} reported_tasks=${tasks_done} sample=\"${_resp_sample}\"" \
+      >> "$_ralph_log"
+  fi
+}
+
 if [[ -z "$_status_block" ]]; then
   # TAP-1899: productivity guard. A truncated-but-productive response (e.g.
   # the 30-min adaptive-timeout case observed in AgentForge 2026-05-21) has
@@ -888,6 +917,7 @@ if [[ -z "$_status_block" ]]; then
   # and halt the campaign mid-flight.
   if [[ "$files_modified" -ge 1 || "$tasks_done" -ge 1 ]]; then
     rm -f "$_nsb_count_file" 2>/dev/null || true
+    _nsb_log_diag "productivity-reset"
     if [[ -f "$_ralph_log" ]]; then
       echo "[$_ts] [INFO] on-stop: no RALPH_STATUS block but loop was productive (files=$files_modified tasks=$tasks_done) — counter reset (TAP-1899)" >> "$_ralph_log"
     fi
@@ -899,6 +929,7 @@ if [[ -z "$_status_block" ]]; then
     fi
     _nsb_new=$((_nsb_prev + 1))
     printf '%s\n' "$_nsb_new" > "$_nsb_count_file" 2>/dev/null || true
+    _nsb_log_diag "increment-to-${_nsb_new}"
     if [[ "$_nsb_new" -ge "$_nsb_threshold" && ! -f "$RALPH_DIR/.harness_halt_reason" ]]; then
       _resp_len=${#response_text}
       printf 'no_status_block_%sx loop=%s response_bytes=%s\n' \
@@ -911,7 +942,10 @@ if [[ -z "$_status_block" ]]; then
   fi
 else
   # Successful parse — reset counter
-  rm -f "$_nsb_count_file" 2>/dev/null || true
+  if [[ -f "$_nsb_count_file" ]]; then
+    rm -f "$_nsb_count_file" 2>/dev/null || true
+    _nsb_log_diag "successful-parse-reset"
+  fi
 fi
 
 # =============================================================================
