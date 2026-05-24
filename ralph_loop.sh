@@ -31,6 +31,8 @@ source "$SCRIPT_DIR/lib/exec_helpers.sh" || { echo "FATAL: Failed to source lib/
 [[ -f "$SCRIPT_DIR/lib/linear_backend.sh" ]] && source "$SCRIPT_DIR/lib/linear_backend.sh"
 [[ -f "$SCRIPT_DIR/lib/linear_optimizer.sh" ]] && source "$SCRIPT_DIR/lib/linear_optimizer.sh"
 [[ -f "$SCRIPT_DIR/lib/skill_retro.sh" ]] && source "$SCRIPT_DIR/lib/skill_retro.sh"
+# TAP-2499: orchestrator-level recommendation-repetition halt (defense-in-depth)
+[[ -f "$SCRIPT_DIR/lib/recommendation_repetition.sh" ]] && source "$SCRIPT_DIR/lib/recommendation_repetition.sh"
 [[ -f "$SCRIPT_DIR/lib/branch_cleanup.sh" ]] && source "$SCRIPT_DIR/lib/branch_cleanup.sh"
 [[ -f "$SCRIPT_DIR/lib/pending_merges.sh" ]] && source "$SCRIPT_DIR/lib/pending_merges.sh"
 # BRAIN-PHASE-B1: memory writes from on-stop hook. Sourced here so the main
@@ -4830,6 +4832,14 @@ execute_claude_code() {
             log_status "WARN" "Exit signal update failed; continuing with stale signals"
         fi
 
+        # TAP-2499: record this loop's RECOMMENDATION into the ring buffer
+        # so the next iteration's repetition check has data. Best-effort —
+        # missing module or missing field is a silent skip.
+        if declare -F recommendation_record >/dev/null 2>&1 && [[ -f "$RALPH_DIR/status.json" ]]; then
+            _rec_text=$(jq -r '.recommendation // ""' "$RALPH_DIR/status.json" 2>/dev/null)
+            [[ -n "$_rec_text" ]] && recommendation_record "$_rec_text"
+        fi
+
         # Coordinator post-run state machine (TAP-1477) — debrief decision
         # (TAP-917), BLOCK signal surfacing (TAP-923), and task-boundary
         # cleanup (TAP-924). Order is enforced inside the helper: debrief
@@ -5467,6 +5477,20 @@ main() {
             update_status "$loop_count" "$(_read_call_count)" "killswitch" "halted" "killswitch_activated"
             log_status "ERROR" "KILLSWITCH file detected - emergency halt"
             break
+        fi
+
+        # TAP-2499: orchestrator-level recommendation-repetition halt — fires
+        # when the same normalized RECOMMENDATION appears >= threshold times
+        # within the window, regardless of what the parser / CB / quorum
+        # paths report. Defense-in-depth for future regressions of TAP-2494.
+        if declare -F recommendation_repetition_check >/dev/null 2>&1; then
+            local _rep_hash
+            if _rep_hash=$(recommendation_repetition_check); then
+                ralph_audit "exit_decision" "recommendation_repetition" "graceful_exit" "loop_count=$loop_count,hash=$_rep_hash" "completed" 2>/dev/null
+                update_status "$loop_count" "$(_read_call_count)" "recommendation_repetition" "completed" "recommendation_repetition"
+                log_status "SUCCESS" "🏁 Recommendation-repetition halt (hash=${_rep_hash}) — agent stuck in pattern, halting"
+                break
+            fi
         fi
 
         # TAP-2495/TAP-2496: per-loop exit-signal quorum check. Mirrors the
