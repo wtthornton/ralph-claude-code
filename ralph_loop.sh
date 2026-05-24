@@ -1442,6 +1442,57 @@ _read_call_count() {
     echo "${_cc:-0}"
 }
 
+# TAP-2496: thin idle tick — skip the full Claude invocation when the Linear
+# backlog is freshly confirmed empty AND the coordinator's brief has high
+# confidence. Returns 0 (eligible) when all conditions met; non-zero otherwise.
+# The AgentForge 2026-05-23 idle-runaway paid ~$1.66 / loop for 108 ticks that
+# all reported "backlog empty." A thin tick replaces those with bash+jq+hook
+# overhead (~50ms) and lets the PR-2 quorum halt at 3 ticks.
+_thin_idle_tick_eligible() {
+    # Opt-out switch (operators set RALPH_THIN_IDLE_TICK=false in .ralphrc.local)
+    [[ "${RALPH_THIN_IDLE_TICK:-true}" == "false" ]] && return 1
+
+    # Linear mode only — file-mode projects need a different empty signal,
+    # out of scope for this PR.
+    [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]] || return 1
+
+    # linear_get_open_count abstains (exit 1) when counts are stale or missing.
+    # That's the same as "not confidently empty" — fall through to real Claude.
+    local _open_count
+    if ! _open_count=$(linear_get_open_count 2>/dev/null); then
+        return 1
+    fi
+    [[ "$_open_count" -eq 0 ]] || return 1
+
+    # Coordinator confidence floor (default 0.9 — conservative; aligned with
+    # the 90/10 split observed on AgentForge where coordinator was ≥0.9 on
+    # 90 of 108 idle ticks).
+    local _brief="$RALPH_DIR/brief.json"
+    [[ -f "$_brief" ]] || return 1
+    local _confidence_floor="${RALPH_THIN_TICK_CONFIDENCE_FLOOR:-0.9}"
+    local _confidence
+    _confidence=$(jq -r '.coordinator_confidence // 0' "$_brief" 2>/dev/null || echo 0)
+    # bash can't compare floats; awk for the threshold check
+    awk -v c="$_confidence" -v f="$_confidence_floor" 'BEGIN { exit !(c+0 >= f+0) }' || return 1
+
+    return 0
+}
+
+# TAP-2496: emit a synthetic RALPH_STATUS block via the existing on-stop.sh
+# stdin pipe — reuses the SAME parse path the real Claude response uses, so
+# no schema drift risk. The synthetic block uses multi-line shape (END marker
+# included) so it passes through the line-anchored greps directly.
+_emit_synthetic_idle_status() {
+    local _loop=$1
+    local _ts
+    _ts=$(get_iso_timestamp)
+    local _payload
+    _payload=$(jq -n --arg ts "$_ts" --argjson loop "$_loop" '{
+      result: ("Harness-synthesized idle tick at " + $ts + " — Linear backlog confirmed empty (open_count=0), coordinator confidence ≥ threshold, no Claude invocation.\n\n---RALPH_STATUS---\nSTATUS: COMPLETE\nTASKS_COMPLETED_THIS_LOOP: 0\nFILES_MODIFIED: 0\nWORK_TYPE: IDLE_TICK\nEXIT_SIGNAL: true\nRECOMMENDATION: harness-emitted idle tick (loop " + ($loop | tostring) + ") — backlog empty, no Claude call needed\n---END_RALPH_STATUS---")
+    }')
+    printf '%s' "$_payload" | RALPH_LOOP_ACTIVE=1 CLAUDE_PROJECT_DIR="${PROJECT_DIR:-$PWD}" bash "$RALPH_DIR/hooks/on-stop.sh"
+}
+
 # Issue #223: Helper to read token count
 _read_token_count() {
     local _tc=0
@@ -5555,6 +5606,25 @@ main() {
         # TAP-915: spawn coordinator to populate .ralph/brief.json before the
         # main agent runs. Best-effort — failure does not block the loop.
         ralph_spawn_coordinator "$loop_count"
+
+        # TAP-2496: thin idle tick. If Linear backlog is freshly confirmed
+        # empty AND coordinator confidence is high, skip the full Claude call
+        # and emit a synthetic RALPH_STATUS through the existing on-stop hook.
+        # Three consecutive thin ticks combine with TAP-2495's quorum to halt
+        # cleanly at < $0.10 — vs. AgentForge's $1.66 / idle-loop baseline.
+        if _thin_idle_tick_eligible; then
+            _emit_synthetic_idle_status "$loop_count"
+            # on-stop.sh wrote status.json; propagate to .exit_signals so the
+            # next loop's quorum check at the top of main() can see the new
+            # completion_indicators entry. Without this call the thin tick
+            # writes status.json but completion_indicators never grows and
+            # the quorum never fires.
+            update_exit_signals_from_status >/dev/null 2>&1 || true
+            log_status "INFO" "💤 Thin idle tick — Claude invocation skipped (loop $loop_count)"
+            update_status "$loop_count" "$(_read_call_count)" "thin_idle_tick" "running"
+            sleep "${INTER_LOOP_PAUSE:-2}"
+            continue
+        fi
 
         # Execute Claude Code
         execute_claude_code "$loop_count"
