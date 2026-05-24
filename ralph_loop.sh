@@ -5418,6 +5418,26 @@ main() {
             break
         fi
 
+        # TAP-2495/TAP-2496: per-loop exit-signal quorum check. Mirrors the
+        # startup check in lib/circuit_breaker.sh:init_circuit_breaker but
+        # fires WITHIN a session — necessary because the EXIT-CLEAN branch in
+        # on-stop.sh resets consecutive_no_progress on every EXIT_SIGNAL: true
+        # emission (including thin idle ticks from _emit_synthetic_idle_status),
+        # so the CB never opens from no-progress alone. Quorum on
+        # .exit_signals.completion_indicators is the deterministic halt.
+        if [[ -f "$RALPH_DIR/.exit_signals" ]]; then
+            local _quorum_count
+            _quorum_count=$(jq -r '.completion_indicators | length' "$RALPH_DIR/.exit_signals" 2>/dev/null || echo 0)
+            [[ "$_quorum_count" =~ ^[0-9]+$ ]] || _quorum_count=0
+            local _quorum_threshold=${EXIT_SIGNAL_HALT_THRESHOLD:-3}
+            if [[ "$_quorum_count" -ge "$_quorum_threshold" ]]; then
+                ralph_audit "exit_decision" "exit_signal_quorum" "graceful_exit" "loop_count=$loop_count,indicators=$_quorum_count" "completed" 2>/dev/null
+                update_status "$loop_count" "$(_read_call_count)" "exit_signal_quorum" "completed" "exit_signal_quorum"
+                log_status "SUCCESS" "🏁 Exit-signal quorum reached ($_quorum_count >= $_quorum_threshold) — agent asked to halt, harness complied"
+                break
+            fi
+        fi
+
         # TAP-1528 / TAP-1529: harness halt sentinel set by on-stop.sh when
         # consecutive RALPH_STATUS-missing responses or CB-OPEN thrashing is
         # detected. Resists CB_AUTO_RESET — operator must clear the file
@@ -5425,6 +5445,19 @@ main() {
         if [[ -f "$RALPH_DIR/.harness_halt_reason" ]]; then
             local halt_reason
             halt_reason=$(cat "$RALPH_DIR/.harness_halt_reason" 2>/dev/null || echo "unknown")
+            # TAP-2495: exit_signal_quorum is a CLEAN halt — Claude legitimately
+            # asked to stop via EXIT_SIGNAL: true ≥ EXIT_SIGNAL_HALT_THRESHOLD
+            # times. Surface as graceful exit (SUCCESS, completed) rather than
+            # the generic ERROR/halted shape, and self-clear the sentinel so
+            # the next ralph invocation against a populated backlog starts fresh.
+            if [[ "$halt_reason" == "exit_signal_quorum" ]]; then
+                ralph_audit "exit_decision" "exit_signal_quorum" "graceful_exit" "loop_count=$loop_count" "completed" 2>/dev/null
+                update_status "$loop_count" "$(_read_call_count)" "exit_signal_quorum" "completed" "exit_signal_quorum"
+                log_status "SUCCESS" "🏁 Exit-signal quorum honored — agent asked to halt, harness complied"
+                log_status "INFO" "  Sentinel cleared. Re-run ralph to start a new session."
+                rm -f "$RALPH_DIR/.harness_halt_reason" 2>/dev/null
+                break
+            fi
             ralph_audit "harness_halt" "on_stop_hook" "halt_execution" "reason=$halt_reason,loop_count=$loop_count" "halted" 2>/dev/null
             update_status "$loop_count" "$(_read_call_count)" "harness_halt" "halted" "$halt_reason"
             log_status "ERROR" "🛑 Harness halt: $halt_reason"
