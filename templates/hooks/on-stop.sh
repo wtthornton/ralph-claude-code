@@ -554,9 +554,17 @@ fi
 # extracts file_path / notebook_path, normalizes to repo-relative, dedupes (jq's
 # `unique` sorts as a side effect), caps at 100, atomic-writes. On no transcript
 # or no edit-class tools, writes an empty file rather than leaving a stale list.
+#
+# TAP-2501: skip this entire block for synthetic idle ticks (WORK_TYPE=IDLE_TICK).
+# Idle ticks have no transcript / no real tool calls, so re-running the walk
+# would rewrite the file to empty — busting the prompt-cache prefix for the
+# next real loop. Skipping keeps the previous loop's authoritative file list
+# intact across idle ticks.
 _lcf_dest="$RALPH_DIR/.last_completed_files"
 _lcf_tmp="${_lcf_dest}.tmp.$$"
-if [[ -n "$_transcript" && -f "$_transcript" ]]; then
+if [[ "$work_type" == "IDLE_TICK" ]]; then
+  : # skip — TAP-2501 cache hygiene
+elif [[ -n "$_transcript" && -f "$_transcript" ]]; then
   jq -rs '
     [ .[] | select(.type == "assistant") | .message.content[]?
       | select(.type == "tool_use"

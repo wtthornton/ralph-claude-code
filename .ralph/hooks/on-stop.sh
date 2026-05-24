@@ -554,9 +554,17 @@ fi
 # extracts file_path / notebook_path, normalizes to repo-relative, dedupes (jq's
 # `unique` sorts as a side effect), caps at 100, atomic-writes. On no transcript
 # or no edit-class tools, writes an empty file rather than leaving a stale list.
+#
+# TAP-2501: skip this entire block for synthetic idle ticks (WORK_TYPE=IDLE_TICK).
+# Idle ticks have no transcript / no real tool calls, so re-running the walk
+# would rewrite the file to empty — busting the prompt-cache prefix for the
+# next real loop. Skipping keeps the previous loop's authoritative file list
+# intact across idle ticks.
 _lcf_dest="$RALPH_DIR/.last_completed_files"
 _lcf_tmp="${_lcf_dest}.tmp.$$"
-if [[ -n "$_transcript" && -f "$_transcript" ]]; then
+if [[ "$work_type" == "IDLE_TICK" ]]; then
+  : # skip — TAP-2501 cache hygiene
+elif [[ -n "$_transcript" && -f "$_transcript" ]]; then
   jq -rs '
     [ .[] | select(.type == "assistant") | .message.content[]?
       | select(.type == "tool_use"
@@ -750,6 +758,14 @@ if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
       > "$RALPH_DIR/.circuit_breaker_state"
   fi
   local_tmp=$(mktemp "$RALPH_DIR/.circuit_breaker_state.XXXXXX")
+
+  # TAP-2497: clear mcp_blocked_count if this loop is NOT an mcp_unreachable
+  # response. Without this, transient outages would keep counting toward the
+  # quorum across recovered loops.
+  if ! [[ "$status" == "BLOCKED" && "$recommendation" == *mcp_unreachable* ]]; then
+    rm -f "$RALPH_DIR/.mcp_blocked_count" 2>/dev/null
+  fi
+
   if [[ "$files_modified" -gt 0 || "$tasks_done" -gt 0 ]]; then
     # Progress detected — reset no-progress counter, permission denials, and close
     jq '.consecutive_no_progress = 0 | .consecutive_permission_denials = 0 | .state = "CLOSED"' \
@@ -791,6 +807,29 @@ if [[ -f "$RALPH_DIR/.circuit_breaker_state" ]]; then
     jq '.consecutive_no_progress = 0 | .consecutive_permission_denials = 0 | .state = "CLOSED"' \
       "$RALPH_DIR/.circuit_breaker_state" > "$local_tmp" 2>/dev/null \
       && mv "$local_tmp" "$RALPH_DIR/.circuit_breaker_state"
+  elif [[ "$status" == "BLOCKED" && "$recommendation" == *mcp_unreachable* ]]; then
+    # TAP-2497: MCP transport is degraded — Claude correctly emitted BLOCKED
+    # rather than improvising EXIT_SIGNAL from a stale cache. Do NOT count
+    # this loop as no-progress (the agent is blocked on infrastructure, not
+    # stagnant). Bump a separate .mcp_blocked_count counter; ralph_loop.sh
+    # uses it to apply exponential backoff and halt after N consecutive
+    # outages with exit_reason=mcp_unreachable_quorum. Counter resets on
+    # the next non-mcp_unreachable response.
+    _mcp_blocked_file="$RALPH_DIR/.mcp_blocked_count"
+    _mcp_blocked_count=0
+    [[ -f "$_mcp_blocked_file" ]] && read -r _mcp_blocked_count < "$_mcp_blocked_file" 2>/dev/null
+    [[ "$_mcp_blocked_count" =~ ^[0-9]+$ ]] || _mcp_blocked_count=0
+    _mcp_blocked_count=$((_mcp_blocked_count + 1))
+    printf '%s\n' "$_mcp_blocked_count" > "$_mcp_blocked_file"
+    jq '.consecutive_permission_denials = 0' \
+      "$RALPH_DIR/.circuit_breaker_state" > "$local_tmp" 2>/dev/null \
+      && mv "$local_tmp" "$RALPH_DIR/.circuit_breaker_state"
+    # Quorum halt: 3 consecutive mcp_unreachable → write halt sentinel
+    _mcp_threshold=${RALPH_MCP_BLOCKED_QUORUM:-3}
+    if [[ "$_mcp_blocked_count" -ge "$_mcp_threshold" ]]; then
+      echo "mcp_unreachable_quorum" > "$RALPH_DIR/.harness_halt_reason"
+      echo "Harness halt: mcp_unreachable_quorum (${_mcp_blocked_count} consecutive mcp_unreachable)" >&2
+    fi
   elif [[ "$work_type" == "PLANNING" && -n "$_status_block" ]]; then
     # TAP-1686: Plan Mode loops produce a plan, not files. When the
     # coordinator marks a task HIGH-risk, build_loop_context sets
