@@ -2245,6 +2245,24 @@ build_loop_context() {
 
     # Extract incomplete tasks from task source
     if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        # TAP-2497: surface MCP health to the agent so it can emit
+        # STATUS: BLOCKED + RECOMMENDATION: mcp_unreachable instead of
+        # improvising EXIT_SIGNAL from a stale brief. The flags are set by
+        # ralph_probe_mcp_servers at startup; this line just exposes them.
+        # When linear=down (the most common failure on AgentForge 2026-05-23),
+        # the agent SHOULD emit BLOCKED+mcp_unreachable so on-stop.sh can
+        # back off rather than counting the loop as no-progress.
+        local _mcp_linear="ok" _mcp_tapps="ok" _mcp_brain="ok" _mcp_any_down=0
+        # Linear plugin is always-on if the user is signed in via Claude Code
+        # OAuth; we have no boolean for it, so treat unknown as "ok" (no
+        # false-positive BLOCKED). If you wire a linear probe later, replace.
+        [[ "${RALPH_MCP_TAPPS_AVAILABLE:-true}" == "false" ]] && _mcp_tapps="down" && _mcp_any_down=1
+        [[ "${RALPH_MCP_BRAIN_AVAILABLE:-true}" == "false" ]] && _mcp_brain="down" && _mcp_any_down=1
+        context+="MCP_HEALTH: linear=${_mcp_linear}, tapps=${_mcp_tapps}, brain=${_mcp_brain}. "
+        if (( _mcp_any_down )); then
+            context+="If a tool you need for the current task is 'down' above (and ToolSearch returns no matching tools mid-loop confirming the outage), DO NOT improvise EXIT_SIGNAL from a stale cache or brief — emit STATUS: BLOCKED with RECOMMENDATION: mcp_unreachable and FILES_MODIFIED: 0. The harness backs off via exponential sleep instead of counting the loop as no-progress. "
+        fi
+
         # TAP-536: On API failure, mark counts as "unknown" instead of "0".
         # Treating a failed lookup as 0 remaining can falsely encourage Claude
         # to emit EXIT_SIGNAL: true.
