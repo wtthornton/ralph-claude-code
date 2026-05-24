@@ -118,6 +118,25 @@ fi
 #      line 607. Anchoring every field grep to ^[[:space:]] makes prose
 #      mid-line uncatchable.
 if [[ -n "$_status_block" ]]; then
+  # PARSER-HARDENING-2 (TAP-2494): single-line RALPH_STATUS blocks.
+  # When Claude emits the entire block on one line (no embedded newlines,
+  # no ---END_RALPH_STATUS--- terminator — observed on AgentForge 2026-05-23
+  # campaign, $22 idle-runaway), the line-anchored field greps below silently
+  # return empty for every field. Block-normalize injects a newline before any
+  # known mid-line field token so the existing greps work unchanged.
+  #
+  # CRITICAL: gate this on "block contains no embedded newlines" so we DON'T
+  # split multi-line blocks where the RECOMMENDATION line legitimately mentions
+  # a field token in prose (NLTlabsPE 2026-04-30 incident — see test_on_stop_hook
+  # PARSER-HARDENING regression case). The line-anchor protection that catches
+  # mid-line prose only works when fields are already on their own lines.
+  if [[ "$_status_block" != *$'\n'* ]]; then
+    _status_block=$(echo "$_status_block" | awk '
+      BEGIN { pat = "[[:space:]]+(STATUS|TASKS_COMPLETED_THIS_LOOP|FILES_MODIFIED|WORK_TYPE|EXIT_SIGNAL|RECOMMENDATION|TESTS_STATUS|LINEAR_ISSUE|LINEAR_URL|LINEAR_EPIC|LINEAR_EPIC_DONE|LINEAR_EPIC_TOTAL|LINEAR_OPEN_COUNT|LINEAR_DONE_COUNT|NEXT_INTENDED_ISSUE):" }
+      { gsub(pat, "\n&"); print }
+    ')
+  fi
+
   _status_block=$(echo "$_status_block" | awk '
     {
       pos = index($0, ":")
@@ -157,6 +176,33 @@ if [[ -n "$_status_block" ]]; then
   # loop. Used by ralph_spawn_coordinator to consume a pre-warmed
   # brief-next.json instead of cold-spawning. Optional — graceful absence.
   next_intended_issue=$(echo "$_status_block" | grep -E "^[[:space:]]*NEXT_INTENDED_ISSUE:" | tail -1 | sed -E 's/^[[:space:]]*NEXT_INTENDED_ISSUE:[[:space:]]*//' | tr -d '[:space:]' || echo "")
+
+  # PARSER-HARDENING-2 FALLBACK (TAP-2494): defense-in-depth value-restricted
+  # parsers. Fire ONLY when the primary line-anchored grep above returned
+  # empty/false AND the block is non-empty (e.g., block-normalize couldn't
+  # find a match the anchored grep would catch — single-line block with no
+  # surrounding whitespace before the field token). Value enum restriction
+  # protects against prose collisions ("did NOT emit EXIT_SIGNAL: false" in a
+  # RECOMMENDATION line cannot trigger because the enum locks the surface).
+  if [[ -z "$exit_signal" || "$exit_signal" == "false" ]]; then
+    _fb_es=$(echo "$_status_block" | grep -oE '\bEXIT_SIGNAL:[[:space:]]*(true|false)\b' | tail -1 | sed -E 's/.*:[[:space:]]*//' | tr -d '[:space:]' || echo "")
+    if [[ -n "$_fb_es" && "$_fb_es" != "$exit_signal" ]]; then
+      exit_signal="$_fb_es"
+      echo "INFO: on-stop fallback parser hit EXIT_SIGNAL=$_fb_es (single-line block detected)" >&2
+    fi
+  fi
+  if [[ "$status" == "UNKNOWN" || -z "$status" ]]; then
+    _fb_st=$(echo "$_status_block" | grep -oE '\bSTATUS:[[:space:]]*(COMPLETE|BLOCKED|IN_PROGRESS|UNKNOWN)\b' | tail -1 | sed -E 's/.*:[[:space:]]*//' | tr -d '[:space:]' || echo "")
+    [[ -n "$_fb_st" ]] && status="$_fb_st"
+  fi
+  if [[ "$tasks_done" == "0" || -z "$tasks_done" ]]; then
+    _fb_td=$(echo "$_status_block" | grep -oE '\bTASKS_COMPLETED_THIS_LOOP:[[:space:]]*[0-9]+\b' | tail -1 | sed -E 's/.*:[[:space:]]*//' | tr -d '[:space:]' || echo "")
+    [[ -n "$_fb_td" && "$_fb_td" =~ ^[0-9]+$ ]] && tasks_done="$_fb_td"
+  fi
+  if [[ "$files_modified_reported" == "0" || -z "$files_modified_reported" ]]; then
+    _fb_fm=$(echo "$_status_block" | grep -oE '\bFILES_MODIFIED:[[:space:]]*[0-9]+\b' | tail -1 | sed -E 's/.*:[[:space:]]*//' | tr -d '[:space:]' || echo "")
+    [[ -n "$_fb_fm" && "$_fb_fm" =~ ^[0-9]+$ ]] && files_modified_reported="$_fb_fm"
+  fi
 else
   # No structured status block found — extract from full text
   exit_signal="false"
