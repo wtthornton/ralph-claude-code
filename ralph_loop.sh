@@ -4840,6 +4840,26 @@ execute_claude_code() {
             [[ -n "$_rec_text" ]] && recommendation_record "$_rec_text"
         fi
 
+        # TAP-2500: per-session cost hard-cap kill switch (opt-in).
+        # Closes the AgentForge $22 idle-runaway blast radius: even with all
+        # other safeties, a future class of bug (e.g., a coordinator regression
+        # that produces non-empty briefs from an empty backlog) could trigger
+        # another runaway. When RALPH_SESSION_COST_HARD_CAP_USD is set AND the
+        # session has crossed it, halt with exit_reason=session_cost_cap_hit
+        # and write a sentinel that ralph-runner skill reads to NOT relaunch.
+        if [[ -n "${RALPH_SESSION_COST_HARD_CAP_USD:-}" ]] && [[ -f "$RALPH_DIR/status.json" ]]; then
+            _sess_cost=$(jq -r '.session_cost_usd // 0' "$RALPH_DIR/status.json" 2>/dev/null)
+            _cap_hit=$(awk -v c="$_sess_cost" -v cap="$RALPH_SESSION_COST_HARD_CAP_USD" 'BEGIN { print (c+0 >= cap+0) ? "1" : "0" }')
+            if [[ "$_cap_hit" == "1" ]]; then
+                printf '%s' "$_sess_cost" > "$RALPH_DIR/.cost_cap_hit"
+                ralph_audit "exit_decision" "session_cost_cap_hit" "graceful_exit" "loop_count=$loop_count,cost=$_sess_cost,cap=$RALPH_SESSION_COST_HARD_CAP_USD" "completed" 2>/dev/null
+                update_status "$loop_count" "$(_read_call_count)" "session_cost_cap_hit" "completed" "session_cost_cap_hit"
+                log_status "ERROR" "💸 Session cost cap hit: \$${_sess_cost} >= \$${RALPH_SESSION_COST_HARD_CAP_USD} — halting"
+                log_status "INFO" "  Sentinel written: .ralph/.cost_cap_hit (ralph-runner will not relaunch)"
+                break
+            fi
+        fi
+
         # Coordinator post-run state machine (TAP-1477) — debrief decision
         # (TAP-917), BLOCK signal surfacing (TAP-923), and task-boundary
         # cleanup (TAP-924). Order is enforced inside the helper: debrief
