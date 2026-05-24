@@ -74,6 +74,27 @@ EOF
     current_state=$(jq -r '.state' "$CB_STATE_FILE" 2>/dev/null || echo "$CB_STATE_CLOSED")
 
     if [[ "$current_state" == "$CB_STATE_OPEN" ]]; then
+        # TAP-2495: EXIT_SIGNAL quorum wins over CB_AUTO_RESET.
+        # If the previous run accumulated ≥ EXIT_SIGNAL_HALT_THRESHOLD (default 3)
+        # legitimate completion indicators in .exit_signals, the agent was
+        # cleanly asking to halt. Bypassing that with auto-reset is what burned
+        # $22 on the AgentForge 2026-05-23 idle-runaway. Refuse to reset; write
+        # .harness_halt_reason so the loop's startup check at ralph_loop.sh:5425
+        # surfaces a graceful exit.
+        local _es_file="$RALPH_DIR/.exit_signals"
+        local _completion_count=0
+        if [[ -f "$_es_file" ]]; then
+            _completion_count=$(jq -r '.completion_indicators | length' "$_es_file" 2>/dev/null || echo 0)
+            [[ "$_completion_count" =~ ^[0-9]+$ ]] || _completion_count=0
+        fi
+        local _quorum_threshold=${EXIT_SIGNAL_HALT_THRESHOLD:-3}
+        if [[ "$_completion_count" -ge "$_quorum_threshold" ]]; then
+            _cb_log_transition "$CB_STATE_OPEN" "$CB_STATE_OPEN" \
+                "Exit-signal quorum (${_completion_count} >= ${_quorum_threshold}); refusing auto-reset (TAP-2495)"
+            echo "exit_signal_quorum" > "$RALPH_DIR/.harness_halt_reason"
+            return 0
+        fi
+
         if [[ "$CB_AUTO_RESET" == "true" ]]; then
             # Auto-reset: bypass cooldown, go straight to CLOSED
             local total_opens

@@ -96,6 +96,15 @@ brief_validate() {
         elif (.coordinator_confidence | type) != "number" then fail("coordinator_confidence must be number")
         elif (.coordinator_confidence < 0 or .coordinator_confidence > 1) then fail("coordinator_confidence must be in [0.0, 1.0]")
         elif (.created_at | type) != "string" or .created_at == "" then fail("created_at must be non-empty string")
+        # TAP-2498: acceptance_action is OPTIONAL during the deprecation window
+        # (legacy briefs without it must still validate). When PRESENT, it MUST
+        # be in the closed enum so coordinator wording drift cannot reach the
+        # agent — the AgentForge 2026-05-23 incident showed the same input
+        # producing "Emit EXIT_SIGNAL: true" → "loop continues cleanly" →
+        # "harness will halt" across consecutive briefs.
+        elif (has("acceptance_action") and (.acceptance_action | type) != "string") then fail("acceptance_action must be string")
+        elif (has("acceptance_action") and ([.acceptance_action] | inside(["EMIT_EXIT_SIGNAL","CONTINUE_AND_RETRY","BLOCK","IMPLEMENT"]) | not)) then fail("acceptance_action must be one of EMIT_EXIT_SIGNAL|CONTINUE_AND_RETRY|BLOCK|IMPLEMENT")
+        elif (has("acceptance_action_rationale") and (.acceptance_action_rationale | type) != "string") then fail("acceptance_action_rationale must be string")
         else "OK"
         end
     ' "$p" 2>/dev/null) || {

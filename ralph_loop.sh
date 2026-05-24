@@ -31,6 +31,8 @@ source "$SCRIPT_DIR/lib/exec_helpers.sh" || { echo "FATAL: Failed to source lib/
 [[ -f "$SCRIPT_DIR/lib/linear_backend.sh" ]] && source "$SCRIPT_DIR/lib/linear_backend.sh"
 [[ -f "$SCRIPT_DIR/lib/linear_optimizer.sh" ]] && source "$SCRIPT_DIR/lib/linear_optimizer.sh"
 [[ -f "$SCRIPT_DIR/lib/skill_retro.sh" ]] && source "$SCRIPT_DIR/lib/skill_retro.sh"
+# TAP-2499: orchestrator-level recommendation-repetition halt (defense-in-depth)
+[[ -f "$SCRIPT_DIR/lib/recommendation_repetition.sh" ]] && source "$SCRIPT_DIR/lib/recommendation_repetition.sh"
 [[ -f "$SCRIPT_DIR/lib/branch_cleanup.sh" ]] && source "$SCRIPT_DIR/lib/branch_cleanup.sh"
 [[ -f "$SCRIPT_DIR/lib/pending_merges.sh" ]] && source "$SCRIPT_DIR/lib/pending_merges.sh"
 # BRAIN-PHASE-B1: memory writes from on-stop hook. Sourced here so the main
@@ -160,7 +162,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.17.1"
+RALPH_VERSION="2.20.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -1442,6 +1444,57 @@ _read_call_count() {
     echo "${_cc:-0}"
 }
 
+# TAP-2496: thin idle tick — skip the full Claude invocation when the Linear
+# backlog is freshly confirmed empty AND the coordinator's brief has high
+# confidence. Returns 0 (eligible) when all conditions met; non-zero otherwise.
+# The AgentForge 2026-05-23 idle-runaway paid ~$1.66 / loop for 108 ticks that
+# all reported "backlog empty." A thin tick replaces those with bash+jq+hook
+# overhead (~50ms) and lets the PR-2 quorum halt at 3 ticks.
+_thin_idle_tick_eligible() {
+    # Opt-out switch (operators set RALPH_THIN_IDLE_TICK=false in .ralphrc.local)
+    [[ "${RALPH_THIN_IDLE_TICK:-true}" == "false" ]] && return 1
+
+    # Linear mode only — file-mode projects need a different empty signal,
+    # out of scope for this PR.
+    [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]] || return 1
+
+    # linear_get_open_count abstains (exit 1) when counts are stale or missing.
+    # That's the same as "not confidently empty" — fall through to real Claude.
+    local _open_count
+    if ! _open_count=$(linear_get_open_count 2>/dev/null); then
+        return 1
+    fi
+    [[ "$_open_count" -eq 0 ]] || return 1
+
+    # Coordinator confidence floor (default 0.9 — conservative; aligned with
+    # the 90/10 split observed on AgentForge where coordinator was ≥0.9 on
+    # 90 of 108 idle ticks).
+    local _brief="$RALPH_DIR/brief.json"
+    [[ -f "$_brief" ]] || return 1
+    local _confidence_floor="${RALPH_THIN_TICK_CONFIDENCE_FLOOR:-0.9}"
+    local _confidence
+    _confidence=$(jq -r '.coordinator_confidence // 0' "$_brief" 2>/dev/null || echo 0)
+    # bash can't compare floats; awk for the threshold check
+    awk -v c="$_confidence" -v f="$_confidence_floor" 'BEGIN { exit !(c+0 >= f+0) }' || return 1
+
+    return 0
+}
+
+# TAP-2496: emit a synthetic RALPH_STATUS block via the existing on-stop.sh
+# stdin pipe — reuses the SAME parse path the real Claude response uses, so
+# no schema drift risk. The synthetic block uses multi-line shape (END marker
+# included) so it passes through the line-anchored greps directly.
+_emit_synthetic_idle_status() {
+    local _loop=$1
+    local _ts
+    _ts=$(get_iso_timestamp)
+    local _payload
+    _payload=$(jq -n --arg ts "$_ts" --argjson loop "$_loop" '{
+      result: ("Harness-synthesized idle tick at " + $ts + " — Linear backlog confirmed empty (open_count=0), coordinator confidence ≥ threshold, no Claude invocation.\n\n---RALPH_STATUS---\nSTATUS: COMPLETE\nTASKS_COMPLETED_THIS_LOOP: 0\nFILES_MODIFIED: 0\nWORK_TYPE: IDLE_TICK\nEXIT_SIGNAL: true\nRECOMMENDATION: harness-emitted idle tick (loop " + ($loop | tostring) + ") — backlog empty, no Claude call needed\n---END_RALPH_STATUS---")
+    }')
+    printf '%s' "$_payload" | RALPH_LOOP_ACTIVE=1 CLAUDE_PROJECT_DIR="${PROJECT_DIR:-$PWD}" bash "$RALPH_DIR/hooks/on-stop.sh"
+}
+
 # Issue #223: Helper to read token count
 _read_token_count() {
     local _tc=0
@@ -2192,6 +2245,24 @@ build_loop_context() {
 
     # Extract incomplete tasks from task source
     if [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]]; then
+        # TAP-2497: surface MCP health to the agent so it can emit
+        # STATUS: BLOCKED + RECOMMENDATION: mcp_unreachable instead of
+        # improvising EXIT_SIGNAL from a stale brief. The flags are set by
+        # ralph_probe_mcp_servers at startup; this line just exposes them.
+        # When linear=down (the most common failure on AgentForge 2026-05-23),
+        # the agent SHOULD emit BLOCKED+mcp_unreachable so on-stop.sh can
+        # back off rather than counting the loop as no-progress.
+        local _mcp_linear="ok" _mcp_tapps="ok" _mcp_brain="ok" _mcp_any_down=0
+        # Linear plugin is always-on if the user is signed in via Claude Code
+        # OAuth; we have no boolean for it, so treat unknown as "ok" (no
+        # false-positive BLOCKED). If you wire a linear probe later, replace.
+        [[ "${RALPH_MCP_TAPPS_AVAILABLE:-true}" == "false" ]] && _mcp_tapps="down" && _mcp_any_down=1
+        [[ "${RALPH_MCP_BRAIN_AVAILABLE:-true}" == "false" ]] && _mcp_brain="down" && _mcp_any_down=1
+        context+="MCP_HEALTH: linear=${_mcp_linear}, tapps=${_mcp_tapps}, brain=${_mcp_brain}. "
+        if (( _mcp_any_down )); then
+            context+="If a tool you need for the current task is 'down' above (and ToolSearch returns no matching tools mid-loop confirming the outage), DO NOT improvise EXIT_SIGNAL from a stale cache or brief — emit STATUS: BLOCKED with RECOMMENDATION: mcp_unreachable and FILES_MODIFIED: 0. The harness backs off via exponential sleep instead of counting the loop as no-progress. "
+        fi
+
         # TAP-536: On API failure, mark counts as "unknown" instead of "0".
         # Treating a failed lookup as 0 remaining can falsely encourage Claude
         # to emit EXIT_SIGNAL: true.
@@ -4779,6 +4850,34 @@ execute_claude_code() {
             log_status "WARN" "Exit signal update failed; continuing with stale signals"
         fi
 
+        # TAP-2499: record this loop's RECOMMENDATION into the ring buffer
+        # so the next iteration's repetition check has data. Best-effort —
+        # missing module or missing field is a silent skip.
+        if declare -F recommendation_record >/dev/null 2>&1 && [[ -f "$RALPH_DIR/status.json" ]]; then
+            _rec_text=$(jq -r '.recommendation // ""' "$RALPH_DIR/status.json" 2>/dev/null)
+            [[ -n "$_rec_text" ]] && recommendation_record "$_rec_text"
+        fi
+
+        # TAP-2500: per-session cost hard-cap kill switch (opt-in).
+        # Closes the AgentForge $22 idle-runaway blast radius: even with all
+        # other safeties, a future class of bug (e.g., a coordinator regression
+        # that produces non-empty briefs from an empty backlog) could trigger
+        # another runaway. When RALPH_SESSION_COST_HARD_CAP_USD is set AND the
+        # session has crossed it, halt with exit_reason=session_cost_cap_hit
+        # and write a sentinel that ralph-runner skill reads to NOT relaunch.
+        if [[ -n "${RALPH_SESSION_COST_HARD_CAP_USD:-}" ]] && [[ -f "$RALPH_DIR/status.json" ]]; then
+            _sess_cost=$(jq -r '.session_cost_usd // 0' "$RALPH_DIR/status.json" 2>/dev/null)
+            _cap_hit=$(awk -v c="$_sess_cost" -v cap="$RALPH_SESSION_COST_HARD_CAP_USD" 'BEGIN { print (c+0 >= cap+0) ? "1" : "0" }')
+            if [[ "$_cap_hit" == "1" ]]; then
+                printf '%s' "$_sess_cost" > "$RALPH_DIR/.cost_cap_hit"
+                ralph_audit "exit_decision" "session_cost_cap_hit" "graceful_exit" "loop_count=$loop_count,cost=$_sess_cost,cap=$RALPH_SESSION_COST_HARD_CAP_USD" "completed" 2>/dev/null
+                update_status "$loop_count" "$(_read_call_count)" "session_cost_cap_hit" "completed" "session_cost_cap_hit"
+                log_status "ERROR" "💸 Session cost cap hit: \$${_sess_cost} >= \$${RALPH_SESSION_COST_HARD_CAP_USD} — halting"
+                log_status "INFO" "  Sentinel written: .ralph/.cost_cap_hit (ralph-runner will not relaunch)"
+                break
+            fi
+        fi
+
         # Coordinator post-run state machine (TAP-1477) — debrief decision
         # (TAP-917), BLOCK signal surfacing (TAP-923), and task-boundary
         # cleanup (TAP-924). Order is enforced inside the helper: debrief
@@ -5418,6 +5517,40 @@ main() {
             break
         fi
 
+        # TAP-2499: orchestrator-level recommendation-repetition halt — fires
+        # when the same normalized RECOMMENDATION appears >= threshold times
+        # within the window, regardless of what the parser / CB / quorum
+        # paths report. Defense-in-depth for future regressions of TAP-2494.
+        if declare -F recommendation_repetition_check >/dev/null 2>&1; then
+            local _rep_hash
+            if _rep_hash=$(recommendation_repetition_check); then
+                ralph_audit "exit_decision" "recommendation_repetition" "graceful_exit" "loop_count=$loop_count,hash=$_rep_hash" "completed" 2>/dev/null
+                update_status "$loop_count" "$(_read_call_count)" "recommendation_repetition" "completed" "recommendation_repetition"
+                log_status "SUCCESS" "🏁 Recommendation-repetition halt (hash=${_rep_hash}) — agent stuck in pattern, halting"
+                break
+            fi
+        fi
+
+        # TAP-2495/TAP-2496: per-loop exit-signal quorum check. Mirrors the
+        # startup check in lib/circuit_breaker.sh:init_circuit_breaker but
+        # fires WITHIN a session — necessary because the EXIT-CLEAN branch in
+        # on-stop.sh resets consecutive_no_progress on every EXIT_SIGNAL: true
+        # emission (including thin idle ticks from _emit_synthetic_idle_status),
+        # so the CB never opens from no-progress alone. Quorum on
+        # .exit_signals.completion_indicators is the deterministic halt.
+        if [[ -f "$RALPH_DIR/.exit_signals" ]]; then
+            local _quorum_count
+            _quorum_count=$(jq -r '.completion_indicators | length' "$RALPH_DIR/.exit_signals" 2>/dev/null || echo 0)
+            [[ "$_quorum_count" =~ ^[0-9]+$ ]] || _quorum_count=0
+            local _quorum_threshold=${EXIT_SIGNAL_HALT_THRESHOLD:-3}
+            if [[ "$_quorum_count" -ge "$_quorum_threshold" ]]; then
+                ralph_audit "exit_decision" "exit_signal_quorum" "graceful_exit" "loop_count=$loop_count,indicators=$_quorum_count" "completed" 2>/dev/null
+                update_status "$loop_count" "$(_read_call_count)" "exit_signal_quorum" "completed" "exit_signal_quorum"
+                log_status "SUCCESS" "🏁 Exit-signal quorum reached ($_quorum_count >= $_quorum_threshold) — agent asked to halt, harness complied"
+                break
+            fi
+        fi
+
         # TAP-1528 / TAP-1529: harness halt sentinel set by on-stop.sh when
         # consecutive RALPH_STATUS-missing responses or CB-OPEN thrashing is
         # detected. Resists CB_AUTO_RESET — operator must clear the file
@@ -5425,6 +5558,19 @@ main() {
         if [[ -f "$RALPH_DIR/.harness_halt_reason" ]]; then
             local halt_reason
             halt_reason=$(cat "$RALPH_DIR/.harness_halt_reason" 2>/dev/null || echo "unknown")
+            # TAP-2495: exit_signal_quorum is a CLEAN halt — Claude legitimately
+            # asked to stop via EXIT_SIGNAL: true ≥ EXIT_SIGNAL_HALT_THRESHOLD
+            # times. Surface as graceful exit (SUCCESS, completed) rather than
+            # the generic ERROR/halted shape, and self-clear the sentinel so
+            # the next ralph invocation against a populated backlog starts fresh.
+            if [[ "$halt_reason" == "exit_signal_quorum" ]]; then
+                ralph_audit "exit_decision" "exit_signal_quorum" "graceful_exit" "loop_count=$loop_count" "completed" 2>/dev/null
+                update_status "$loop_count" "$(_read_call_count)" "exit_signal_quorum" "completed" "exit_signal_quorum"
+                log_status "SUCCESS" "🏁 Exit-signal quorum honored — agent asked to halt, harness complied"
+                log_status "INFO" "  Sentinel cleared. Re-run ralph to start a new session."
+                rm -f "$RALPH_DIR/.harness_halt_reason" 2>/dev/null
+                break
+            fi
             ralph_audit "harness_halt" "on_stop_hook" "halt_execution" "reason=$halt_reason,loop_count=$loop_count" "halted" 2>/dev/null
             update_status "$loop_count" "$(_read_call_count)" "harness_halt" "halted" "$halt_reason"
             log_status "ERROR" "🛑 Harness halt: $halt_reason"
@@ -5522,6 +5668,25 @@ main() {
         # TAP-915: spawn coordinator to populate .ralph/brief.json before the
         # main agent runs. Best-effort — failure does not block the loop.
         ralph_spawn_coordinator "$loop_count"
+
+        # TAP-2496: thin idle tick. If Linear backlog is freshly confirmed
+        # empty AND coordinator confidence is high, skip the full Claude call
+        # and emit a synthetic RALPH_STATUS through the existing on-stop hook.
+        # Three consecutive thin ticks combine with TAP-2495's quorum to halt
+        # cleanly at < $0.10 — vs. AgentForge's $1.66 / idle-loop baseline.
+        if _thin_idle_tick_eligible; then
+            _emit_synthetic_idle_status "$loop_count"
+            # on-stop.sh wrote status.json; propagate to .exit_signals so the
+            # next loop's quorum check at the top of main() can see the new
+            # completion_indicators entry. Without this call the thin tick
+            # writes status.json but completion_indicators never grows and
+            # the quorum never fires.
+            update_exit_signals_from_status >/dev/null 2>&1 || true
+            log_status "INFO" "💤 Thin idle tick — Claude invocation skipped (loop $loop_count)"
+            update_status "$loop_count" "$(_read_call_count)" "thin_idle_tick" "running"
+            sleep "${INTER_LOOP_PAUSE:-2}"
+            continue
+        fi
 
         # Execute Claude Code
         execute_claude_code "$loop_count"
