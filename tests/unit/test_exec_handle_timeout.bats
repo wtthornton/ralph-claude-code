@@ -180,3 +180,83 @@ JSON
     exec_handle_timeout "$OUT" "" || rc=$?
     [[ "$rc" -eq 3 ]] || fail "expected return 3 when CB is open, got $rc"
 }
+
+# =============================================================================
+# Issue 3 (TIMEOUT-STATUS): a timed-out loop must never surface a STALE prior
+# status.json. exec_handle_timeout overwrites status.json with an explicit
+# {status:"timeout", ...} on both the productive and the sub-threshold
+# unproductive paths (on-stop.sh does not run on a SIGTERM timeout).
+# =============================================================================
+
+@test "Issue 3: productive timeout overwrites stale status.json with explicit timeout status" {
+    # Pre-seed a STALE status from a previous run (the field-reported symptom).
+    cat > "$STATUS_FILE" <<'JSON'
+{"status":"completed","recommendation":"Linear backlog confirmed empty — stopping","files_modified":0,"exit_signal":"true"}
+JSON
+
+    ralph_has_real_changes() { return 0; }
+    _count_files_changed_since_loop_start() { echo "3"; }
+    ralph_record_latency() { :; }
+    ralph_prepare_claude_output_for_analysis() { :; }
+    save_claude_session() { :; }
+    update_exit_signals_from_status() { return 0; }
+    log_status_summary() { return 0; }
+    ralph_debrief_coordinator() { :; }
+    ralph_clear_coordinator_artifacts() { :; }
+    cb_is_open() { return 1; }
+    export -f ralph_has_real_changes _count_files_changed_since_loop_start \
+              ralph_record_latency ralph_prepare_claude_output_for_analysis \
+              save_claude_session update_exit_signals_from_status \
+              log_status_summary ralph_debrief_coordinator \
+              ralph_clear_coordinator_artifacts cb_is_open
+
+    CLAUDE_USE_CONTINUE="false"
+    CONSECUTIVE_TIMEOUT_COUNT=0
+
+    local rc=0
+    exec_handle_timeout "$OUT" "" || rc=$?
+    [[ "$rc" -eq 0 ]] || fail "expected return 0 on productive timeout, got $rc"
+
+    local status_value
+    status_value=$(jq -r '.status' "$STATUS_FILE")
+    [[ "$status_value" == "timeout" ]] \
+        || fail "expected status=timeout, got '$status_value' (stale status leaked)"
+
+    # The real file-change count must feed the emitted status.
+    local files_mod
+    files_mod=$(jq -r '.files_modified' "$STATUS_FILE")
+    [[ "$files_mod" -eq 3 ]] || fail "expected files_modified=3, got '$files_mod'"
+
+    # The stale recommendation / exit_signal must be gone.
+    local rec exit_sig
+    rec=$(jq -r '.recommendation' "$STATUS_FILE")
+    [[ "$rec" != *"backlog confirmed empty"* ]] \
+        || fail "stale recommendation leaked into timeout status: '$rec'"
+    exit_sig=$(jq -r '.exit_signal' "$STATUS_FILE")
+    [[ "$exit_sig" == "false" ]] \
+        || fail "timeout status must not carry a true exit_signal, got '$exit_sig'"
+}
+
+@test "Issue 3: sub-threshold unproductive timeout overwrites stale status.json" {
+    cat > "$STATUS_FILE" <<'JSON'
+{"status":"completed","recommendation":"shipped TAP-1234","files_modified":7}
+JSON
+    # Default stub: ralph_has_real_changes returns 1 (no changes).
+    CONSECUTIVE_TIMEOUT_COUNT=0   # below MAX_CONSECUTIVE_TIMEOUTS=3
+    local rc=0
+    exec_handle_timeout "$OUT" "" || rc=$?
+    [[ "$rc" -eq 1 ]] || fail "expected return 1 on sub-threshold timeout, got $rc"
+
+    local status_value files_mod
+    status_value=$(jq -r '.status' "$STATUS_FILE")
+    [[ "$status_value" == "timeout" ]] \
+        || fail "expected status=timeout on unproductive path, got '$status_value'"
+    files_mod=$(jq -r '.files_modified' "$STATUS_FILE")
+    [[ "$files_mod" -eq 0 ]] || fail "expected files_modified=0, got '$files_mod'"
+}
+
+@test "Issue 3: exec_emit_timeout_status sanitizes a non-numeric count to 0 and writes valid JSON" {
+    exec_emit_timeout_status "not-a-number" "boom"
+    run jq -e '.status == "timeout" and .files_modified == 0 and .summary == "boom"' "$STATUS_FILE"
+    [[ "$status" -eq 0 ]] || fail "expected valid timeout JSON with sanitized count, got: $(cat "$STATUS_FILE")"
+}

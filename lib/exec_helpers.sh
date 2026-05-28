@@ -514,6 +514,48 @@ exec_detect_rate_limit() {
     return 0
 }
 
+# exec_emit_timeout_status — write an explicit "timeout" status to STATUS_FILE
+# so a timed-out loop NEVER surfaces a stale prior run's status.json (Issue 3).
+#
+# On a SIGTERM timeout the on-stop.sh Stop hook does not run, so status.json
+# retains the PREVIOUS loop's content. Without this, the loop summary / monitor
+# report a completely wrong result (the field-reported symptom: a loop that had
+# edited files mid-work surfaced "backlog confirmed empty — stopping", verbatim
+# text from a different run). Fields mirror what downstream readers expect
+# (.recommendation, .files_modified, .exit_signal, .tasks_completed) so no false
+# exit / completion signal is inferred from the timeout. The real file-change
+# count (the "treating as productive" signal) feeds .files_modified.
+#
+# Args:    $1 files_changed (int, sanitized), $2 summary (string)
+# Globals: STATUS_FILE
+exec_emit_timeout_status() {
+    local files_changed summary ts
+    files_changed=$(printf '%s' "${1:-0}" | tr -cd '0-9'); files_changed=${files_changed:-0}
+    summary="${2:-execution timed out, result unknown}"
+    [[ -n "${STATUS_FILE:-}" ]] || return 0
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --argjson fc "$files_changed" \
+            --arg sm "$summary" \
+            --arg ts "$ts" \
+            '{
+                status: "timeout",
+                summary: $sm,
+                recommendation: $sm,
+                files_modified: $fc,
+                files_changed: $fc,
+                tasks_completed: 0,
+                exit_signal: "false",
+                permission_denial_count: 0,
+                timestamp: $ts
+            }' > "$STATUS_FILE" 2>/dev/null || true
+    else
+        printf '{"status":"timeout","summary":"%s","recommendation":"%s","files_modified":%s,"files_changed":%s,"tasks_completed":0,"exit_signal":"false","permission_denial_count":0,"timestamp":"%s"}\n' \
+            "$summary" "$summary" "$files_changed" "$files_changed" "$ts" > "$STATUS_FILE" 2>/dev/null || true
+    fi
+}
+
 # exec_handle_timeout — Exit-code-124 (timeout) handler (TAP-1476).
 #
 # Distinguishes productive timeouts (real work was done during the iteration)
@@ -553,6 +595,11 @@ exec_handle_timeout() {
         timeout_files_changed=$(_count_files_changed_since_loop_start)
         log_status "INFO" "⏱️ Timeout but $timeout_files_changed new file(s) changed during this iteration — treating as productive"
         echo '{"status": "timed_out_productive", "files_changed": '$timeout_files_changed', "timestamp": "'$(date '+%Y-%m-%d %H:%M:%S')'"}' > "$PROGRESS_FILE"
+        # Issue 3 (TIMEOUT-STATUS): overwrite status.json with an explicit
+        # timeout status BEFORE reading it back below, so the summary / monitor
+        # never surface the previous run's status. on-stop.sh did not run (the
+        # CLI was SIGTERM-killed), so status.json is otherwise stale here.
+        exec_emit_timeout_status "$timeout_files_changed" "execution timed out mid-work, result unknown"
         # GUARD-2: reset the consecutive timeout counter on productive timeout.
         CONSECUTIVE_TIMEOUT_COUNT=0
 
@@ -647,6 +694,10 @@ CBEOF
         return 3
     fi
 
+    # Issue 3 (TIMEOUT-STATUS): sub-threshold unproductive timeout — still
+    # overwrite status.json so the stale prior status is not surfaced. The
+    # at-threshold path above already wrote an explicit HALTED status.
+    exec_emit_timeout_status "0" "execution timed out with no file changes, result unknown"
     return 1
 }
 
@@ -1090,4 +1141,95 @@ exec_log_execution_stats() {
     [[ $system_errors -lt 0 ]] && system_errors=0
 
     log_status "WARN" "Execution stats: Tools=${tool_count:-0} Agents=${agent_count:-0} Errors=${error_count:-0} (${expected_errors} scope, ${system_errors} system)"
+}
+
+# =============================================================================
+# MCP catalog availability on session resume (Issues 1 + 4)
+# =============================================================================
+# STDIO MCP servers (tapps-mcp, docs-mcp) are child processes spawned per
+# `claude` invocation. On `claude --resume <id>` they die with the prior
+# process and must be re-spawned AND re-registered before the agent issues tool
+# calls. When that race is lost the agent sees "No such tool available:
+# mcp__tapps-mcp__…" and no-ops the loop. The HTTP server (tapps-brain) is an
+# external long-lived service and survives resume, so it is intentionally NOT
+# in the expected-STDIO set below.
+#
+# The startup `claude mcp list` probe (ralph_probe_mcp_servers) cannot detect
+# this: it ran once, in a different process, and is cached up to 24h — so it
+# reports the *server connection* status, not the *tool catalog* the resumed
+# agent process actually sees (Issue 4). These helpers read catalog truth from
+# the per-loop session stream instead.
+
+# exec_stream_server_status <output_file> <server_name>
+# Echo the server's status from the session's `type:"system"` init message:
+#   "connected"  — server listed with a non-failed status
+#   "failed"     — server listed with status "failed"
+#   "absent"     — init message present but the server is not listed
+#   ""           — no system init line in the stream (e.g. text-mode output)
+exec_stream_server_status() {
+    local f=$1 server=$2
+    [[ -f "$f" ]] || { echo ""; return 0; }
+    local sys
+    sys=$(grep -E '"type"[[:space:]]*:[[:space:]]*"system"' "$f" 2>/dev/null | head -1)
+    [[ -n "$sys" ]] || { echo ""; return 0; }
+    local status
+    status=$(printf '%s' "$sys" | jq -r --arg s "$server" '
+        if (.mcp_servers // null) == null then "nokey"
+        else ((.mcp_servers[] | select(.name == $s) | .status) // "absent")
+        end' 2>/dev/null)
+    # A normalized status: anything that is not "failed"/"absent"/"nokey"/empty
+    # is treated as connected.
+    case "$status" in
+        ""|"null"|"nokey") echo "" ;;
+        "failed"|"absent") echo "$status" ;;
+        *) echo "connected" ;;
+    esac
+}
+
+# exec_mcp_catalog_lost <output_file>
+# Return 0 (true) when a (resumed) session came up WITHOUT its STDIO MCP tool
+# catalog. Two independent signatures, either is sufficient:
+#   (a) the agent emitted "No such tool available: mcp__…" — the strongest,
+#       transport-agnostic signal that a tool schema was missing at call time;
+#   (b) the session init message reports an expected STDIO server (one the
+#       startup probe found available) as failed/absent for this run.
+# Returns 1 (false) otherwise.
+exec_mcp_catalog_lost() {
+    local f=$1
+    [[ -f "$f" ]] || return 1
+
+    # (a) agent-visible "no such tool" for an MCP-namespaced tool.
+    if grep -qE 'No such tool available:[[:space:]]*"?mcp__' "$f" 2>/dev/null; then
+        return 0
+    fi
+
+    # (b) init-message signature, gated on the server having been expected.
+    local st
+    st=$(exec_stream_server_status "$f" "tapps-mcp")
+    if [[ "$st" == "failed" || "$st" == "absent" ]] \
+       && [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]]; then
+        return 0
+    fi
+    st=$(exec_stream_server_status "$f" "docs-mcp")
+    if [[ "$st" == "failed" || "$st" == "absent" ]] \
+       && [[ "${RALPH_MCP_DOCS_AVAILABLE:-false}" == "true" ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# exec_mcp_health_label <available_flag> <catalog_lost_sentinel_path>
+# Compute the MCP_HEALTH value for a server. Echoes "ok" or "down".
+# Issue 4: even when the startup probe flag says "available" (port/connection
+# was live), a present catalog-lost sentinel forces "down" — the health signal
+# must reflect the actual tool catalog the agent saw last loop, not just probe
+# liveness.
+exec_mcp_health_label() {
+    local available=$1 sentinel=$2
+    if [[ -n "$sentinel" && -f "$sentinel" ]]; then
+        echo "down"
+        return 0
+    fi
+    [[ "$available" == "true" ]] && echo "ok" || echo "down"
 }
