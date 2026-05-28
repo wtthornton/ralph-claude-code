@@ -137,8 +137,8 @@ class RalphConfig(BaseModel):
     model_map_trivial: str = "claude-haiku-4-5"
     model_map_small: str = "claude-haiku-4-5"
     model_map_medium: str = "claude-sonnet-4-6"
-    model_map_large: str = "claude-opus-4-7"
-    model_map_architectural: str = "claude-opus-4-7"
+    model_map_large: str = "claude-opus-4-8"
+    model_map_architectural: str = "claude-opus-4-8"
 
     # SDK-COST-3: Token-based rate limiting
     max_tokens_per_hour: int = Field(default=0, ge=0, description="Max tokens per hour. 0 = disabled.")

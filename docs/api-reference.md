@@ -1210,8 +1210,8 @@ Precedence (highest to lowest):
 | `model_map_trivial` | `str` | `'claude-haiku-4-5'` |
 | `model_map_small` | `str` | `'claude-haiku-4-5'` |
 | `model_map_medium` | `str` | `'claude-sonnet-4-6'` |
-| `model_map_large` | `str` | `'claude-opus-4-7'` |
-| `model_map_architectural` | `str` | `'claude-opus-4-7'` |
+| `model_map_large` | `str` | `'claude-opus-4-8'` |
+| `model_map_architectural` | `str` | `'claude-opus-4-8'` |
 | `max_tokens_per_hour` | `int` | `Field(default=0, ge=0, description='Max tokens per hour. 0 = disabled.')` |
 
 **Methods:**
@@ -2017,8 +2017,8 @@ chain (haiku -> sonnet -> opus). Already at opus stays at opus.
 
 | Name | Type | Value |
 |------|------|-------|
-| `DEFAULT_PRICING` | `dict[str, ModelPricing]` | `{'claude-opus-4-7': ModelPricing(input_per_1m=5.0, output_per_1m=25.0, cache_write_per_1m=6.25, cache_read_per_1m=0.5), 'claude-opus-4-6': ModelPricing(input_per_1m=5.0, output_per_1m=25.0, cache_write_per_1m=6.25, cache_read_per_1m=0.5), 'claude-sonnet-4-6': ModelPricing(input_per_1m=3.0, output_per_1m=15.0, cache_write_per_1m=3.75, cache_read_per_1m=0.3), 'claude-haiku-4-5': ModelPricing(input_per_1m=1.0, output_per_1m=5.0, cache_write_per_1m=1.25, cache_read_per_1m=0.1)}` |
-| `DEFAULT_MODEL_MAP` | `dict[CostComplexityBand, str]` | `{CostComplexityBand.TRIVIAL: 'claude-haiku-4-5', CostComplexityBand.SMALL: 'claude-haiku-4-5', CostComplexityBand.MEDIUM: 'claude-sonnet-4-6', CostComplexityBand.LARGE: 'claude-opus-4-7', CostComplexityBand.ARCHITECTURAL: 'claude-opus-4-7'}` |
+| `DEFAULT_PRICING` | `dict[str, ModelPricing]` | `{'claude-opus-4-8': ModelPricing(input_per_1m=5.0, output_per_1m=25.0, cache_write_per_1m=6.25, cache_read_per_1m=0.5), 'claude-opus-4-7': ModelPricing(input_per_1m=5.0, output_per_1m=25.0, cache_write_per_1m=6.25, cache_read_per_1m=0.5), 'claude-opus-4-6': ModelPricing(input_per_1m=5.0, output_per_1m=25.0, cache_write_per_1m=6.25, cache_read_per_1m=0.5), 'claude-sonnet-4-6': ModelPricing(input_per_1m=3.0, output_per_1m=15.0, cache_write_per_1m=3.75, cache_read_per_1m=0.3), 'claude-haiku-4-5': ModelPricing(input_per_1m=1.0, output_per_1m=5.0, cache_write_per_1m=1.25, cache_read_per_1m=0.1)}` |
+| `DEFAULT_MODEL_MAP` | `dict[CostComplexityBand, str]` | `{CostComplexityBand.TRIVIAL: 'claude-haiku-4-5', CostComplexityBand.SMALL: 'claude-haiku-4-5', CostComplexityBand.MEDIUM: 'claude-sonnet-4-6', CostComplexityBand.LARGE: 'claude-opus-4-8', CostComplexityBand.ARCHITECTURAL: 'claude-opus-4-8'}` |
 
 ---
 
