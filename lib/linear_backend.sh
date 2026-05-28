@@ -282,6 +282,25 @@ _linear_count_from_snapshot_cache() {
         return 1
     fi
 
+    # TAP-2646: Guard against auto-populated empty snapshots. When the Linear
+    # plugin is called with state=null ("any") it returns [] as a query-shape
+    # quirk — not a real zero. The auto-populate hook (TAP-1412) writes that []
+    # into the cache with auto_populated=true. Trusting it as "0 issues" lets the
+    # TAP-2442 pre-seed write a poisoned linear_open_count=0 into status.json,
+    # which the PREFLIGHT-EMPTY-PLAN gate then reads as a clean completion and
+    # fires a false plan_complete on a non-empty backlog (NLTlabsPE 2026-05-27:
+    # exited with 63 issues open). A genuine empty bucket (auto_populated absent
+    # or false) is still honored as a real 0. Abstain (return 1) only on the
+    # poisoned signature so the gate falls back to a fresh read next iteration.
+    if [[ "$_count" -eq 0 ]]; then
+        local _auto_populated
+        _auto_populated=$(jq -r '.auto_populated // false' "$_newest" 2>/dev/null || echo "false")
+        if [[ "$_auto_populated" == "true" ]]; then
+            _linear_log_error "snapshot_${state}" "auto_populated_empty"
+            return 1
+        fi
+    fi
+
     printf '%s\n' "$_count"
     return 0
 }

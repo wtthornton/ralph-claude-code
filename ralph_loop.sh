@@ -162,7 +162,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.20.0"
+RALPH_VERSION="2.20.1"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -1693,20 +1693,30 @@ should_exit_gracefully() {
             return 0
         fi
         local total_items=$((open_items + done_items))
-        # PREFLIGHT-EMPTY-PLAN (Linear branch): zero open issues = nothing to do
-        # this iteration, regardless of whether the project has any done items.
-        # Same rationale as the fix_plan.md branch: exit clean rather than burn
-        # a Claude call into an empty backlog. Operator restarts after seeding work.
-        # NOTE: open_items=0 here is an authoritative count (TAP-536 contract);
-        # API failures took the abstain path above and never reach this check.
+        # PREFLIGHT-EMPTY-PLAN (Linear branch): zero open issues = nothing to do.
+        # Require positive completion evidence (done>0) before treating open=0 as
+        # authoritative. When BOTH open AND done are zero the count is likely stale
+        # or poisoned (TAP-2646: an auto-populated empty any-state snapshot seeds a
+        # 0 into status.json via TAP-2442; the next loop reads it as "no work" and
+        # exits on a non-empty backlog — NLTlabsPE 2026-05-27 exited with 63 open).
+        # Abstain in the 0/0 case and let the agent report fresh counts next loop.
+        # NOTE: in push-mode (no LINEAR_API_KEY) these counts come from status.json
+        # and can carry a stale 0; the API path is still TAP-536 fail-loud and never
+        # reaches here on error, so only the push-mode 0/0 signature needs guarding.
         if [[ $open_items -eq 0 ]]; then
             if [[ $total_items -gt 0 ]]; then
+                # Positive completion evidence: at least one done issue confirms a
+                # real completion rather than a stale/poisoned-count artefact.
                 log_status "WARN" "Exit condition: All Linear issues completed ($done_items/$total_items) in project '${RALPH_LINEAR_PROJECT}'" >&2
+                echo "plan_complete"
+                return 0
             else
-                log_status "WARN" "Exit condition: Linear project '${RALPH_LINEAR_PROJECT}' has zero open issues (no work seeded)" >&2
+                # open=0 AND done=0: no positive completion evidence — the poisoned/
+                # stale-count signature. Abstain rather than risk a false plan_complete.
+                log_status "WARN" "Linear counts show 0 open / 0 done in project '${RALPH_LINEAR_PROJECT}' — abstaining (no completion evidence; possible stale count, see TAP-2646)" >&2
+                echo ""
+                return 0
             fi
-            echo "plan_complete"
-            return 0
         fi
     elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         # Valid patterns: "- [ ]" (uncompleted) and "- [x]" or "- [X]" (completed)
@@ -2944,10 +2954,29 @@ ralph_spawn_coordinator() {
     # without invoking the Write tool. Reiterate the file path + atomic
     # pattern + JSON shape inline so the coordinator can't shortcut to
     # "summarize only".
+    # TAP-2493 follow-up (AgentForge 2026-05-26 incident): pass
+    # RALPH_LINEAR_TEAM / RALPH_LINEAR_PROJECT into the coordinator body in
+    # linear mode. The MODE=brief contract refers to "the team/project from
+    # your input" (step 4b's locality hint, and the no-task fresh-probe
+    # rule), but pre-fix the spawn passed only TASK_SOURCE / LOOP /
+    # TASK_INPUT — the coordinator had to infer team from the worker-side
+    # system prompt or guess. Injecting explicit values here closes the
+    # latent contract gap so the coordinator can never silently probe with
+    # the wrong team. Additive: omitted when either env var is empty.
+    local _coord_team_block=""
+    if [[ "$task_source" == "linear" ]]; then
+        if [[ -n "${RALPH_LINEAR_TEAM:-}" ]]; then
+            _coord_team_block+="RALPH_LINEAR_TEAM=${RALPH_LINEAR_TEAM}"$'\n'
+        fi
+        if [[ -n "${RALPH_LINEAR_PROJECT:-}" ]]; then
+            _coord_team_block+="RALPH_LINEAR_PROJECT=${RALPH_LINEAR_PROJECT}"$'\n'
+        fi
+    fi
+
     local coord_body
     coord_body="TASK_SOURCE=${task_source}
 LOOP=${loop_count}
-TASK_INPUT: ${task_input}
+${_coord_team_block}TASK_INPUT: ${task_input}
 
 REQUIRED ACTION (do this BEFORE returning the summary):
   1. Use the Write tool to write the brief JSON to ${brief_target} (a single

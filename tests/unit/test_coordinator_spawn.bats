@@ -218,6 +218,82 @@ EOF
         || fail "linear next-task not piped to coordinator"
 }
 
+@test "TAP-2493 follow-up: linear mode includes RALPH_LINEAR_TEAM/PROJECT in coord body" {
+    # AgentForge 2026-05-26 incident: the coordinator's MODE=brief step 4b
+    # refers to "the team/project from your input", but the spawn body did
+    # not include them. The coordinator had to infer from the worker-side
+    # system prompt, opening a silent-wrong-team failure mode. Pin the
+    # fix: both env vars must land in the coord body when set.
+    export RALPH_TASK_SOURCE=linear
+    export RALPH_LINEAR_TEAM=TappsCodingAgents
+    export RALPH_LINEAR_PROJECT='AgentForge Platform'
+    linear_get_next_task() { echo ""; return 0; }
+    export -f linear_get_next_task
+
+    _coordinator_invoke_claude() {
+        echo "$1" > "$TEST_TEMP_DIR/.coord_input"
+        write_valid_brief
+        return 0
+    }
+    export CLAUDE_CODE_CMD=bash
+
+    run ralph_spawn_coordinator 1
+    [[ "$status" -eq 0 ]] || fail "expected zero exit, got: $output"
+    grep -q '^RALPH_LINEAR_TEAM=TappsCodingAgents$' "$TEST_TEMP_DIR/.coord_input" \
+        || fail "RALPH_LINEAR_TEAM not in coordinator input on its own line, got: $(cat "$TEST_TEMP_DIR/.coord_input")"
+    grep -q '^RALPH_LINEAR_PROJECT=AgentForge Platform$' "$TEST_TEMP_DIR/.coord_input" \
+        || fail "RALPH_LINEAR_PROJECT not in coordinator input on its own line, got: $(cat "$TEST_TEMP_DIR/.coord_input")"
+}
+
+@test "TAP-2493 follow-up: file mode omits RALPH_LINEAR_TEAM/PROJECT even when env set" {
+    # File-mode loops have no Linear concept; injecting team/project would
+    # be misleading. The injection is gated to task_source=linear.
+    export RALPH_TASK_SOURCE=file
+    export RALPH_LINEAR_TEAM=TappsCodingAgents
+    export RALPH_LINEAR_PROJECT='AgentForge Platform'
+    cat > "$RALPH_DIR/fix_plan.md" <<'EOF'
+- [ ] do the thing
+EOF
+
+    _coordinator_invoke_claude() {
+        echo "$1" > "$TEST_TEMP_DIR/.coord_input"
+        write_valid_brief
+        return 0
+    }
+    export CLAUDE_CODE_CMD=bash
+
+    run ralph_spawn_coordinator 1
+    [[ "$status" -eq 0 ]] || fail "expected zero exit, got: $output"
+    ! grep -q 'RALPH_LINEAR_TEAM=' "$TEST_TEMP_DIR/.coord_input" \
+        || fail "RALPH_LINEAR_TEAM should not leak into file-mode coord body, got: $(cat "$TEST_TEMP_DIR/.coord_input")"
+    ! grep -q 'RALPH_LINEAR_PROJECT=' "$TEST_TEMP_DIR/.coord_input" \
+        || fail "RALPH_LINEAR_PROJECT should not leak into file-mode coord body, got: $(cat "$TEST_TEMP_DIR/.coord_input")"
+}
+
+@test "TAP-2493 follow-up: linear mode omits unset team/project (no empty key=value lines)" {
+    # The injection must be gated per-var. Setting only one of the two should
+    # leave the other absent from the body, not emit "RALPH_LINEAR_TEAM=".
+    export RALPH_TASK_SOURCE=linear
+    unset RALPH_LINEAR_TEAM
+    export RALPH_LINEAR_PROJECT='AgentForge Platform'
+    linear_get_next_task() { echo ""; return 0; }
+    export -f linear_get_next_task
+
+    _coordinator_invoke_claude() {
+        echo "$1" > "$TEST_TEMP_DIR/.coord_input"
+        write_valid_brief
+        return 0
+    }
+    export CLAUDE_CODE_CMD=bash
+
+    run ralph_spawn_coordinator 1
+    [[ "$status" -eq 0 ]] || fail "expected zero exit, got: $output"
+    grep -q '^RALPH_LINEAR_PROJECT=AgentForge Platform$' "$TEST_TEMP_DIR/.coord_input" \
+        || fail "RALPH_LINEAR_PROJECT line missing, got: $(cat "$TEST_TEMP_DIR/.coord_input")"
+    ! grep -q '^RALPH_LINEAR_TEAM=' "$TEST_TEMP_DIR/.coord_input" \
+        || fail "RALPH_LINEAR_TEAM line should not be present (unset), got: $(cat "$TEST_TEMP_DIR/.coord_input")"
+}
+
 @test "TAP-915: build_loop_context advertises brief when present and valid" {
     write_valid_brief
     # build_loop_context reads from $RALPH_DIR/brief.json

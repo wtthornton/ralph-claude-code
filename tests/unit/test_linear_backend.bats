@@ -354,10 +354,11 @@ restore_curl() {
 # PREFLIGHT-EMPTY-PLAN (Linear backend) — Bug 3 regression tests.
 # These exercise should_exit_gracefully from ralph_loop.sh directly, with the
 # linear_get_open_count / linear_get_done_count functions stubbed in bash.
-# Three contracts to verify:
-#   (a) open=0   \u2192 exit "plan_complete"     (legitimate empty backlog)
-#   (b) open>0   \u2192 continue (return "")     (work to do)
-#   (c) error    \u2192 abstain (return "")      (TAP-536 fail-loud)
+# Contracts to verify:
+#   (a) open=0, done>0  \u2192 exit "plan_complete"  (genuine completion)
+#   (b) open=0, done=0  \u2192 abstain (return "")    (TAP-2646 poisoned/stale signature)
+#   (c) open>0          \u2192 continue (return "")   (work to do)
+#   (d) count error     \u2192 abstain (return "")    (TAP-536 fail-loud)
 # ---------------------------------------------------------------------------
 
 # Helper: invoke the live should_exit_gracefully with a Linear stub.
@@ -391,17 +392,22 @@ should_exit_gracefully 2>/dev/null
 "
 }
 
-@test "PREFLIGHT (Linear): open=0 returns plan_complete (legitimate empty backlog)" {
+@test "PREFLIGHT (Linear): open=0 done>0 returns plan_complete (genuine completion)" {
+    # Positive completion evidence (done>0) confirms a real empty backlog, not a
+    # stale/poisoned count \u2014 exit clean.
     run _run_should_exit_with_linear_stub 0 0 0 5
     assert_success
     assert_output "plan_complete"
 }
 
-@test "PREFLIGHT (Linear): open=0 done=0 returns plan_complete (project has no issues at all)" {
-    # Edge case: brand-new project with nothing seeded. Same outcome \u2014 exit clean.
+@test "TAP-2646: PREFLIGHT (Linear): open=0 done=0 ABSTAINS (poisoned/stale-count signature)" {
+    # NLTlabsPE 2026-05-27: an auto-populated empty any-state snapshot seeded a
+    # poisoned linear_open_count=0; the gate fired plan_complete on a 63-issue
+    # backlog. With no completion evidence (done=0) the 0/0 signature is no longer
+    # treated as authoritative \u2014 abstain and let the agent report fresh counts.
     run _run_should_exit_with_linear_stub 0 0 0 0
     assert_success
-    assert_output "plan_complete"
+    assert_output ""
 }
 
 @test "PREFLIGHT (Linear): open>0 continues (returns empty string)" {
