@@ -217,7 +217,7 @@ RALPH_BRANCH_CLEANUP_PROTECTED=main:master:develop:release/*
 # =============================================================================
 
 # Model to use for Ralph loops (default: uses Claude Code's default)
-# Examples: claude-sonnet-4-6, claude-opus-4-7
+# Examples: claude-sonnet-4-6, claude-opus-4-8
 # CLAUDE_MODEL=""
 
 # Effort level for Ralph loops. "low" reduces output tokens ~20-40% for routine tasks.

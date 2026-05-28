@@ -25,6 +25,7 @@
 pricing_rates_for_model() {
   local model="$1"
   case "$model" in
+    claude-opus-4-8*)       echo "5.00 25.00 0.50 6.25 10.00" ;;
     claude-opus-4-7*)       echo "5.00 25.00 0.50 6.25 10.00" ;;
     claude-opus-4-6*)       echo "5.00 25.00 0.50 6.25 10.00" ;;
     claude-sonnet-4-6*)     echo "3.00 15.00 0.30 3.75 6.00" ;;

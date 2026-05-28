@@ -65,8 +65,12 @@ vibe. Don't commit budget to a vibe.
 
 ### Cost-aware model routing
 
-Ralph routes by complexity via `sdk/ralph_sdk/cost.py::select_model`.
-Mirror that reasoning when you decide which sub-agent to invoke:
+Ralph routes by complexity via `sdk/ralph_sdk/cost.py::select_model`
+(the optional SDK path). The live bash harness routes by **task type**
+instead — `lib/complexity.sh::ralph_classify_task_type` maps
+docs/tools → Haiku, code → Sonnet, arch → Opus, with a force-Opus
+escalation after 3 QA failures. Both schemes share the same intent;
+mirror that reasoning when you decide which sub-agent to invoke:
 
 | Complexity       | Agent               | Model  | When                                   |
 | ---------------- | ------------------- | ------ | -------------------------------------- |

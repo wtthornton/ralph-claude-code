@@ -146,22 +146,22 @@ class TestSelectModel:
         assert select_model(CostComplexityBand.MEDIUM) == "claude-sonnet-4-6"  # nosec B101  # pytest assertion
 
     def test_large_routes_to_opus(self):
-        assert select_model(CostComplexityBand.LARGE) == "claude-opus-4-7"  # nosec B101  # pytest assertion
+        assert select_model(CostComplexityBand.LARGE) == "claude-opus-4-8"  # nosec B101  # pytest assertion
 
     def test_architectural_routes_to_opus(self):
-        assert select_model(CostComplexityBand.ARCHITECTURAL) == "claude-opus-4-7"  # nosec B101  # pytest assertion
+        assert select_model(CostComplexityBand.ARCHITECTURAL) == "claude-opus-4-8"  # nosec B101  # pytest assertion
 
     def test_retry_escalates_haiku_to_sonnet(self):
         assert select_model(CostComplexityBand.SMALL, retry_count=1) == "claude-sonnet-4-6"  # nosec B101  # pytest assertion
 
     def test_retry_escalates_sonnet_to_opus(self):
-        assert select_model(CostComplexityBand.MEDIUM, retry_count=1) == "claude-opus-4-7"  # nosec B101  # pytest assertion
+        assert select_model(CostComplexityBand.MEDIUM, retry_count=1) == "claude-opus-4-8"  # nosec B101  # pytest assertion
 
     def test_retry_caps_at_opus(self):
-        assert select_model(CostComplexityBand.MEDIUM, retry_count=99) == "claude-opus-4-7"  # nosec B101  # pytest assertion
+        assert select_model(CostComplexityBand.MEDIUM, retry_count=99) == "claude-opus-4-8"  # nosec B101  # pytest assertion
 
     def test_opus_cannot_escalate_further(self):
-        assert select_model(CostComplexityBand.LARGE, retry_count=5) == "claude-opus-4-7"  # nosec B101  # pytest assertion
+        assert select_model(CostComplexityBand.LARGE, retry_count=5) == "claude-opus-4-8"  # nosec B101  # pytest assertion
 
     def test_zero_retry_no_escalation(self):
         assert select_model(CostComplexityBand.SMALL, retry_count=0) == "claude-haiku-4-5"  # nosec B101  # pytest assertion
@@ -230,6 +230,7 @@ class TestTokenRateLimiter:
 class TestDefaults:
     def test_default_pricing_has_known_models(self):
         assert "claude-sonnet-4-6" in DEFAULT_PRICING  # nosec B101  # pytest assertion
+        assert "claude-opus-4-8" in DEFAULT_PRICING  # nosec B101  # pytest assertion
         assert "claude-opus-4-7" in DEFAULT_PRICING  # nosec B101  # pytest assertion
         assert "claude-haiku-4-5" in DEFAULT_PRICING  # nosec B101  # pytest assertion
 
