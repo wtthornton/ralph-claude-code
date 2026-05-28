@@ -201,12 +201,13 @@ _source_coord_timeout_helpers() {
     ' "$sh")"
 }
 
-@test "TAP-1682: adaptive timeout falls back to 120s with no samples" {
+@test "TAP-1682: adaptive timeout falls back to 300s with no samples" {
     _source_coord_timeout_helpers
     [[ ! -f "$COORDINATOR_TIMINGS_LOG" ]]
     run ralph_compute_coordinator_timeout
     assert_success
-    assert_output "120"
+    # Issue 2: fallback raised 120→300 to cover the coordinator's 150–250s band.
+    assert_output "300"
 }
 
 @test "TAP-1682: adaptive timeout honors RALPH_COORDINATOR_TIMEOUT_SECONDS override" {
@@ -229,21 +230,20 @@ _source_coord_timeout_helpers() {
     assert_output "true"
 }
 
-@test "TAP-1682: adaptive timeout returns P95x2 clamped to [30,600] with enough samples" {
+@test "TAP-1682: adaptive timeout returns P95x2 clamped to [180,600] with enough samples" {
     _source_coord_timeout_helpers
-    # Seed durations 10..100 (P95 of 91 samples is the 86th sorted value = 86).
+    # Seed durations 10..100 (all exit_code 0 → no censoring inflation).
     local i
     for i in $(seq 10 100); do
         ralph_record_coordinator_timing "$i" 0
     done
-    # The CAP=30 means only the last 30 (durations 71..100) survive. P95
-    # index = (30*95)/100 = 28. 28th sorted value of {71..100} is 98. ×2=196.
+    # CAP=30 keeps the last 30 (durations 71..100). Issue 2 ceiling index =
+    # (30*95+99)/100 = 29. 29th sorted value of {71..100} is 99. ×2 = 198.
     run ralph_compute_coordinator_timeout
     assert_success
-    [[ "$output" -ge 30 ]]
+    [[ "$output" -ge 180 ]]
     [[ "$output" -le 600 ]]
-    # 28th of 71..100 is 98, ×2 = 196.
-    assert_output "196"
+    assert_output "198"
 }
 
 @test "TAP-1682: adaptive timeout clamps to upper bound (600s) on huge P95" {
@@ -257,7 +257,7 @@ _source_coord_timeout_helpers() {
     assert_output "600"
 }
 
-@test "TAP-1682: adaptive timeout clamps to lower bound (30s) on tiny P95" {
+@test "TAP-1682: adaptive timeout clamps to lower bound (180s) on tiny P95" {
     _source_coord_timeout_helpers
     local i
     for i in $(seq 1 30); do
@@ -265,7 +265,8 @@ _source_coord_timeout_helpers() {
     done
     run ralph_compute_coordinator_timeout
     assert_success
-    assert_output "30"
+    # Issue 2: floor raised 30→180 so a deflated sample set can't kill a brief.
+    assert_output "180"
 }
 
 @test "TAP-1682: record_timing caps the file to 30 most recent samples" {

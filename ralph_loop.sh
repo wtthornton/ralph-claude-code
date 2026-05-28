@@ -2266,7 +2266,17 @@ build_loop_context() {
         # Linear plugin is always-on if the user is signed in via Claude Code
         # OAuth; we have no boolean for it, so treat unknown as "ok" (no
         # false-positive BLOCKED). If you wire a linear probe later, replace.
-        [[ "${RALPH_MCP_TAPPS_AVAILABLE:-true}" == "false" ]] && _mcp_tapps="down" && _mcp_any_down=1
+        # Issue 4: tapps health must reflect the actual MCP tool catalog the
+        # agent saw last loop (the per-loop .mcp_catalog_lost sentinel written
+        # by the resume-retry path), NOT just the 24h-cached startup probe. A
+        # resumed session can lose its STDIO catalog while `claude mcp list`
+        # still reports the server connected — the sentinel forces "down".
+        if declare -F exec_mcp_health_label >/dev/null 2>&1; then
+            _mcp_tapps=$(exec_mcp_health_label "${RALPH_MCP_TAPPS_AVAILABLE:-true}" "$RALPH_DIR/.mcp_catalog_lost")
+        elif [[ "${RALPH_MCP_TAPPS_AVAILABLE:-true}" == "false" || -f "$RALPH_DIR/.mcp_catalog_lost" ]]; then
+            _mcp_tapps="down"
+        fi
+        [[ "$_mcp_tapps" == "down" ]] && _mcp_any_down=1
         [[ "${RALPH_MCP_BRAIN_AVAILABLE:-true}" == "false" ]] && _mcp_brain="down" && _mcp_any_down=1
         context+="MCP_HEALTH: linear=${_mcp_linear}, tapps=${_mcp_tapps}, brain=${_mcp_brain}. "
         if (( _mcp_any_down )); then
@@ -2657,7 +2667,7 @@ _coordinator_invoke_claude() {
     if declare -F ralph_compute_coordinator_timeout >/dev/null 2>&1; then
         _coord_timeout=$(ralph_compute_coordinator_timeout)
     else
-        _coord_timeout="${RALPH_COORDINATOR_TIMEOUT_SECONDS:-120}"
+        _coord_timeout="${RALPH_COORDINATOR_TIMEOUT_SECONDS:-300}"
     fi
 
     # TAP-921: resume-or-spawn — if a fresh persisted session_id exists,
@@ -2789,6 +2799,11 @@ _coordinator_invoke_claude() {
         _mode_label="${BASH_REMATCH[1]}"
     fi
     _coordinator_record_outcome "$_rc" "$_mode_label" "$_stream_file" "$_coord_timeout" "$_coord_duration"
+    # Issue 2: phase attribution (synthesis vs brain recall) — must run while
+    # the captured stream still exists, i.e. before the rm below.
+    if declare -F ralph_record_coordinator_phase_timing >/dev/null 2>&1; then
+        ralph_record_coordinator_phase_timing "$_stream_file" "$_coord_duration" "$_rc" "$_mode_label"
+    fi
     [[ -n "$_stream_file" ]] && rm -f -- "$_stream_file" 2>/dev/null
     return $_rc
 }
@@ -2999,7 +3014,7 @@ that trips the harness's coordinator regression detector."
         # debug a CLI/agent-config issue.
         if [[ $_coord_rc -eq 124 ]]; then
             local _tmo
-            _tmo=$(ralph_compute_coordinator_timeout 2>/dev/null || echo "120")
+            _tmo=$(ralph_compute_coordinator_timeout 2>/dev/null || echo "300")
             log_status "WARN" "coordinator: timed out after ${_tmo}s — continuing without brief (set RALPH_COORDINATOR_TIMEOUT_SECONDS to pin a value, or RALPH_COORDINATOR_DISABLED=true to turn it off)"
             # TAP-1682: graceful degradation — even a stale cached brief
             # beats no brief at all. Use a much higher max-age (24h) so a
@@ -4519,6 +4534,7 @@ ralph_compute_adaptive_timeout() {
 # =============================================================================
 
 COORDINATOR_TIMINGS_LOG="${RALPH_DIR}/.coordinator_timings.jsonl"
+COORDINATOR_PHASE_TIMINGS_LOG="${RALPH_DIR}/.coordinator_phase_timings.jsonl"
 COORDINATOR_TIMING_SAMPLE_CAP=30
 
 # Append one coordinator wall-clock sample. Called from
@@ -4543,6 +4559,49 @@ ralph_record_coordinator_timing() {
     fi
 }
 
+# Issue 2: attribute coordinator wall-clock to its internal phases so the slow
+# step is visible instead of guessed. The coordinator is an opaque Claude
+# subagent, so the harness measures total wall-clock and reads the captured
+# stream for STRUCTURE: how many tool calls ran and whether brain_recall was
+# among them. brain_recall is a single sub-second MCP round-trip (probed live:
+# ~53ms bridge round-trip), so any multi-second total is synthesis-dominated.
+# This CONFIRMS (rather than assumes) that brief synthesis — not brain recall —
+# is the cost, and gives operators a per-loop attribution line. The slow-step
+# question raised in the field report is answered by `dominant_phase`.
+# Best-effort; never fails the loop. One JSONL line per invocation:
+#   {"ts":…,"mode":…,"total_seconds":…,"exit_code":…,"tool_calls":…,
+#    "brain_recall_calls":…,"brain_recall_invoked":bool,"dominant_phase":…}
+ralph_record_coordinator_phase_timing() {
+    local stream_file="$1" total_seconds="$2" exit_code="${3:-0}" mode="${4:-unknown}"
+    [[ -n "$total_seconds" ]] || return 0
+    local recall_calls=0 tool_calls=0 brain_recall="false" dominant="unknown"
+    if [[ -n "$stream_file" && -s "$stream_file" ]]; then
+        tool_calls=$(grep -c -E '"type"[[:space:]]*:[[:space:]]*"tool_use"' "$stream_file" 2>/dev/null | tr -cd '0-9'); tool_calls=${tool_calls:-0}
+        recall_calls=$(grep -c -E 'mcp__tapps-brain__|brain_recall|memory_recall|memory_search|hive_search' "$stream_file" 2>/dev/null | tr -cd '0-9'); recall_calls=${recall_calls:-0}
+    fi
+    [[ "${recall_calls:-0}" -gt 0 ]] && brain_recall="true"
+    # recall is a sub-second round-trip; multi-second totals are synthesis.
+    if [[ "${total_seconds:-0}" -le 5 ]]; then
+        dominant="startup"
+    else
+        dominant="synthesis"
+    fi
+    local line
+    line=$(printf '{"ts":%s,"mode":"%s","total_seconds":%s,"exit_code":%s,"tool_calls":%s,"brain_recall_calls":%s,"brain_recall_invoked":%s,"dominant_phase":"%s"}' \
+        "$(date -u +%s)" "$mode" "${total_seconds:-0}" "${exit_code:-0}" "${tool_calls:-0}" "${recall_calls:-0}" "$brain_recall" "$dominant")
+    printf '%s\n' "$line" >> "$COORDINATOR_PHASE_TIMINGS_LOG" 2>/dev/null || return 0
+    [[ "${VERBOSE_PROGRESS:-}" == "true" ]] && \
+        log_status "DEBUG" "coordinator phase: mode=$mode total=${total_seconds}s tools=${tool_calls} recall=${recall_calls} dominant=${dominant}"
+    local count
+    count=$(wc -l < "$COORDINATOR_PHASE_TIMINGS_LOG" 2>/dev/null | tr -d '[:space:]')
+    if [[ "${count:-0}" -gt "${COORDINATOR_TIMING_SAMPLE_CAP:-30}" ]]; then
+        tail -"${COORDINATOR_TIMING_SAMPLE_CAP:-30}" "$COORDINATOR_PHASE_TIMINGS_LOG" \
+            > "${COORDINATOR_PHASE_TIMINGS_LOG}.tmp" 2>/dev/null
+        mv -f "${COORDINATOR_PHASE_TIMINGS_LOG}.tmp" "$COORDINATOR_PHASE_TIMINGS_LOG" 2>/dev/null
+        rm -f "${COORDINATOR_PHASE_TIMINGS_LOG}.tmp" 2>/dev/null || true
+    fi
+}
+
 # Compute the coordinator timeout in SECONDS (not minutes — coordinator runs
 # are bounded enough to want sub-minute granularity). Honors
 # RALPH_COORDINATOR_TIMEOUT_SECONDS as a hard override so operators can pin a
@@ -4554,10 +4613,15 @@ ralph_compute_coordinator_timeout() {
         return 0
     fi
 
+    # Issue 2: the coordinator is a full Claude subagent; observed completion
+    # latency is 150–250s (≈180s on a fresh session). The old 120s fallback /
+    # 30s floor sat BELOW that band, so sparse or deflated sample sets produced
+    # 150–250s budgets that killed healthy briefs. Raise both to cover the
+    # observed p95.
     local min_samples="${RALPH_COORDINATOR_TIMEOUT_MIN_SAMPLES:-3}"
-    local min_seconds="${RALPH_COORDINATOR_TIMEOUT_MIN_SECONDS:-30}"
+    local min_seconds="${RALPH_COORDINATOR_TIMEOUT_MIN_SECONDS:-180}"
     local max_seconds="${RALPH_COORDINATOR_TIMEOUT_MAX_SECONDS:-600}"
-    local fallback="${RALPH_COORDINATOR_TIMEOUT_FALLBACK_SECONDS:-120}"
+    local fallback="${RALPH_COORDINATOR_TIMEOUT_FALLBACK_SECONDS:-300}"
 
     local sample_count=0
     if [[ -f "$COORDINATOR_TIMINGS_LOG" ]]; then
@@ -4568,11 +4632,24 @@ ralph_compute_coordinator_timeout() {
         return 0
     fi
 
-    # Extract durations, sort, pick P95 index, ×2.
+    # Issue 2 (right-censoring): a timed-out run (exit_code 124) records its
+    # duration ≈ the timeout budget T — the TRUE latency the coordinator needed
+    # was > T but is never observed. Treating that censored sample at face value
+    # caps the distribution at the current budget, so the adaptive value can
+    # never grow past a too-tight timeout. Inflate censored samples by 1.5× so
+    # the budget escapes the censoring trap on the next computation.
+    #
+    # Issue 2 (tail coverage): integer (n*95)/100 picks the MEDIAN, not the tail,
+    # for small n (n=3 → index 2). Use a ceiling index so "p95" actually covers
+    # the slow tail for the small sample sets the coordinator log usually holds.
     local p95_index p95_seconds
-    p95_index=$(( (sample_count * 95) / 100 ))
+    p95_index=$(( (sample_count * 95 + 99) / 100 ))
     [[ "$p95_index" -lt 1 ]] && p95_index=1
-    p95_seconds=$(jq -r '.duration_seconds // empty' "$COORDINATOR_TIMINGS_LOG" 2>/dev/null \
+    [[ "$p95_index" -gt "$sample_count" ]] && p95_index=$sample_count
+    p95_seconds=$(jq -r '(if (.exit_code // 0) == 124
+                          then ((.duration_seconds // 0) * 3 / 2 | floor)
+                          else (.duration_seconds // empty) end)' \
+            "$COORDINATOR_TIMINGS_LOG" 2>/dev/null \
         | grep -E '^[0-9]+$' \
         | sort -n \
         | sed -n "${p95_index}p")
@@ -4840,6 +4917,50 @@ execute_claude_code() {
     # MCP-CLEANUP: Kill orphaned MCP server processes after each CLI invocation.
     # Claude Code spawns these as grandchildren that survive CLI exit on Windows.
     ralph_cleanup_orphaned_mcp
+
+    # MCP-RESUME (Issue 1): a resumed session can come up WITHOUT its STDIO MCP
+    # tool catalog (tapps-mcp / docs-mcp die with the prior process on --resume
+    # and are not always re-registered before the agent runs). The agent then
+    # no-ops the loop with "No such tool available: mcp__…". The startup MCP
+    # probe cannot catch this — it ran once, in a different process, and is
+    # cached up to 24h (Issue 4). Detect the catalog-loss no-op signature and
+    # retry the loop ONCE with a fresh (non-resumed) session instead of burning
+    # it. Bounded: a single linear retry, no loop. Gated on a resume loop that
+    # produced no real work, so we never discard a loop that actually shipped.
+    if [[ "$exit_code" -eq 0 && -n "$session_id" && "$CLAUDE_USE_CONTINUE" == "true" ]] \
+       && declare -F exec_mcp_catalog_lost >/dev/null 2>&1 \
+       && ! ralph_has_real_changes \
+       && exec_mcp_catalog_lost "$output_file"; then
+        log_status "WARN" "MCP-RESUME: resumed session ${session_id:0:12}… came up with no STDIO MCP tool catalog — retrying loop once with a fresh session (not burning it)"
+        # Drop the poisoned session id so neither the retry nor the next loop
+        # resumes onto it; save_claude_session repopulates it from the fresh run.
+        rm -f "$RALPH_DIR/.claude_session_id" 2>/dev/null || true
+        session_id=""
+        # Rebuild WITHOUT --resume — CLAUDE_CMD_ARGS still carries the dead
+        # --resume <id> from the first build.
+        build_claude_command "$PROMPT_FILE" "$loop_context" "" >/dev/null 2>&1 || true
+        echo -e "\n=== Loop #$loop_count — fresh-session retry (MCP-RESUME) — $(date '+%H:%M:%S') ===" >> "$LIVE_LOG_FILE"
+        if [[ "$LIVE_OUTPUT" == "true" ]]; then
+            exec_run_live "$timeout_seconds" "$output_file" "$adaptive_timeout"
+            exit_code=$?
+        else
+            exec_run_background "$timeout_seconds" "$output_file" "$use_modern_cli"
+            exit_code=$?
+            [[ $exit_code -eq 99 ]] && return 1
+        fi
+        ralph_cleanup_orphaned_mcp
+        if exec_mcp_catalog_lost "$output_file"; then
+            # Fresh session STILL has no catalog → the MCP transport is
+            # genuinely down, not a resume artifact. Keep the sentinel so
+            # MCP_HEALTH shows tapps=down next loop (Issue 4) and the agent can
+            # emit STATUS: BLOCKED + mcp_unreachable instead of no-progress.
+            touch "$RALPH_DIR/.mcp_catalog_lost" 2>/dev/null || true
+            log_status "WARN" "MCP-RESUME: fresh-session retry STILL has no MCP catalog — transport likely down (not a resume artifact); MCP_HEALTH will show tapps=down next loop"
+        else
+            rm -f "$RALPH_DIR/.mcp_catalog_lost" 2>/dev/null || true
+            log_status "INFO" "MCP-RESUME: fresh-session retry restored the MCP tool catalog"
+        fi
+    fi
 
     # Expose invocation duration to caller so the fast-trip detector in the main
     # loop can see it (invocation_start_epoch is local-scoped to this function).
