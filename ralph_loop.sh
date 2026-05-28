@@ -2954,10 +2954,29 @@ ralph_spawn_coordinator() {
     # without invoking the Write tool. Reiterate the file path + atomic
     # pattern + JSON shape inline so the coordinator can't shortcut to
     # "summarize only".
+    # TAP-2493 follow-up (AgentForge 2026-05-26 incident): pass
+    # RALPH_LINEAR_TEAM / RALPH_LINEAR_PROJECT into the coordinator body in
+    # linear mode. The MODE=brief contract refers to "the team/project from
+    # your input" (step 4b's locality hint, and the no-task fresh-probe
+    # rule), but pre-fix the spawn passed only TASK_SOURCE / LOOP /
+    # TASK_INPUT — the coordinator had to infer team from the worker-side
+    # system prompt or guess. Injecting explicit values here closes the
+    # latent contract gap so the coordinator can never silently probe with
+    # the wrong team. Additive: omitted when either env var is empty.
+    local _coord_team_block=""
+    if [[ "$task_source" == "linear" ]]; then
+        if [[ -n "${RALPH_LINEAR_TEAM:-}" ]]; then
+            _coord_team_block+="RALPH_LINEAR_TEAM=${RALPH_LINEAR_TEAM}"$'\n'
+        fi
+        if [[ -n "${RALPH_LINEAR_PROJECT:-}" ]]; then
+            _coord_team_block+="RALPH_LINEAR_PROJECT=${RALPH_LINEAR_PROJECT}"$'\n'
+        fi
+    fi
+
     local coord_body
     coord_body="TASK_SOURCE=${task_source}
 LOOP=${loop_count}
-TASK_INPUT: ${task_input}
+${_coord_team_block}TASK_INPUT: ${task_input}
 
 REQUIRED ACTION (do this BEFORE returning the summary):
   1. Use the Write tool to write the brief JSON to ${brief_target} (a single
