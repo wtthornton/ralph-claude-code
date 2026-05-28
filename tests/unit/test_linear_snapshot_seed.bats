@@ -142,3 +142,98 @@ EOF
     assert_success
     [[ "$output" == "2" ]]
 }
+
+# ----------------------------------------------------------------------------
+# TAP-2646 — poisoned (auto_populated) empty-snapshot guard.
+#
+# A list_issues call with state=null ("any") returns [] as a Linear-plugin
+# query-shape quirk; the TAP-1412 auto-populate hook caches that [] with
+# auto_populated=true. Without a guard the TAP-2442 pre-seed reads it as a
+# real 0 and writes a poisoned linear_open_count=0 into status.json, which the
+# PREFLIGHT-EMPTY-PLAN gate then treats as a clean completion (NLTlabsPE
+# 2026-05-27: exited with 63 issues open). The reader must abstain on the
+# poisoned signature but still honor a genuine empty bucket.
+# ----------------------------------------------------------------------------
+
+# Write a snapshot with an explicit auto_populated flag (and arbitrary state
+# token, so we can simulate the "__any__" cache the plugin actually writes).
+_write_snapshot_flagged() {
+    local state="$1" issue_count="$2" expires_at="$3" auto_populated="$4"
+    local file="$RALPH_LINEAR_SNAPSHOT_CACHE_DIR/${RALPH_LINEAR_TEAM}__${RALPH_LINEAR_PROJECT}__${state}__abc123.json"
+    local issues="["
+    for i in $(seq 1 "$issue_count"); do
+        [[ $i -gt 1 ]] && issues+=","
+        issues+="{\"id\":\"TAP-$i\"}"
+    done
+    issues+="]"
+    cat > "$file" <<EOF
+{
+  "cached_at": $(($(date -u +%s) - 60)),
+  "expires_at": ${expires_at},
+  "state": "${state}",
+  "auto_populated": ${auto_populated},
+  "team": "${RALPH_LINEAR_TEAM}",
+  "project": "${RALPH_LINEAR_PROJECT}",
+  "issues": ${issues}
+}
+EOF
+}
+
+@test "TAP-2646: auto_populated empty snapshot → abstain (return 1)" {
+    # The poisoned signature: empty issues + auto_populated:true in the bucket
+    # the reader globs (state=null is normalized to the active/open view).
+    _write_snapshot_flagged "open" 0 $(($(date -u +%s) + 300)) "true"
+    run _linear_count_from_snapshot_cache "open"
+    assert_failure
+    [[ ! "$output" =~ ^[0-9]+$ ]]
+}
+
+@test "TAP-2646: genuine empty snapshot (no auto_populated) → real 0 honored" {
+    # Guard must not be over-broad: a real empty bucket still returns 0.
+    _write_snapshot_flagged "completed" 0 $(($(date -u +%s) + 300)) "false"
+    run _linear_count_from_snapshot_cache "completed"
+    assert_success
+    [[ "$output" == "0" ]]
+}
+
+@test "TAP-2646: auto_populated:true but non-empty → count returned (flag only matters at 0)" {
+    # The flag alone is not poison — a populated auto-populated snapshot is a
+    # legitimate count and must pass through.
+    _write_snapshot_flagged "open" 5 $(($(date -u +%s) + 300)) "true"
+    run _linear_count_from_snapshot_cache "open"
+    assert_success
+    [[ "$output" == "5" ]]
+}
+
+@test "TAP-2646: seed writes NO poisoned 0 when open snapshot is auto_populated empty" {
+    # Full root-cause chain: poisoned open snapshot, no completed snapshot.
+    # The seed must abstain on open (and write nothing), so linear_get_open_count
+    # later abstains rather than returning a poisoned 0 that trips plan_complete.
+    _write_snapshot_flagged "open" 0 $(($(date -u +%s) + 300)) "true"
+    run linear_seed_counts_from_snapshot_cache
+    assert_success
+    # status.json must not carry a poisoned linear_open_count.
+    if [[ -f "$RALPH_DIR/status.json" ]]; then
+        local _open
+        _open=$(jq -r '.linear_open_count // "absent"' "$RALPH_DIR/status.json")
+        [[ "$_open" == "absent" ]] || { echo "expected no linear_open_count, got $_open"; return 1; }
+    fi
+    # And the downstream count read abstains (no poisoned 0 to serve).
+    run linear_get_open_count
+    assert_failure
+}
+
+@test "TAP-2646: poisoned __any__ cache + populated open bucket → real count, no false 0" {
+    # The literal acceptance scenario: a poisoned auto_populated empty "__any__"
+    # snapshot coexists with a populated state-bucket snapshot. The seed must
+    # read the populated open count and never serve the poisoned empty one.
+    _write_snapshot_flagged "any" 0 $(($(date -u +%s) + 300)) "true"   # poisoned
+    _write_snapshot_flagged "open" 7 $(($(date -u +%s) + 300)) "false" # real
+    run linear_seed_counts_from_snapshot_cache
+    assert_success
+    [[ -f "$RALPH_DIR/status.json" ]]
+    [[ "$(jq -r '.linear_open_count' "$RALPH_DIR/status.json")" == "7" ]]
+    run linear_get_open_count
+    assert_success
+    [[ "$output" == "7" ]]
+}

@@ -1693,20 +1693,30 @@ should_exit_gracefully() {
             return 0
         fi
         local total_items=$((open_items + done_items))
-        # PREFLIGHT-EMPTY-PLAN (Linear branch): zero open issues = nothing to do
-        # this iteration, regardless of whether the project has any done items.
-        # Same rationale as the fix_plan.md branch: exit clean rather than burn
-        # a Claude call into an empty backlog. Operator restarts after seeding work.
-        # NOTE: open_items=0 here is an authoritative count (TAP-536 contract);
-        # API failures took the abstain path above and never reach this check.
+        # PREFLIGHT-EMPTY-PLAN (Linear branch): zero open issues = nothing to do.
+        # Require positive completion evidence (done>0) before treating open=0 as
+        # authoritative. When BOTH open AND done are zero the count is likely stale
+        # or poisoned (TAP-2646: an auto-populated empty any-state snapshot seeds a
+        # 0 into status.json via TAP-2442; the next loop reads it as "no work" and
+        # exits on a non-empty backlog — NLTlabsPE 2026-05-27 exited with 63 open).
+        # Abstain in the 0/0 case and let the agent report fresh counts next loop.
+        # NOTE: in push-mode (no LINEAR_API_KEY) these counts come from status.json
+        # and can carry a stale 0; the API path is still TAP-536 fail-loud and never
+        # reaches here on error, so only the push-mode 0/0 signature needs guarding.
         if [[ $open_items -eq 0 ]]; then
             if [[ $total_items -gt 0 ]]; then
+                # Positive completion evidence: at least one done issue confirms a
+                # real completion rather than a stale/poisoned-count artefact.
                 log_status "WARN" "Exit condition: All Linear issues completed ($done_items/$total_items) in project '${RALPH_LINEAR_PROJECT}'" >&2
+                echo "plan_complete"
+                return 0
             else
-                log_status "WARN" "Exit condition: Linear project '${RALPH_LINEAR_PROJECT}' has zero open issues (no work seeded)" >&2
+                # open=0 AND done=0: no positive completion evidence — the poisoned/
+                # stale-count signature. Abstain rather than risk a false plan_complete.
+                log_status "WARN" "Linear counts show 0 open / 0 done in project '${RALPH_LINEAR_PROJECT}' — abstaining (no completion evidence; possible stale count, see TAP-2646)" >&2
+                echo ""
+                return 0
             fi
-            echo "plan_complete"
-            return 0
         fi
     elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         # Valid patterns: "- [ ]" (uncompleted) and "- [x]" or "- [X]" (completed)
