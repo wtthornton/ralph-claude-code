@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # TAP-646: guard against agent contract drift.
 #
-# A. ralph-tester must match the doc claim (Sonnet, worktree-isolated).
+# A. ralph-tester must match the doc claim (Opus 4.8 quality-max, worktree-isolated).
 # B. No agent file may declare `Agent(...)` as a tool — that's not a valid
 #    entry in the Claude Code schema; sub-agent delegation uses `Task`.
 
@@ -9,8 +9,8 @@ load '../helpers/test_helper'
 
 PROJECT_ROOT="${BATS_TEST_DIRNAME}/../.."
 
-@test "TAP-646 A: ralph-tester uses model: sonnet (matches CLAUDE.md)" {
-    run grep -E "^model: sonnet$" "$PROJECT_ROOT/.claude/agents/ralph-tester.md"
+@test "TAP-646 A: ralph-tester uses model: claude-opus-4-8 (matches CLAUDE.md)" {
+    run grep -E "^model: claude-opus-4-8$" "$PROJECT_ROOT/.claude/agents/ralph-tester.md"
     assert_success
 }
 
