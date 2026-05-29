@@ -38,9 +38,9 @@ Expected outcome on a 40-ticket backlog like NLTlabsPE: **$15 instead of $85**, 
 | Agent | Model | Tools | When to use | Cost profile |
 |-------|-------|-------|-------------|--------------|
 | `ralph-explorer` | Haiku-4.5 | Read, Glob, Grep, Bash(read-only) | Codebase search, "where is X defined?", "what calls this function?" | **~$0.02–0.10 per call.** 5-20× cheaper than doing the same work inline on Opus. |
-| `ralph-tester` | Sonnet-4-6 (worktree-isolated) | Read, Bash | Run `npm test`, `pytest`, `playwright` — any test command | Medium. Isolation prevents test artifacts polluting main branch. |
-| `ralph-reviewer` | Sonnet-4-6 (read-only) | Read, Glob, Grep | Review before commit / before Done | Medium. Catches regressions before the diff ships. |
-| `ralph-architect` | Opus-4-7 | Full toolbelt + Task | LARGE tasks only (cross-module, architectural, new feature) | **Expensive — the ONE legitimate Opus call-site.** Mandatory code review follows. |
+| `ralph-tester` | Opus-4-8 (worktree-isolated) | Read, Bash | Run `npm test`, `pytest`, `playwright` — any test command | Quality-max gate. Isolation prevents test artifacts polluting main branch. |
+| `ralph-reviewer` | Opus-4-8 (read-only) | Read, Glob, Grep | Review before commit / before Done | Quality-max gate; fires at epic boundaries, so the Opus cost lands on an occasional operation. |
+| `ralph-architect` | Opus-4-8 | Full toolbelt + Task | LARGE tasks only (cross-module, architectural, new feature) | **Expensive — the architect/QA quality lane.** Mandatory code review follows. |
 | `general-purpose` | Sonnet-4-6 | Everything | Fallback when none of the above fit | Medium. Don't default to this — the named agents exist for a reason. |
 
 **Models cost per 1M tokens** (Anthropic pricing as of April 2026):
@@ -338,7 +338,7 @@ Watch these counters:
 4. **`linear_get_next_task` in push-mode without the TAP-741 fix.** Emits false `linear_api_error: reason=no_api_key` every loop. Upgrade source repo + `ralph-upgrade`.
 5. **Context7 cache staleness.** 24h TTL default. If an upstream library ships a breaking change, cache serves stale info for up to a day. For security-sensitive libs, invalidate manually.
 6. **tapps-brain max entries is silent.** 5000 entry cap auto-evicts without warning. Monitor via `brain_status()` and clean up with `maintenance_gc` periodically.
-7. **Sub-agents cost money too.** `ralph-explorer` is cheap but not free ($0.02–0.10). `ralph-tester` is Sonnet ($1–2 per full test run). Don't delegate trivial 1-line questions — delegate searches that would take 5+ Reads.
+7. **Sub-agents cost money too.** `ralph-explorer` is cheap but not free ($0.02–0.10). The quality lanes (`ralph-tester`, `ralph-reviewer`, `ralph-architect`) run on Opus 4.8. Don't delegate trivial 1-line questions — delegate searches that would take 5+ Reads.
 
 ## Part 8 — Rollout plan (practical)
 

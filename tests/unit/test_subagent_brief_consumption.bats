@@ -72,21 +72,22 @@ setup() { :; }
         || fail "ralph.md must reference delegate_to so it can defer to ralph-architect"
 }
 
-@test "TAP-916: frontmatter unchanged — no new tools / model swaps" {
-    # Snapshot the model and tools field of each file as a sanity check
-    # that this story stayed body-only. We assert the model is what it
-    # was at the start of TAP-916 (sonnet for ralph/reviewer/tester,
-    # haiku for explorer/bg-tester, claude-opus-4-7 for architect).
+@test "TAP-916: agent-file model pins match the documented lineup" {
+    # Drift guard on each sub-agent's model field. Expected lineup after the
+    # Opus 4.8 quality-max review (OPERATOR-NOTES.md): main loop + bg-tester +
+    # explorer stay cheap (sonnet/haiku); the architect, reviewer, and tester
+    # quality lanes run claude-opus-4-8. Keep this in lockstep with CLAUDE.md,
+    # docs/ARCHITECTURE.md, and docs/RALPH-STACK-GUIDE.md.
     grep -qE '^model:[[:space:]]+sonnet[[:space:]]*$' "$AGENTS_DIR/ralph.md" \
         || fail "ralph.md model must remain 'sonnet'"
-    grep -qE '^model:[[:space:]]+claude-opus-4-7[[:space:]]*$' "$AGENTS_DIR/ralph-architect.md" \
-        || fail "ralph-architect.md model must remain 'claude-opus-4-7'"
-    grep -qE '^model:[[:space:]]+sonnet[[:space:]]*$' "$AGENTS_DIR/ralph-tester.md" \
-        || fail "ralph-tester.md model must remain 'sonnet'"
+    grep -qE '^model:[[:space:]]+claude-opus-4-8[[:space:]]*$' "$AGENTS_DIR/ralph-architect.md" \
+        || fail "ralph-architect.md model must be 'claude-opus-4-8'"
+    grep -qE '^model:[[:space:]]+claude-opus-4-8[[:space:]]*$' "$AGENTS_DIR/ralph-tester.md" \
+        || fail "ralph-tester.md model must be 'claude-opus-4-8'"
     grep -qE '^model:[[:space:]]+haiku[[:space:]]*$' "$AGENTS_DIR/ralph-bg-tester.md" \
         || fail "ralph-bg-tester.md model must remain 'haiku'"
-    grep -qE '^model:[[:space:]]+sonnet[[:space:]]*$' "$AGENTS_DIR/ralph-reviewer.md" \
-        || fail "ralph-reviewer.md model must remain 'sonnet'"
+    grep -qE '^model:[[:space:]]+claude-opus-4-8[[:space:]]*$' "$AGENTS_DIR/ralph-reviewer.md" \
+        || fail "ralph-reviewer.md model must be 'claude-opus-4-8'"
     grep -qE '^model:[[:space:]]+haiku[[:space:]]*$' "$AGENTS_DIR/ralph-explorer.md" \
         || fail "ralph-explorer.md model must remain 'haiku'"
 }

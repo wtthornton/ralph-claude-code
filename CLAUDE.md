@@ -165,9 +165,9 @@ Python Agent SDK for dual-mode operation. All models are **Pydantic v2 BaseModel
 
 **Sub-agents**: Four specialized agents keep search, testing, review, and complex architecture work out of the main context:
 - **ralph-explorer** (Haiku) — fast codebase search
-- **ralph-tester** (Sonnet, worktree-isolated) — test runner
-- **ralph-reviewer** (Sonnet, read-only) — code review
-- **ralph-architect** (Opus) — complex/architectural tasks with mandatory code review
+- **ralph-tester** (Opus 4.8, worktree-isolated) — test runner
+- **ralph-reviewer** (Opus 4.8, read-only) — code review
+- **ralph-architect** (Opus 4.8) — complex/architectural tasks with mandatory code review
 
 The main Ralph agent (Sonnet) handles routine work with task batching (up to 5 small / 3 medium tasks per invocation) and delegates LARGE tasks to ralph-architect.
 

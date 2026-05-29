@@ -177,9 +177,9 @@ Four specialized agents in [`.claude/agents/`](../.claude/agents/):
 |---|---|---|---|
 | **ralph** | Sonnet | none (main) | Routine work, task batching, delegation router |
 | **ralph-explorer** | Haiku | none | Read-only codebase search |
-| **ralph-tester** | Sonnet | worktree | Test runner |
-| **ralph-reviewer** | Sonnet | read-only | Code review before commit |
-| **ralph-architect** | Opus | none | Complex/architectural tasks with mandatory review |
+| **ralph-tester** | Opus 4.8 | worktree | Test runner |
+| **ralph-reviewer** | Opus 4.8 | read-only | Code review before commit |
+| **ralph-architect** | Opus 4.8 | none | Complex/architectural tasks with mandatory review |
 | **ralph-bg-tester** | Sonnet | background | Async test runner during next iteration |
 
 Main Ralph runs on Sonnet with `bypassPermissions` and `effort: medium` for throughput. LARGE/ARCHITECTURAL tasks escalate to ralph-architect (Opus) with mandatory ralph-reviewer afterwards. See [ADR-0004](decisions/0004-epic-boundary-qa-deferral.md).
