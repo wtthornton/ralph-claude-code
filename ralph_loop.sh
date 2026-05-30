@@ -4458,17 +4458,56 @@ PSEOF
 
 LATENCY_LOG="${RALPH_DIR}/.invocation_latencies"
 
-# Record a successful invocation's duration (in seconds)
+# Record an invocation's duration (in seconds) + exit code.
+#
+# Format: one JSON object per line, mirroring .coordinator_timings.jsonl —
+#   {"ts":<epoch>,"duration_seconds":<int>,"exit_code":<int>}
+#
+# Why exit_code is required: a productive-timeout sample records duration ≈ the
+# timeout budget T (the CLI was SIGTERM-killed at T; the TRUE latency the loop
+# needed was > T but was never observed). Without an exit_code marker the
+# percentile calculation treats T as the loop's actual capability and the
+# adaptive value can never grow past a too-tight budget — the same right-
+# censoring bug fixed for the coordinator in TAP-1682. exit_code 124 marks the
+# sample as censored; ralph_compute_adaptive_timeout inflates it by 1.5×.
+#
+# Legacy logs (plain integer per line, written by the pre-fix harness) are
+# migrated to JSONL on first write. The legacy values are assumed non-censored
+# (exit_code 0) — slightly optimistic but unavoidable without the original
+# context, and the cap-50 sample window means legacy values roll off quickly.
+#
+# Args: $1 duration_seconds (int), $2 exit_code (int, optional, default 0)
 ralph_record_latency() {
     local duration_seconds="$1"
-    echo "$duration_seconds" >> "$LATENCY_LOG"
+    local exit_code="${2:-0}"
+    [[ -n "$duration_seconds" ]] || return 0
 
-    # Keep only the last 50 samples to bound file size. Guard the mv behind
-    # tail success — same defect class as the memory.sh:222 fix in 724a00e: an
-    # unconditional mv after a failed tail (disk full, OOM, signal) silently
-    # promotes an empty/partial .tmp over the real log, wiping every latency
-    # sample and forcing adaptive_timeout back to the static default for the
-    # rest of the session until 3+ new samples accumulate.
+    # One-time legacy-format migration: if the file exists, is non-empty, and
+    # the first line is a bare integer (not JSON), rewrite each line as JSONL
+    # before appending the new entry.
+    if [[ -f "$LATENCY_LOG" && -s "$LATENCY_LOG" ]]; then
+        local _first
+        IFS= read -r _first < "$LATENCY_LOG" 2>/dev/null || _first=""
+        if [[ -n "$_first" && ! "$_first" =~ ^\{ ]]; then
+            local _now _migrated_tmp
+            _now=$(date -u +%s)
+            _migrated_tmp="${LATENCY_LOG}.migrating"
+            if awk -v ts="$_now" '/^[0-9]+$/ { printf "{\"ts\":%s,\"duration_seconds\":%s,\"exit_code\":0}\n", ts, $0 }' \
+                "$LATENCY_LOG" > "$_migrated_tmp" 2>/dev/null; then
+                mv "$_migrated_tmp" "$LATENCY_LOG" 2>/dev/null
+            fi
+            rm -f "$_migrated_tmp" 2>/dev/null
+        fi
+    fi
+
+    printf '{"ts":%s,"duration_seconds":%s,"exit_code":%s}\n' \
+        "$(date -u +%s)" "$duration_seconds" "$exit_code" >> "$LATENCY_LOG"
+
+    # Cap at last 50 samples. Guard the mv behind tail success — same defect
+    # class as the memory.sh:222 fix in 724a00e: an unconditional mv after a
+    # failed tail (disk full, OOM, signal) silently promotes an empty/partial
+    # .tmp over the real log, wiping every latency sample and forcing
+    # adaptive_timeout back to the static default for the rest of the session.
     if [[ -f "$LATENCY_LOG" ]]; then
         local count
         count=$(wc -l < "$LATENCY_LOG" 2>/dev/null | tr -d '[:space:]')
@@ -4481,15 +4520,27 @@ ralph_record_latency() {
     fi
 }
 
-# Compute adaptive timeout based on P95 of historical completion times
+# Compute adaptive timeout based on P95 of historical completion times.
+#
+# Two corrections vs. the original ADAPTIVE-1 implementation, mirroring the
+# coordinator-timeout fixes (TAP-1682 + Issue 2):
+#
+# 1. RIGHT-CENSORING: a timed-out sample (exit_code 124) records duration ≈
+#    the timeout budget — the true latency was greater but unobserved. Treating
+#    that censored value at face value caps the distribution at the current
+#    budget, so the adaptive value can never grow past a too-tight timeout.
+#    Censored samples are inflated 1.5× before the percentile is taken, letting
+#    the budget escape the censoring trap on the next computation.
+#
+# 2. TAIL COVERAGE: integer (n*95)/100 picks the median for small n (n=3 → 2,
+#    n=10 → 9 = 90th percentile, not 95th). Ceiling rounding makes "P95"
+#    actually cover the slow tail for small sample sets.
 ralph_compute_adaptive_timeout() {
-    # If adaptive timeout is disabled, use static setting
     if [[ "${ADAPTIVE_TIMEOUT_ENABLED:-true}" != "true" ]]; then
         echo "${CLAUDE_TIMEOUT_MINUTES:-15}"
         return
     fi
 
-    # Need minimum samples before adapting
     local sample_count
     if [[ -f "$LATENCY_LOG" ]]; then
         sample_count=$(wc -l < "$LATENCY_LOG" 2>/dev/null | tr -d '[:space:]')
@@ -4503,23 +4554,36 @@ ralph_compute_adaptive_timeout() {
         return
     fi
 
-    # Compute P95
     local p95_index p95_seconds timeout_seconds timeout_minutes
-    p95_index=$(( (sample_count * 95) / 100 ))
+    p95_index=$(( (sample_count * 95 + 99) / 100 ))
     [[ "$p95_index" -lt 1 ]] && p95_index=1
+    [[ "$p95_index" -gt "$sample_count" ]] && p95_index=$sample_count
 
-    p95_seconds=$(sort -n "$LATENCY_LOG" | sed -n "${p95_index}p")
+    # JSONL path (post-migration). For each line, inflate censored samples 1.5×;
+    # extract sorted ascending; take the p95 index.
+    p95_seconds=$(jq -r '(if (.exit_code // 0) == 124
+                         then ((.duration_seconds // 0) * 3 / 2 | floor)
+                         else (.duration_seconds // empty) end)' \
+            "$LATENCY_LOG" 2>/dev/null \
+        | grep -E '^[0-9]+$' \
+        | sort -n \
+        | sed -n "${p95_index}p")
+
+    # Legacy fallback: if jq found nothing (e.g., the migration helper failed
+    # but the file is still plain integers), fall back to the pre-fix read path
+    # so a degraded environment still produces a sane timeout.
+    if [[ -z "$p95_seconds" ]]; then
+        p95_seconds=$(sort -n "$LATENCY_LOG" 2>/dev/null | sed -n "${p95_index}p")
+    fi
     [[ -z "$p95_seconds" ]] && { echo "${CLAUDE_TIMEOUT_MINUTES:-15}"; return; }
 
-    # Apply multiplier
     timeout_seconds=$((p95_seconds * ADAPTIVE_TIMEOUT_MULTIPLIER))
-    timeout_minutes=$(( (timeout_seconds + 59) / 60 ))  # Round up
+    timeout_minutes=$(( (timeout_seconds + 59) / 60 ))
 
-    # Clamp to min/max
     [[ "$timeout_minutes" -lt "$ADAPTIVE_TIMEOUT_MIN_MINUTES" ]] && timeout_minutes=$ADAPTIVE_TIMEOUT_MIN_MINUTES
     [[ "$timeout_minutes" -gt "$ADAPTIVE_TIMEOUT_MAX_MINUTES" ]] && timeout_minutes=$ADAPTIVE_TIMEOUT_MAX_MINUTES
 
-    log_status "DEBUG" "Adaptive timeout: P95=${p95_seconds}s × ${ADAPTIVE_TIMEOUT_MULTIPLIER} = ${timeout_minutes}m (range: ${ADAPTIVE_TIMEOUT_MIN_MINUTES}-${ADAPTIVE_TIMEOUT_MAX_MINUTES}m, samples: $sample_count)"
+    log_status "DEBUG" "Adaptive timeout: P95=${p95_seconds}s × ${ADAPTIVE_TIMEOUT_MULTIPLIER} = ${timeout_minutes}m (range: ${ADAPTIVE_TIMEOUT_MIN_MINUTES}-${ADAPTIVE_TIMEOUT_MAX_MINUTES}m, samples: $sample_count, censored samples inflated 1.5×)"
     echo "$timeout_minutes"
 }
 
@@ -5064,12 +5128,15 @@ execute_claude_code() {
             return 3  # Special code for circuit breaker trip
         fi
 
-        # ADAPTIVE-1: Record latency for successful (non-timeout) completions
+        # ADAPTIVE-1: Record latency for successful (non-timeout) completions.
+        # Explicit exit_code=0 marks the sample as uncensored (real latency
+        # observed); the productive-timeout path in exec_handle_timeout uses
+        # 124 to flag right-censored samples for 1.5× inflation.
         if [[ -n "${invocation_start_epoch:-}" ]]; then
             local invocation_end_epoch duration_seconds
             invocation_end_epoch=$(date +%s)
             duration_seconds=$((invocation_end_epoch - invocation_start_epoch))
-            ralph_record_latency "$duration_seconds"
+            ralph_record_latency "$duration_seconds" 0
         fi
 
         # CBDECAY-1: Record success for sliding window
