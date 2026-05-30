@@ -2,7 +2,7 @@
 
 **Epic:** [Observability](epic-observability.md)
 **Priority:** Medium
-**Status:** Design — approved (command surface + v1 rules signed off); implementation pending follow-up
+**Status:** Implemented — `ralph --analyze` shipped (`lib/telemetry_analyze.sh`, 17 BATS cases)
 **Effort:** Medium
 **Component:** `lib/telemetry_analyze.sh` (new), `ralph_loop.sh` (CLI dispatch), `tests/unit/test_telemetry_analyze.bats` (new)
 
@@ -138,16 +138,16 @@ failing health check would).
 
 ## Acceptance
 
-- [ ] Operator signs off on Decision 1 (command surface) and the v1 rule set.
-- [ ] `ralph --analyze` reads only the six files above; never writes `.ralph/`.
-- [ ] Every rule degrades to `[SKIP]` on a missing/empty file — no crash, exit 0.
-- [ ] p95 rules reuse the PR #54/#58 right-censor + ceiling-index method (no drift
-      to a naive percentile).
-- [ ] `--json` emits the stable-key schema above; `--analyze` and `--analyze
+- [x] Operator signs off on Decision 1 (command surface) and the v1 rule set.
+- [x] `ralph --analyze` reads only the six files above; never writes `.ralph/`.
+- [x] Every rule degrades to `[SKIP]` on a missing/empty file — no crash, exit 0.
+- [x] p95 rules reuse the PR #54/#58 right-censor + ceiling-index method (no drift
+      to a naive percentile) via the shared `_ta_percentile` helper.
+- [x] `--json` emits the stable-key schema above; `--analyze` and `--analyze
       --json` agree on findings.
-- [ ] BATS coverage for OK/WARN/SKIP per rule + `--json` shape; `npm run
-      test:unit` green.
-- [ ] Does NOT duplicate `ralph --stats` aggregations (run counts, work-type,
+- [x] BATS coverage for OK/WARN/SKIP per rule + `--json` shape (17 cases); `npm run
+      test:unit` green (2118 pass).
+- [x] Does NOT duplicate `ralph --stats` aggregations (run counts, work-type,
       brain, skills).
 
 ## Refs

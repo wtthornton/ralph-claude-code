@@ -427,6 +427,20 @@ jq '.["TAP-123"]' .ralph/.qa_failures.json
 
 The count increments on QA failure (called by on-stop hook), resets on PASSING (via `qa_failures_reset`), and triggers Opus escalation at count ≥3.
 
+## Observability: Telemetry Analyzer (`ralph --analyze`)
+
+`ralph --analyze` (lib/telemetry_analyze.sh, `ralph_telemetry_analyze`) is a **read-only, always-exit-0** analyzer over the harness's *control-path* telemetry — the JSONL/state files each consumed by exactly one internal decision and otherwise never surfaced. It is the closed loop from telemetry → finding → action; it deliberately does **not** duplicate `ralph --stats` (which reads `.ralph/metrics/*.jsonl` for run counts / work-type / brain / skills). Human `[OK]/[WARN]/[SKIP]/[INFO]` output by default; `ralph --analyze --json` emits `{generated_at, findings:[{rule, severity, value, threshold, detail, hint}]}` (stable keys for dashboards). Never writes `.ralph/`.
+
+Five v1 rules (each degrades to `[SKIP]` on a missing/empty file, so a fresh project is never an error):
+
+1. **coordinator_timeout** — censored-p95 of `.coordinator_timings.jsonl` vs the live `ralph_compute_coordinator_timeout` budget; `WARN` at p95 ≥ 90% of budget.
+2. **mainloop_timeout** — censored-p95 of `.invocation_latencies` vs `ralph_compute_adaptive_timeout` (minutes→seconds); same 90% rule.
+3. **cache_hit_rate** — `session_cache_read / (read + create + session_input)` from `status.json` (the exact ralph_monitor.sh:480 formula) vs `RALPH_CACHE_HIT_RATE_WARN` (default 30); `WARN` below.
+4. **opus_escalation** — counts `qa_failure_escalation` in the last `RALPH_ANALYZE_ROUTING_WINDOW` (default 200) lines of `.model_routing.jsonl`, naming stuck issues (`.qa_failures.json` value ≥3).
+5. **coordinator_phase** — synthesis-dominated share + brain_recall-invoked count from `.coordinator_phase_timings.jsonl`. **This is the field signal OPERATOR-NOTES item #2 (coordinator→Haiku trial) is gated on** — when synthesis dominates, the analyzer says so.
+
+The two timeout rules reuse the PR #54/#58 right-censor (`exit_code 124` → ×1.5) + ceiling-p95 method via the shared `_ta_percentile` helper, so the analyzer's percentile agrees with the value the harness enforces. Design: [docs/specs/story-telemetry-harvester.md](docs/specs/story-telemetry-harvester.md). Covered by `tests/unit/test_telemetry_analyze.bats` (17 cases).
+
 ## Testing
 
 - **Framework**: BATS (Bash Automated Testing System) with bats-assert and bats-support
