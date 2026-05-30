@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **COSTROUTE-3 prompt-cache scaffolding ([lib/complexity.sh](lib/complexity.sh), [tests/unit/test_cost_optimization.bats](tests/unit/test_cost_optimization.bats)).** `RALPH_PROMPT_CACHE_ENABLED`, `ralph_build_cacheable_prompt`, and `ralph_get_stable_prefix_hash` had zero production callers — the spec shipped marked Done in [epic-cost-aware-routing.md:39](docs/specs/epic-cost-aware-routing.md#L39) but the wiring was never landed, and the function targeted file mode (`PROMPT.md` / `AGENT.md` / `fix_plan.md`) which no real user runs (`RALPH_TASK_SOURCE=linear` is the active backend). Removed to eliminate the trust hazard — operators flipping the flag would observe no behavior change. The COSTROUTE-3 story is now marked **Reverted**; COSTROUTE-4 cost-dashboard tests in the same file are untouched. Any future prompt-cache-structure work should be re-scoped against the linear-mode runtime path (`build_claude_command` → user-message concatenation) and gated on TAP-1685 cache-hit field data showing a sustained regression.
+
 ---
 
 ## [2.17.1] — 2026-05-23
