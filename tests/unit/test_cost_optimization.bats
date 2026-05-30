@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 
-# Tests for COSTROUTE-3 (prompt cache optimization) and COSTROUTE-4 (cost dashboard)
+# Tests for COSTROUTE-4 (cost dashboard).
+# COSTROUTE-3 (prompt cache optimization) was reverted — the function shipped
+# without a runtime caller in linear mode. See PR removing it for rationale.
 
 setup() {
     export RALPH_DIR="$BATS_TEST_TMPDIR/.ralph"
@@ -10,101 +12,6 @@ setup() {
 
 teardown() {
     rm -rf "$BATS_TEST_TMPDIR/.ralph"
-}
-
-# =============================================================================
-# COSTROUTE-3: Prompt Cache Optimization
-# =============================================================================
-
-@test "COSTROUTE-3: ralph_build_cacheable_prompt returns 1 when disabled" {
-    export RALPH_PROMPT_CACHE_ENABLED="false"
-    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
-    run ralph_build_cacheable_prompt
-    [[ "$status" -eq 1 ]]
-}
-
-@test "COSTROUTE-3: ralph_build_cacheable_prompt returns 1 when PROMPT.md missing" {
-    export RALPH_PROMPT_CACHE_ENABLED="true"
-    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
-    run ralph_build_cacheable_prompt
-    [[ "$status" -eq 1 ]]
-}
-
-@test "COSTROUTE-3: ralph_build_cacheable_prompt includes PROMPT.md content" {
-    export RALPH_PROMPT_CACHE_ENABLED="true"
-    echo "# My Project Prompt" > "$RALPH_DIR/PROMPT.md"
-    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
-    result=$(ralph_build_cacheable_prompt)
-    [[ "$result" == *"# My Project Prompt"* ]]
-}
-
-@test "COSTROUTE-3: ralph_build_cacheable_prompt includes AGENT.md when present" {
-    export RALPH_PROMPT_CACHE_ENABLED="true"
-    echo "# Prompt" > "$RALPH_DIR/PROMPT.md"
-    echo "# Build instructions" > "$RALPH_DIR/AGENT.md"
-    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
-    result=$(ralph_build_cacheable_prompt)
-    [[ "$result" == *"Build & Run Instructions"* ]]
-    [[ "$result" == *"# Build instructions"* ]]
-}
-
-@test "COSTROUTE-3: ralph_build_cacheable_prompt includes cache boundary marker" {
-    export RALPH_PROMPT_CACHE_ENABLED="true"
-    echo "# Prompt" > "$RALPH_DIR/PROMPT.md"
-    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
-    result=$(ralph_build_cacheable_prompt)
-    [[ "$result" == *"Current Iteration Context"* ]]
-}
-
-@test "COSTROUTE-3: ralph_build_cacheable_prompt includes loop iteration" {
-    export RALPH_PROMPT_CACHE_ENABLED="true"
-    echo "# Prompt" > "$RALPH_DIR/PROMPT.md"
-    echo '{"loop_count": 5}' > "$RALPH_DIR/status.json"
-    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
-    result=$(ralph_build_cacheable_prompt)
-    [[ "$result" == *"Loop iteration: 5"* ]]
-}
-
-@test "COSTROUTE-3: ralph_build_cacheable_prompt includes task progress" {
-    export RALPH_PROMPT_CACHE_ENABLED="true"
-    echo "# Prompt" > "$RALPH_DIR/PROMPT.md"
-    cat > "$RALPH_DIR/fix_plan.md" <<'PLAN'
-## Tasks
-- [x] Task 1
-- [x] Task 2
-- [ ] Task 3
-- [ ] Task 4
-PLAN
-    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
-    result=$(ralph_build_cacheable_prompt)
-    [[ "$result" == *"Tasks: 2/4 complete, 2 remaining"* ]]
-}
-
-@test "COSTROUTE-3: stable prefix hash is consistent" {
-    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
-    echo "# Test Prompt" > "$RALPH_DIR/PROMPT.md"
-    echo "# Build instructions" > "$RALPH_DIR/AGENT.md"
-
-    hash1=$(ralph_get_stable_prefix_hash)
-    hash2=$(ralph_get_stable_prefix_hash)
-    [[ "$hash1" == "$hash2" ]]
-}
-
-@test "COSTROUTE-3: stable prefix hash changes when PROMPT.md changes" {
-    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
-    echo "# Version 1" > "$RALPH_DIR/PROMPT.md"
-    hash1=$(ralph_get_stable_prefix_hash)
-
-    echo "# Version 2 - changed" > "$RALPH_DIR/PROMPT.md"
-    hash2=$(ralph_get_stable_prefix_hash)
-    [[ "$hash1" != "$hash2" ]]
-}
-
-@test "COSTROUTE-3: stable prefix hash is non-empty" {
-    source "$BATS_TEST_DIRNAME/../../lib/complexity.sh"
-    echo "# Prompt" > "$RALPH_DIR/PROMPT.md"
-    hash=$(ralph_get_stable_prefix_hash)
-    [[ -n "$hash" ]]
 }
 
 # =============================================================================

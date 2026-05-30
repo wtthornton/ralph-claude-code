@@ -16,10 +16,14 @@ reviewer gate, and the tester gate).
 
 ## Other deferred items (not code changes)
 
-- **Prompt caching:** `RALPH_PROMPT_CACHE_ENABLED=false`. Check the live TAP-1685
-  cache panel in `ralph-monitor`; if session hit-rate < 30%, the prepended
-  locality/USYNC directives in `build_loop_context()` are the likely cause and
-  should move below the stable prompt prefix.
+- **Prompt caching observability:** check the live TAP-1685 cache panel in
+  `ralph-monitor`; if the rolling-session hit rate sits below
+  `RALPH_CACHE_HIT_RATE_WARN` (default 30%) across a real campaign, the most
+  likely causes are session-resume failures, mid-session edits to CLAUDE.md /
+  agent files / skills, or the per-loop locality/USYNC content injected into the
+  user message by `build_loop_context()`. Data-gated; do not speculatively
+  refactor without field data. (The earlier `RALPH_PROMPT_CACHE_ENABLED` flag
+  gated a function with no production caller and was removed.)
 - **Coordinator cost lever (deferred for quality):** `ralph-coordinator` could
   trial Haiku (cheaper + faster, helps the coordinator-timeout pain) since its
   brief synthesis is structured/low-difficulty.

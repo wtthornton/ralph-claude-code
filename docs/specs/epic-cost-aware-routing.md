@@ -36,7 +36,7 @@ The 2026 research identifies cost-aware model routing as the **#1 cost optimizat
 |-------|-------|----------|--------|--------|
 | [COSTROUTE-1](story-costroute-1-complexity-classifier.md) | Task Complexity Classifier | High | Medium | **Done** |
 | [COSTROUTE-2](story-costroute-2-dynamic-model-selection.md) | Dynamic Model Selection Based on Complexity | High | Medium | **Done** |
-| [COSTROUTE-3](story-costroute-3-prompt-cache-optimization.md) | Prompt Structure Optimization for Cache Hits | High | Small | **Done** |
+| [COSTROUTE-3](story-costroute-3-prompt-cache-optimization.md) | Prompt Structure Optimization for Cache Hits | High | Small | **Reverted** (shipped without a runtime caller in linear mode; flag + functions removed) |
 | [COSTROUTE-4](story-costroute-4-token-budget.md) | Token Budget and Cost Dashboard | Medium | Small | **Done** |
 
 ## Implementation Order

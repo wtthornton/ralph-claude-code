@@ -1,8 +1,10 @@
 # Story COSTROUTE-3: Prompt Structure Optimization for Cache Hits
 
+> **Status: Reverted (May 2026).** The implementation (`ralph_build_cacheable_prompt`, `ralph_get_stable_prefix_hash`, `RALPH_PROMPT_CACHE_ENABLED` in `lib/complexity.sh`) shipped without a runtime caller and targeted file mode (`PROMPT.md` / `AGENT.md` / `fix_plan.md`) — but all real users run `RALPH_TASK_SOURCE=linear`. The flag and functions have been removed. Any future cache-structure work should be re-scoped against the linear-mode runtime path (`build_claude_command` → user-message concatenation) and gated on TAP-1685 cache-hit field data showing a sustained regression.
+
 **Epic:** [Cost-Aware Model Routing](epic-cost-aware-routing.md)
 **Priority:** High
-**Status:** Open
+**Status:** Reverted
 **Effort:** Small
 **Component:** `.claude/agents/ralph.md`, `ralph_loop.sh`, `.claude/hooks/on-session-start.sh`
 
