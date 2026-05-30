@@ -35,6 +35,8 @@ source "$SCRIPT_DIR/lib/exec_helpers.sh" || { echo "FATAL: Failed to source lib/
 [[ -f "$SCRIPT_DIR/lib/recommendation_repetition.sh" ]] && source "$SCRIPT_DIR/lib/recommendation_repetition.sh"
 [[ -f "$SCRIPT_DIR/lib/branch_cleanup.sh" ]] && source "$SCRIPT_DIR/lib/branch_cleanup.sh"
 [[ -f "$SCRIPT_DIR/lib/pending_merges.sh" ]] && source "$SCRIPT_DIR/lib/pending_merges.sh"
+# TELEMETRY-HARVESTER: `ralph --analyze` closed-loop telemetry analyzer.
+[[ -f "$SCRIPT_DIR/lib/telemetry_analyze.sh" ]] && source "$SCRIPT_DIR/lib/telemetry_analyze.sh"
 # BRAIN-PHASE-B1: memory writes from on-stop hook. Sourced here so the main
 # loop also has access if we later want to write outside hook context.
 [[ -f "$SCRIPT_DIR/lib/brain_client.sh" ]] && source "$SCRIPT_DIR/lib/brain_client.sh"
@@ -6165,6 +6167,8 @@ GitHub Issues (Phase 10 — v1.7.0):
 Cost Optimization (Phase 14):
     --cost-dashboard        Show unified cost dashboard and exit
     --costs                 Alias for --cost-dashboard
+    --analyze               Analyze control-path telemetry and print findings; exit
+    --analyze --json        Emit telemetry findings as JSON and exit
 
 Monorepo (Issue #163):
     --service NAME          Scope Ralph to a monorepo service directory
@@ -6413,6 +6417,12 @@ while [[ $# -gt 0 ]]; do
             source "$SCRIPT_DIR/lib/tracing.sh" 2>/dev/null || true
             source "$SCRIPT_DIR/lib/metrics.sh" 2>/dev/null || true
             ralph_show_cost_dashboard "${@:2}"
+            exit 0
+            ;;
+        --analyze)
+            # TELEMETRY-HARVESTER: read-only analysis of control-path telemetry.
+            source "$SCRIPT_DIR/lib/telemetry_analyze.sh" 2>/dev/null || true
+            ralph_telemetry_analyze "${@:2}"
             exit 0
             ;;
         --rollback)
