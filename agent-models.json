@@ -1,0 +1,16 @@
+{
+  "_doc": "Single source of truth for .claude/agents/*.md model: fields. Edit this file from an OPERATOR terminal (protect-ralph-files.sh blocks .claude/ writes from inside any Claude Code session), then run `bash scripts/apply-agent-models.sh` to propagate. Drift is enforced by tests/unit/test_agent_models_lockstep.bats — CI fails if the manifest and the agent files diverge. See docs/OPERATOR-EDITS.md for the full workflow.",
+  "lineup": {
+    "ralph":              "sonnet",
+    "ralph-coordinator":  "sonnet",
+    "ralph-bg-tester":    "haiku",
+    "ralph-explorer":     "haiku",
+    "ralph-architect":    "claude-opus-4-8",
+    "ralph-reviewer":     "claude-opus-4-8",
+    "ralph-tester":       "claude-opus-4-8",
+    "tapps-researcher":   "claude-sonnet-4-6",
+    "tapps-reviewer":     "claude-sonnet-4-6",
+    "tapps-review-fixer": "claude-sonnet-4-6",
+    "tapps-validator":    "claude-haiku-4-5-20251001"
+  }
+}

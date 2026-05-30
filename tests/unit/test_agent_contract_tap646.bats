@@ -9,8 +9,17 @@ load '../helpers/test_helper'
 
 PROJECT_ROOT="${BATS_TEST_DIRNAME}/../.."
 
-@test "TAP-646 A: ralph-tester uses model: claude-opus-4-8 (matches CLAUDE.md)" {
-    run grep -E "^model: claude-opus-4-8$" "$PROJECT_ROOT/.claude/agents/ralph-tester.md"
+@test "TAP-646 A: ralph-tester model: matches agent-models.json (single source of truth)" {
+    # The hard-coded model string moved into agent-models.json. This test now
+    # asserts the agent file's model: line matches what the manifest declares.
+    # The master drift guard (test_agent_models_lockstep.bats) covers every
+    # agent; this test stays named for its TAP-646 history and the documented
+    # ralph-tester contract.
+    local expected
+    expected=$(jq -r '.lineup["ralph-tester"]' "$PROJECT_ROOT/agent-models.json")
+    [[ "$expected" != "null" && -n "$expected" ]] \
+        || fail "ralph-tester not declared in agent-models.json"
+    run grep -E "^model: ${expected}\$" "$PROJECT_ROOT/.claude/agents/ralph-tester.md"
     assert_success
 }
 
