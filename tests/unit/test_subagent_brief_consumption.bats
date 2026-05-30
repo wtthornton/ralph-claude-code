@@ -72,22 +72,20 @@ setup() { :; }
         || fail "ralph.md must reference delegate_to so it can defer to ralph-architect"
 }
 
-@test "TAP-916: agent-file model pins match the documented lineup" {
-    # Drift guard on each sub-agent's model field. Expected lineup after the
-    # Opus 4.8 quality-max review (OPERATOR-NOTES.md): main loop + bg-tester +
-    # explorer stay cheap (sonnet/haiku); the architect, reviewer, and tester
-    # quality lanes run claude-opus-4-8. Keep this in lockstep with CLAUDE.md,
-    # docs/ARCHITECTURE.md, and docs/RALPH-STACK-GUIDE.md.
-    grep -qE '^model:[[:space:]]+sonnet[[:space:]]*$' "$AGENTS_DIR/ralph.md" \
-        || fail "ralph.md model must remain 'sonnet'"
-    grep -qE '^model:[[:space:]]+claude-opus-4-8[[:space:]]*$' "$AGENTS_DIR/ralph-architect.md" \
-        || fail "ralph-architect.md model must be 'claude-opus-4-8'"
-    grep -qE '^model:[[:space:]]+claude-opus-4-8[[:space:]]*$' "$AGENTS_DIR/ralph-tester.md" \
-        || fail "ralph-tester.md model must be 'claude-opus-4-8'"
-    grep -qE '^model:[[:space:]]+haiku[[:space:]]*$' "$AGENTS_DIR/ralph-bg-tester.md" \
-        || fail "ralph-bg-tester.md model must remain 'haiku'"
-    grep -qE '^model:[[:space:]]+claude-opus-4-8[[:space:]]*$' "$AGENTS_DIR/ralph-reviewer.md" \
-        || fail "ralph-reviewer.md model must be 'claude-opus-4-8'"
-    grep -qE '^model:[[:space:]]+haiku[[:space:]]*$' "$AGENTS_DIR/ralph-explorer.md" \
-        || fail "ralph-explorer.md model must remain 'haiku'"
+@test "TAP-916: agent-file model pins match agent-models.json (single source of truth)" {
+    # Drift guard on each sub-agent's model field. The expected values now
+    # come from agent-models.json (the manifest IS the source of truth, edited
+    # by operators outside the harness and propagated via
+    # scripts/apply-agent-models.sh). The master drift guard
+    # (test_agent_models_lockstep.bats) covers every agent; this test stays
+    # named for its TAP-916 history and the six core agent files.
+    local manifest="$AGENTS_DIR/../../agent-models.json"
+    local agent expected
+    for agent in ralph ralph-architect ralph-tester ralph-bg-tester ralph-reviewer ralph-explorer; do
+        expected=$(jq -r --arg k "$agent" '.lineup[$k]' "$manifest")
+        [[ "$expected" != "null" && -n "$expected" ]] \
+            || fail "$agent not declared in agent-models.json"
+        grep -qE "^model:[[:space:]]+${expected}[[:space:]]*\$" "$AGENTS_DIR/${agent}.md" \
+            || fail "${agent}.md model must be '${expected}' (per agent-models.json)"
+    done
 }
