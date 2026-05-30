@@ -606,13 +606,16 @@ exec_handle_timeout() {
         # ADAPTIVE-1: record timeout duration as a latency sample for
         # productive timeouts. Prevents "coordinated omission" bias where
         # only fast loops are recorded and slow QA/epic-boundary loops time
-        # out without being counted.
+        # out without being counted. exit_code=124 flags the sample as
+        # right-censored so ralph_compute_adaptive_timeout can inflate it 1.5×
+        # — without the flag the sample is recorded ≈ T (the timeout budget)
+        # and the adaptive value can never grow past a too-tight T.
         if [[ -n "$invocation_start_epoch" ]]; then
             local timeout_end_epoch timeout_duration
             timeout_end_epoch=$(date +%s)
             timeout_duration=$((timeout_end_epoch - invocation_start_epoch))
-            ralph_record_latency "$timeout_duration"
-            log_status "DEBUG" "Recorded productive timeout latency: ${timeout_duration}s (will push adaptive timeout higher)"
+            ralph_record_latency "$timeout_duration" 124
+            log_status "DEBUG" "Recorded productive timeout latency: ${timeout_duration}s (censored — will push adaptive timeout higher via 1.5× inflation)"
         fi
 
         ralph_prepare_claude_output_for_analysis "$output_file" "timeout"
