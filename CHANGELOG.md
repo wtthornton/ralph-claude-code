@@ -8,9 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [2.21.0] — 2026-05-30
+
+Feature + reliability bundle accumulated on `main` since the 2.20.1 stamp (PRs #54–#62). Adds the `ralph --analyze` telemetry analyzer and the `agent-models.json` single-source-of-truth, routes Opus-tier agents to Opus 4.8, and lands two harness-reliability fixes surfaced by a live campaign. CLI-only release — the Python SDK remains at 2.2.0 (its unreleased Opus 4.8 pricing change ships under the CLI but is not separately version-stamped this cycle).
+
+### Added
+
+- **`ralph --analyze` — closed-loop telemetry analyzer ([lib/telemetry_analyze.sh](lib/telemetry_analyze.sh), PR #62).** Read-only, always-exit-0 analysis over the harness's *control-path* telemetry (the JSONL/state files each consumed by one internal decision and otherwise never surfaced). Five rules — coordinator/main-loop timeout health (censored-p95 vs the live adaptive budget), prompt-cache hit-rate, Opus QA-failure escalation cluster, and coordinator phase attribution. Human `[OK]/[WARN]/[SKIP]/[INFO]` by default; `--analyze --json` emits a stable-key schema for dashboards. Does not duplicate `ralph --stats`. The phase-attribution rule is the field signal the coordinator→Haiku trial is gated on. Design: [docs/specs/story-telemetry-harvester.md](docs/specs/story-telemetry-harvester.md).
+- **`agent-models.json` single source of truth + operator-edits playbook (PR #59).** The repo-root [agent-models.json](agent-models.json) is now the canonical `{agent-name → model-id}` map; `scripts/apply-agent-models.sh` propagates it to `.claude/agents/*.md`, and [tests/unit/test_agent_models_lockstep.bats](tests/unit/test_agent_models_lockstep.bats) fails CI in either direction. A model bump is now one edit + one script run instead of a coordinated change across five files. Playbook: [docs/OPERATOR-EDITS.md](docs/OPERATOR-EDITS.md).
+- **Opus 4.8 pricing in cost routing (PR #55).** Adds Opus 4.8 to the per-model pricing table so `--cost-dashboard` and budget alerts price Opus-4.8 routed work correctly.
+
+### Changed
+
+- **Opus-tier agents routed to Opus 4.8 (PRs #55, #56).** `ralph-architect`, `ralph-reviewer`, and `ralph-tester` now target Opus 4.8 for maximum reasoning depth on the quality lanes; the main loop stays on Sonnet.
+
+### Fixed
+
+- **MCP resume catalog recovery, explicit timeout status, and coordinator adaptive timeout (PR #54).** Four live-campaign harness bugs: (1) STDIO MCP tool catalog lost after `claude --resume` is now detected and retried once with a fresh session; (2) MCP health reflects catalog truth, not just probe liveness; (3) a SIGTERM execution timeout now writes an explicit `status:"timeout"` instead of falling back to the previous loop's stale `status.json`; (4) the coordinator adaptive timeout no longer under-computes (right-censors timed-out samples, raises floor/fallback to cover the observed 150–250s band). Upstream root causes for (1) and (3) are filed as [anthropics/claude-code#64016](https://github.com/anthropics/claude-code/issues/64016) and [#64017](https://github.com/anthropics/claude-code/issues/64017).
+- **Main-loop adaptive timeout right-censoring + ceiling p95 (PR #58).** Mirrors the coordinator-timeout fix into `ralph_compute_adaptive_timeout`: timed-out samples (`exit_code` 124) are inflated 1.5× before the percentile, and the p95 index uses ceiling rounding so small sample sets bias to the slow tail rather than the median. Legacy plain-int latency logs auto-migrate to JSONL. Covered by [tests/unit/test_adaptive_timeout.bats](tests/unit/test_adaptive_timeout.bats).
+
 ### Removed
 
-- **COSTROUTE-3 prompt-cache scaffolding ([lib/complexity.sh](lib/complexity.sh), [tests/unit/test_cost_optimization.bats](tests/unit/test_cost_optimization.bats)).** `RALPH_PROMPT_CACHE_ENABLED`, `ralph_build_cacheable_prompt`, and `ralph_get_stable_prefix_hash` had zero production callers — the spec shipped marked Done in [epic-cost-aware-routing.md:39](docs/specs/epic-cost-aware-routing.md#L39) but the wiring was never landed, and the function targeted file mode (`PROMPT.md` / `AGENT.md` / `fix_plan.md`) which no real user runs (`RALPH_TASK_SOURCE=linear` is the active backend). Removed to eliminate the trust hazard — operators flipping the flag would observe no behavior change. The COSTROUTE-3 story is now marked **Reverted**; COSTROUTE-4 cost-dashboard tests in the same file are untouched. Any future prompt-cache-structure work should be re-scoped against the linear-mode runtime path (`build_claude_command` → user-message concatenation) and gated on TAP-1685 cache-hit field data showing a sustained regression.
+- **COSTROUTE-3 prompt-cache scaffolding ([lib/complexity.sh](lib/complexity.sh), [tests/unit/test_cost_optimization.bats](tests/unit/test_cost_optimization.bats), PR #57).** `RALPH_PROMPT_CACHE_ENABLED`, `ralph_build_cacheable_prompt`, and `ralph_get_stable_prefix_hash` had zero production callers — the spec shipped marked Done in [epic-cost-aware-routing.md:39](docs/specs/epic-cost-aware-routing.md#L39) but the wiring was never landed, and the function targeted file mode (`PROMPT.md` / `AGENT.md` / `fix_plan.md`) which no real user runs (`RALPH_TASK_SOURCE=linear` is the active backend). Removed to eliminate the trust hazard — operators flipping the flag would observe no behavior change. The COSTROUTE-3 story is now marked **Reverted**; COSTROUTE-4 cost-dashboard tests in the same file are untouched. Any future prompt-cache-structure work should be re-scoped against the linear-mode runtime path (`build_claude_command` → user-message concatenation) and gated on TAP-1685 cache-hit field data showing a sustained regression.
 
 ---
 
