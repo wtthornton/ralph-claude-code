@@ -239,6 +239,7 @@ Project-level config lives in `.ralphrc` (sourced as bash). Key variables:
 - `RALPH_LINEAR_PROJECT` — Linear project name, must exactly match workspace (required when `RALPH_TASK_SOURCE=linear`)
 - `RALPH_NO_OPTIMIZE` — Disable automatic fix_plan.md reordering on session start
 - `RALPH_NO_EXPLORER_RESOLVE` — Disable ralph-explorer file resolution for vague tasks
+- `RALPH_NO_DESLOP` — Skip the epic-boundary deslop pass (ralph-workflow skill step 7.5 — invokes the `simplify` skill on changed files). Agent-honored flag, not read by harness bash: it is exported to the Claude CLI subprocess via `set -a` and the skill checks it (default: `false`)
 - `RALPH_MAX_EXPLORER_RESOLVE` — Max vague tasks to resolve per optimization run (default: 5)
 - `RALPH_NO_LINEAR_OPTIMIZE` — Disable Linear cache-locality optimizer entirely (no API calls, no hint file written)
 - `RALPH_OPTIMIZER_FETCH_LIMIT` — Max issues to fetch and score per optimizer run (default: 20)

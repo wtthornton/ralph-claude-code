@@ -294,6 +294,17 @@ RALPH_NO_OPTIMIZE=false
 RALPH_NO_EXPLORER_RESOLVE=false
 
 # =============================================================================
+# EPIC-BOUNDARY DESLOP (ralph-workflow skill step 7.5)
+# =============================================================================
+# At each epic boundary, after QA is green, the ralph-workflow skill tells
+# Claude to run the `simplify` skill on the files changed in the epic
+# (removes dead code, unused imports, redundant comments, speculative error
+# handling — never adds). This is an agent-honored flag: it is exported to
+# the Claude CLI subprocess via `set -a`, and the skill checks it. When true,
+# the deslop pass is skipped.
+RALPH_NO_DESLOP=false
+
+# =============================================================================
 # Linear cache-locality optimizer (TAP-589 LINOPT epic)
 # =============================================================================
 # Only active when RALPH_TASK_SOURCE=linear. Fires at

@@ -10,6 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.21.2] — 2026-05-31
+
+Patch release — documentation/config follow-up from a full verification pass on the `ralph-workflow` skill. Every harness-contract claim the skill makes (RALPH_STATUS schema, `no_status_block_3x` halt, TAP-1899 productivity guard, dual-condition EXIT_SIGNAL gate, `exec_aggregate_qa_results`, `pending_merges_add` caps, `validate-command.sh` blocks, `build_loop_context` injection lines, `NEXT_INTENDED_ISSUE`/`brief-next.json` lookahead, brief paths) was confirmed against the code and is accurate. CLI/docs-only — no behavior change; SDK remains at 2.2.0.
+
+### Fixed
+
+- **`RALPH_NO_DESLOP` knob was referenced only inside the `ralph-workflow` skill** — undocumented in [templates/ralphrc.template](templates/ralphrc.template) and [CLAUDE.md](CLAUDE.md), so operators had no way to discover it. The flag is honorable by the agent (`.ralphrc` vars export to the Claude CLI subprocess via `set -a` and the skill checks it at epic-boundary step 7.5), but the operator-facing surface was missing. Added a documented `RALPH_NO_DESLOP=false` block to `ralphrc.template` and the config list in `CLAUDE.md`. No skill body change — the skill was already contract-correct, so no `ralph-upgrade-project` skill propagation is required; the `ralphrc.template` default backfills as a Tier-2 merge on the next project upgrade.
+
+---
+
 ## [2.21.1] — 2026-05-31
 
 Patch release — three autonomous-campaign friction fixes surfaced running Ralph 2.21.0 against a Linear backlog (AgentForge). All fixed at the source templates so they ship via `install.sh`; the runtime `.ralph/hooks/` copies stay byte-identical (parity-guard tests). CLI-only — the Python SDK remains at 2.2.0. **Operators running Ralph against managed repos should `ralph-upgrade` then `ralph-upgrade-project` to pick up the hook + prompt changes.**
