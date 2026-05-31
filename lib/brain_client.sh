@@ -102,6 +102,12 @@ brain_client_record_metric() {
     # treats those as `hook` for backward compatibility.
     local source="${6:-hook}"               # hook | coordinator-fallback | coordinator
 
+    # TAP-2678: a client-side circuit-breaker-open skip is NOT a brain failure —
+    # the brain returned (or would have returned) 200. Emit a distinct op so
+    # `ralph --stats` and audits don't count it as a failure (this drove 447
+    # spurious op:failure/http_code:200 rows = 76% of one metric stream).
+    [[ "$reason" == "circuit_breaker_open" && "$http_code" == "200" ]] && op="cb_open_skip"
+
     local metrics_dir="$ralph_dir/metrics"
     mkdir -p "$metrics_dir" 2>/dev/null || return 0
     local file="$metrics_dir/brain.jsonl"
