@@ -379,6 +379,49 @@ EOF
         || fail "relative .ralphrc redirect must be blocked, got $status: $output"
 }
 
+# ---- TAP-2599: transient Linear cache carve-out ------------------------------
+# Ralph's task selector self-manages .ralph/.linear_next_issue (the
+# ralph-workflow skill tells the agent to `rm -f` it after honoring a
+# locality hint). The blanket .ralph/ protection used to cancel that tool
+# call every loop. The carve-out allows the transient hint to be removed
+# while durable state stays protected.
+
+@test "TAP-2599: rm of .ralph/.linear_next_issue is ALLOWED (relative)" {
+    run_hook 'rm -f .ralph/.linear_next_issue'
+    [[ "$status" -eq 0 ]] \
+        || fail "transient hint rm must be allowed, got $status: $output"
+}
+
+@test "TAP-2599: rm of .ralph/.linear_next_issue is ALLOWED (absolute)" {
+    run_hook "rm -f $TEST_DIR/.ralph/.linear_next_issue"
+    [[ "$status" -eq 0 ]] \
+        || fail "transient hint rm (abs path) must be allowed, got $status: $output"
+}
+
+@test "TAP-2599: mv of .ralph/.linear_next_issue is ALLOWED" {
+    run_hook 'mv .ralph/.linear_next_issue /tmp/x'
+    [[ "$status" -eq 0 ]] \
+        || fail "transient hint mv must be allowed, got $status: $output"
+}
+
+@test "TAP-2599: clobber of .ralph/status.json is STILL BLOCKED" {
+    run_hook 'rm -f .ralph/status.json'
+    [[ "$status" -eq 2 ]] \
+        || fail "durable status.json must stay protected, got $status: $output"
+}
+
+@test "TAP-2599: redirect into .ralph/status.json is STILL BLOCKED" {
+    run_hook 'echo x > .ralph/status.json'
+    [[ "$status" -eq 2 ]] \
+        || fail "redirect into status.json must stay protected, got $status: $output"
+}
+
+@test "TAP-2599: clobber of .ralph/.circuit_breaker_state is STILL BLOCKED" {
+    run_hook 'cp foo .ralph/.circuit_breaker_state'
+    [[ "$status" -eq 2 ]] \
+        || fail "durable circuit-breaker state must stay protected, got $status: $output"
+}
+
 # ---- byte parity guard (TAP-1876 amendment to the TAP-624 parity rule) -------
 
 @test "TAP-1876: .ralph/hooks/validate-command.sh is byte-identical to template" {

@@ -220,6 +220,16 @@ _is_protected_path() {
     local p="$1"
     p="${p%\"}"; p="${p#\"}"; p="${p%\'}"; p="${p#\'}"
     case "$p" in
+        # Carve-out FIRST (TAP-2599): Ralph self-manages its transient
+        # task-selection caches under .ralph/. The ralph-workflow skill
+        # (step 0) tells the agent to `rm -f .ralph/.linear_next_issue`
+        # after honoring a locality hint, and the optimizer rewrites it
+        # every session. Blanket-protecting it forced a cancelled tool
+        # call every selection loop. These are ephemeral hints, never
+        # durable state — durable files (status.json, fix_plan.md,
+        # .circuit_breaker_state, .harness_halt_reason) stay protected by
+        # the blanket arm below.
+        "$RALPH_DIR"/.linear_next*|.ralph/.linear_next*|./.ralph/.linear_next*) return 1 ;;
         "$RALPH_DIR"|"$RALPH_DIR"/*) return 0 ;;
         .ralph|.ralph/*|./.ralph/*) return 0 ;;
         "$_proj_dir"/.ralphrc) return 0 ;;

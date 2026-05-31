@@ -106,3 +106,59 @@ _seed_files_modified() {
     run cat "$TEST_TEMP_DIR/.ralph/.no_status_block_count"
     assert_output "1"
 }
+
+# =============================================================================
+# TAP-2636: a loop that completed a story by squash-merging a PR modifies
+# zero files in the working tree and may emit no RALPH_STATUS footer — but
+# HEAD moved. The hook compares against .loop_start_sha and treats a landed
+# commit as productive so a merge loop also resets the counter.
+# =============================================================================
+
+# Make TEST_TEMP_DIR a git repo with one commit; echo its SHA.
+_git_init_one_commit() {
+    git -C "$TEST_TEMP_DIR" init -q
+    git -C "$TEST_TEMP_DIR" config user.email t@t.t
+    git -C "$TEST_TEMP_DIR" config user.name t
+    echo a > "$TEST_TEMP_DIR/a.txt"
+    git -C "$TEST_TEMP_DIR" add a.txt
+    git -C "$TEST_TEMP_DIR" commit -qm first
+    git -C "$TEST_TEMP_DIR" rev-parse HEAD
+}
+
+@test "TAP-2636: empty status block + commit landed this loop RESETS the counter (no halt)" {
+    local first_sha
+    first_sha=$(_git_init_one_commit)
+    # .loop_start_sha = the SHA before this loop's work.
+    printf '%s\n' "$first_sha" > "$TEST_TEMP_DIR/.ralph/.loop_start_sha"
+    # Loop did real work: a new commit landed (squash-merge advanced HEAD).
+    echo b > "$TEST_TEMP_DIR/b.txt"
+    git -C "$TEST_TEMP_DIR" add b.txt
+    git -C "$TEST_TEMP_DIR" commit -qm "merge: TAP-2636"
+    # Pre-seed at threshold-1 so the pre-fix hook would have halted here.
+    printf '%s\n' "2" > "$TEST_TEMP_DIR/.ralph/.no_status_block_count"
+    # No .files_modified_this_loop — the only productivity signal is the commit.
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_no_status_block_input)"
+    assert_success
+
+    [[ ! -f "$TEST_TEMP_DIR/.ralph/.no_status_block_count" ]] || \
+        fail "counter should be cleared on commit-landed loop, contains: $(cat "$TEST_TEMP_DIR/.ralph/.no_status_block_count")"
+    [[ ! -f "$TEST_TEMP_DIR/.ralph/.harness_halt_reason" ]] || \
+        fail "halt sentinel written despite a landed commit: $(cat "$TEST_TEMP_DIR/.ralph/.harness_halt_reason")"
+}
+
+@test "TAP-2636: empty status block + NO commit (HEAD unchanged) STILL trips at threshold" {
+    local first_sha
+    first_sha=$(_git_init_one_commit)
+    # .loop_start_sha == current HEAD — no commit landed this loop.
+    printf '%s\n' "$first_sha" > "$TEST_TEMP_DIR/.ralph/.loop_start_sha"
+    printf '%s\n' "2" > "$TEST_TEMP_DIR/.ralph/.no_status_block_count"
+
+    run --separate-stderr bash "$TEMPLATE_HOOK" <<<"$(_no_status_block_input)"
+    assert_success
+
+    [[ -f "$TEST_TEMP_DIR/.ralph/.harness_halt_reason" ]] || \
+        fail "halt sentinel must still be written when HEAD did not move"
+    run cat "$TEST_TEMP_DIR/.ralph/.harness_halt_reason"
+    [[ "$output" == no_status_block_3x* ]] || fail "halt reason wrong format: $output"
+}

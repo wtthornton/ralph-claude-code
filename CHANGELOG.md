@@ -10,6 +10,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.21.1] — 2026-05-31
+
+Patch release — three autonomous-campaign friction fixes surfaced running Ralph 2.21.0 against a Linear backlog (AgentForge). All fixed at the source templates so they ship via `install.sh`; the runtime `.ralph/hooks/` copies stay byte-identical (parity-guard tests). CLI-only — the Python SDK remains at 2.2.0. **Operators running Ralph against managed repos should `ralph-upgrade` then `ralph-upgrade-project` to pick up the hook + prompt changes.**
+
+### Fixed
+
+- **TAP-2599: `validate-command.sh` no longer blocks Ralph deleting its own transient locality hint** ([templates/hooks/validate-command.sh](templates/hooks/validate-command.sh#L222)). The ralph-workflow skill (step 0) tells the agent to `rm -f .ralph/.linear_next_issue` after honoring a `LOCALITY HINT`, but the blanket `.ralph/*` protection cancelled that tool call every task-selection loop — a noisy `BLOCKED: write to protected path` + a burned tool call per loop. A carve-out as the first arm of `_is_protected_path()` allows `rm`/`mv`/`cp` of `.linear_next*` (the ephemeral hint, rewritten every session) while durable state (`status.json`, `fix_plan.md`, `.circuit_breaker_state`, `.harness_halt_reason`) stays protected. Synced into `.ralph/hooks/`; 6 new BATS cases in [tests/unit/test_validate_command.bats](tests/unit/test_validate_command.bats).
+- **TAP-2599: squash-merge resume guidance now deletes the remote branch** ([ralph_loop.sh](ralph_loop.sh)). The `build_loop_context` RESUME guidance suggested bare `gh pr merge --squash --auto`, leaving `origin/<feature-branch>` behind after the auto-merge fired (observed: PR #406 merged but `origin/tap-2599-…` remained). Both occurrences now use `--squash --auto --delete-branch`, matching the ralph-workflow skill and the async `pending_merges_poll` helper (which already used `--delete-branch`). Static guard in [tests/unit/test_merge_delete_branch.bats](tests/unit/test_merge_delete_branch.bats).
+- **TAP-2636: benign no-status-block loops no longer halt (or stick) a successful campaign** ([templates/hooks/on-stop.sh](templates/hooks/on-stop.sh), [ralph_loop.sh](ralph_loop.sh)). A loop that completed a story by squash-merging a PR modifies zero working-tree files and may emit no `RALPH_STATUS` footer — but `HEAD` moved. (a) The on-stop productivity guard now treats a commit landing this loop (current `HEAD` vs `.loop_start_sha`) as productive and resets the no-status-block counter, alongside the existing files/tasks signals. (b) At startup, a `no_status_block_Nx` halt sentinel is auto-cleared (instead of refusing to run) when the prior loop's `status.json` shows success (`tasks_completed`/`files_modified` ≥ 1 or `exit_signal: true`) via the new `ralph_no_status_halt_is_benign` helper. Genuine zero-progress loops keep the hard halt. Synced into `.ralph/hooks/`; new BATS cases in [tests/unit/test_on_stop_halt_productivity.bats](tests/unit/test_on_stop_halt_productivity.bats) and [tests/unit/test_no_status_halt_clear.bats](tests/unit/test_no_status_halt_clear.bats).
+
+---
+
 ## [2.21.0] — 2026-05-30
 
 Feature + reliability bundle accumulated on `main` since the 2.20.1 stamp (PRs #54–#62). Adds the `ralph --analyze` telemetry analyzer and the `agent-models.json` single-source-of-truth, routes Opus-tier agents to Opus 4.8, and lands two harness-reliability fixes surfaced by a live campaign. CLI-only release — the Python SDK remains at 2.2.0 (its unreleased Opus 4.8 pricing change ships under the CLI but is not separately version-stamped this cycle).
