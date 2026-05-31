@@ -1591,8 +1591,23 @@ wait_for_reset() {
 }
 
 # Check if we should gracefully exit
+# TAP-2636: decide whether a no_status_block_Nx halt sentinel is benign —
+# i.e. the prior loop's status.json shows the campaign actually did work and
+# the missing RALPH_STATUS footer was cosmetic, not a genuine stall. Pure
+# function of the status.json at $1 (defaults to $RALPH_DIR/status.json) so it
+# is unit-testable. Returns 0 (benign → safe to auto-clear) / 1 (keep halt).
+ralph_no_status_halt_is_benign() {
+    local status_file="${1:-$RALPH_DIR/status.json}"
+    [[ -f "$status_file" ]] || return 1
+    local _t _f _e
+    _t=$(jq -r '.tasks_completed // 0' "$status_file" 2>/dev/null | tr -cd '0-9'); _t=${_t:-0}
+    _f=$(jq -r '.files_modified // 0' "$status_file" 2>/dev/null | tr -cd '0-9'); _f=${_f:-0}
+    _e=$(jq -r '.exit_signal // "false"' "$status_file" 2>/dev/null || echo "false")
+    [[ "$_t" -ge 1 || "$_f" -ge 1 || "$_e" == "true" ]]
+}
+
 should_exit_gracefully() {
-    
+
     if [[ ! -f "$EXIT_SIGNALS_FILE" ]]; then
         return 1  # Don't exit, file doesn't exist
     fi
@@ -2416,7 +2431,7 @@ build_loop_context() {
                 RALPH_CURRENT_TASK_TEXT=$(printf '%s' "$_prev_task" | ralph_sanitize_prompt_text 300)
             fi
         fi
-        context+="If 'RESUME IN PROGRESS' is shown above, work that ticket FIRST before starting any new issue — run \`git log main --grep='<TICKET-ID>'\` to check if commits exist; if the work is on an unmerged branch, merge it now (\`gh pr merge --squash --auto\` or \`git merge\`). Only start a new ticket after the in-progress one reaches Done or is confirmed blocked by a genuine R2 hard blocker. Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means commits are on \`main\`. Before Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists. If work is only on a branch, attempt to self-merge (\`gh pr merge --squash --auto\` or \`git merge\`); after a successful squash-merge, delete the source branch locally (\`git branch -D <branch>\`) and on origin (\`git push origin --delete <branch>\` — best-effort, ignore network/permission errors) so the repo stays at \`main\` + active branch. If the merge is blocked (no permission, required checks pending, conflicts you cannot resolve this loop), post a Linear comment listing unmerged SHAs and leave the ticket **In Progress** so Ralph retries next loop — do NOT move it to In Review for this. RALPH IS HEADLESS: there is no human on standby to review, merge, or answer questions. There is no human reviewer. 'In Review' is reserved for HARD blockers only — the EXACT four: (1) missing credentials/API keys a human must generate (e.g. OAuth token requiring browser click-through), (2) explicit budget/spend cap reached, (3) irreversible destructive operation requiring human sign-off: production database migration dropping data, secret rotation, mass deletion, credential exfiltration risk — NOT security bug fixes or hardening (those are Done), (4) genuinely ambiguous product decision where both interpretations have real cost and neither is a safe default. When in doubt between Done and In Review: pick Done if AC is substantively met, In Progress if it is not. NEVER pick In Review out of uncertainty. Everything else is NOT In Review: unmerged branch → In Progress + retry; flaky tests / red build / lint failures → fix them; 'code probably works but I'm unsure' → Done if AC substantively met; 'needs code review' → Done (no reviewer exists); security bug fix or hardening → Done; 'couldn't figure out how to do X' → leave In Progress, Ralph retries with fresh context next loop. When you do use In Review, the last Linear comment MUST name one of the four exact reasons above verbatim — if you cannot, pick Done or In Progress instead. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain. REQUIRED: include LINEAR_OPEN_COUNT: <N>, LINEAR_DONE_COUNT: <N>, and LINEAR_ISSUE: <ID-or-NONE> (the issue you worked this loop, e.g. TAP-915, or NONE if no issue was touched) in your RALPH_STATUS block. If you worked under an epic, also include LINEAR_EPIC: <ID>, LINEAR_EPIC_DONE: <N>, LINEAR_EPIC_TOTAL: <N>. Counts come from Linear MCP — the harness reads these to populate the live monitor."
+        context+="If 'RESUME IN PROGRESS' is shown above, work that ticket FIRST before starting any new issue — run \`git log main --grep='<TICKET-ID>'\` to check if commits exist; if the work is on an unmerged branch, merge it now (\`gh pr merge --squash --auto --delete-branch\` or \`git merge\`). Only start a new ticket after the in-progress one reaches Done or is confirmed blocked by a genuine R2 hard blocker. Use Linear MCP tools to list open issues, work on the highest priority one, and mark it Done as soon as the code is shipped — even if acceptance criteria are cosmetically misaligned (e.g. AC says '14 tools' and tests assert 15). 'Shipped' means commits are on \`main\`. Before Done, run \`git log main --grep='<TICKET-ID>'\` and confirm at least one matching commit exists. If work is only on a branch, attempt to self-merge (\`gh pr merge --squash --auto --delete-branch\` or \`git merge\`); after a successful squash-merge, delete the source branch locally (\`git branch -D <branch>\`) and on origin (\`git push origin --delete <branch>\` — best-effort, ignore network/permission errors) so the repo stays at \`main\` + active branch. If the merge is blocked (no permission, required checks pending, conflicts you cannot resolve this loop), post a Linear comment listing unmerged SHAs and leave the ticket **In Progress** so Ralph retries next loop — do NOT move it to In Review for this. RALPH IS HEADLESS: there is no human on standby to review, merge, or answer questions. There is no human reviewer. 'In Review' is reserved for HARD blockers only — the EXACT four: (1) missing credentials/API keys a human must generate (e.g. OAuth token requiring browser click-through), (2) explicit budget/spend cap reached, (3) irreversible destructive operation requiring human sign-off: production database migration dropping data, secret rotation, mass deletion, credential exfiltration risk — NOT security bug fixes or hardening (those are Done), (4) genuinely ambiguous product decision where both interpretations have real cost and neither is a safe default. When in doubt between Done and In Review: pick Done if AC is substantively met, In Progress if it is not. NEVER pick In Review out of uncertainty. Everything else is NOT In Review: unmerged branch → In Progress + retry; flaky tests / red build / lint failures → fix them; 'code probably works but I'm unsure' → Done if AC substantively met; 'needs code review' → Done (no reviewer exists); security bug fix or hardening → Done; 'couldn't figure out how to do X' → leave In Progress, Ralph retries with fresh context next loop. When you do use In Review, the last Linear comment MUST name one of the four exact reasons above verbatim — if you cannot, pick Done or In Progress instead. Do NOT read or modify fix_plan.md. Set EXIT_SIGNAL: true when no open issues remain. REQUIRED: include LINEAR_OPEN_COUNT: <N>, LINEAR_DONE_COUNT: <N>, and LINEAR_ISSUE: <ID-or-NONE> (the issue you worked this loop, e.g. TAP-915, or NONE if no issue was touched) in your RALPH_STATUS block. If you worked under an epic, also include LINEAR_EPIC: <ID>, LINEAR_EPIC_DONE: <N>, LINEAR_EPIC_TOTAL: <N>. Counts come from Linear MCP — the harness reads these to populate the live monitor."
     # Bug #3 Fix: Support indented markdown checkboxes with [[:space:]]* pattern
     elif [[ -f "$RALPH_DIR/fix_plan.md" ]]; then
         local incomplete_tasks
@@ -5790,11 +5805,27 @@ main() {
                 rm -f "$RALPH_DIR/.harness_halt_reason" 2>/dev/null
                 break
             fi
-            ralph_audit "harness_halt" "on_stop_hook" "halt_execution" "reason=$halt_reason,loop_count=$loop_count" "halted" 2>/dev/null
-            update_status "$loop_count" "$(_read_call_count)" "harness_halt" "halted" "$halt_reason"
-            log_status "ERROR" "🛑 Harness halt: $halt_reason"
-            log_status "INFO" "  Clear .ralph/.harness_halt_reason after diagnosing the root cause to resume."
-            break
+            # TAP-2636: a no_status_block_Nx halt that fired on the tail of a
+            # SUCCESSFUL campaign should not block the NEXT (fresh-session)
+            # invocation. The on-stop productivity guard already resets the
+            # counter on file/task/commit progress; this is the startup safety
+            # net for the case where the sentinel was written but the prior
+            # loop's status.json demonstrably shows work landed. Auto-clear and
+            # proceed instead of refusing to run. Genuine no-progress halts
+            # (status.json shows 0 files, 0 tasks, no exit signal) keep the
+            # hard halt.
+            if [[ "$halt_reason" == no_status_block_* ]] && ralph_no_status_halt_is_benign; then
+                log_status "INFO" "♻️  Clearing benign $halt_reason halt — last loop's status.json shows success (tasks/files/exit-signal)"
+                ralph_audit "harness_halt" "on_stop_hook" "auto_cleared" "reason=$halt_reason,loop_count=$loop_count" "recovered" 2>/dev/null
+                rm -f "$RALPH_DIR/.harness_halt_reason" "$RALPH_DIR/.no_status_block_count" 2>/dev/null
+                # Fall through to normal execution this iteration.
+            else
+                ralph_audit "harness_halt" "on_stop_hook" "halt_execution" "reason=$halt_reason,loop_count=$loop_count" "halted" 2>/dev/null
+                update_status "$loop_count" "$(_read_call_count)" "harness_halt" "halted" "$halt_reason"
+                log_status "ERROR" "🛑 Harness halt: $halt_reason"
+                log_status "INFO" "  Clear .ralph/.harness_halt_reason after diagnosing the root cause to resume."
+                break
+            fi
         fi
 
         # Check circuit breaker before attempting execution
