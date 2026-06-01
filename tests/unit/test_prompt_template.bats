@@ -30,3 +30,26 @@ _TEMPLATE_PROMPT_FILE="${BATS_TEST_DIRNAME}/../../templates/PROMPT.md"
     # Must reference the skill that now owns the task-selection contract
     grep -q 'ralph-workflow' "$_TEMPLATE_PROMPT_FILE"
 }
+
+# =============================================================================
+# TEST 3: TAP-2333 — the three upstreamed PROMPT.md hardening rules are present
+# (TAP-2332 friction patterns promoted to the template so every Ralph-managed
+# project inherits them via ralph-upgrade-project). A future template edit must
+# not silently drop them.
+# =============================================================================
+
+@test "TAP-2333: Pattern 1 — python3 -c → /tmp/snippet.py / python-introspection" {
+    [[ -f "$_TEMPLATE_PROMPT_FILE" ]]
+    grep -q '/tmp/snippet.py' "$_TEMPLATE_PROMPT_FILE"
+    grep -q 'python-introspection' "$_TEMPLATE_PROMPT_FILE"
+}
+
+@test "TAP-2333: Pattern 2 — Read before first Edit reminder" {
+    grep -qi 'Read before Edit' "$_TEMPLATE_PROMPT_FILE"
+    grep -q 'File has not been read yet' "$_TEMPLATE_PROMPT_FILE"
+}
+
+@test "TAP-2333: Pattern 3 — git status busy-dir guard with STATUS: BLOCKED pivot" {
+    grep -q 'STATUS: BLOCKED' "$_TEMPLATE_PROMPT_FILE"
+    grep -q 'RALPH_BUSY_DIRS' "$_TEMPLATE_PROMPT_FILE"
+}
