@@ -93,3 +93,108 @@ _write_status() {
     run ralph_mcp_health_gate
     [[ "$status" -eq 0 ]] || fail "healthy probe should return 0"
 }
+
+# ---------------------------------------------------------------------------
+# TAP-2777: MCP-disconnect worker-leak guards
+# ---------------------------------------------------------------------------
+
+# ralph_mcp_disconnect_timeout: cap a post-disconnect retry's timeout
+@test "ralph_mcp_disconnect_timeout: caps to short value when prior loop disconnected" {
+    RALPH_MCP_DISCONNECT_TIMEOUT_SECONDS=120 run ralph_mcp_disconnect_timeout 900 2
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == "120" ]] || fail "expected short cap 120, got: $output"
+}
+
+@test "ralph_mcp_disconnect_timeout: keeps nominal when not a disconnect retry (count 0)" {
+    RALPH_MCP_DISCONNECT_TIMEOUT_SECONDS=120 run ralph_mcp_disconnect_timeout 900 0
+    [[ "$output" == "900" ]] || fail "expected nominal 900, got: $output"
+}
+
+@test "ralph_mcp_disconnect_timeout: keeps nominal when it is already shorter than the cap" {
+    RALPH_MCP_DISCONNECT_TIMEOUT_SECONDS=120 run ralph_mcp_disconnect_timeout 90 3
+    [[ "$output" == "90" ]] || fail "expected nominal 90, got: $output"
+}
+
+@test "ralph_mcp_disconnect_timeout: non-numeric blocked count treated as 0 (no cap)" {
+    RALPH_MCP_DISCONNECT_TIMEOUT_SECONDS=120 run ralph_mcp_disconnect_timeout 900 ""
+    [[ "$output" == "900" ]] || fail "expected nominal 900, got: $output"
+}
+
+# portable_timeout: --kill-after wiring (TAP-2777)
+@test "portable_timeout: passes --kill-after when RALPH_TIMEOUT_KILL_AFTER set" {
+    mkdir -p "$TEST_TEMP_DIR/bin"
+    printf '#!/usr/bin/env bash\necho "ARGS:$*"\n' > "$TEST_TEMP_DIR/bin/timeout"
+    chmod +x "$TEST_TEMP_DIR/bin/timeout"
+    PATH="$TEST_TEMP_DIR/bin:$PATH"
+    reset_timeout_detection
+    export RALPH_TIMEOUT_KILL_AFTER=15s
+    run portable_timeout 60s echo hi
+    [[ "$output" == *"--kill-after=15s"* ]] || fail "expected --kill-after in: $output"
+    [[ "$output" == *"60s"* ]] || fail "expected duration in: $output"
+}
+
+@test "portable_timeout: omits --kill-after when RALPH_TIMEOUT_KILL_AFTER unset" {
+    mkdir -p "$TEST_TEMP_DIR/bin"
+    printf '#!/usr/bin/env bash\necho "ARGS:$*"\n' > "$TEST_TEMP_DIR/bin/timeout"
+    chmod +x "$TEST_TEMP_DIR/bin/timeout"
+    PATH="$TEST_TEMP_DIR/bin:$PATH"
+    reset_timeout_detection
+    unset RALPH_TIMEOUT_KILL_AFTER
+    run portable_timeout 60s echo hi
+    [[ "$output" != *"--kill-after"* ]] || fail "did not expect --kill-after in: $output"
+}
+
+# ralph_reap_orphaned_claude_workers: safety + kill behavior via mocks
+_install_reaper_mocks() {
+    # Mock pgrep: -f returns $FAKE_CLAUDE_PID, -P returns nothing.
+    # Mock ps:   -o ppid= echoes $FAKE_PPID, -o comm= echoes $FAKE_PCOMM.
+    mkdir -p "$TEST_TEMP_DIR/bin"
+    cat > "$TEST_TEMP_DIR/bin/pgrep" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == "-f" ]] && { echo "${FAKE_CLAUDE_PID}"; exit 0; }
+exit 0
+EOF
+    cat > "$TEST_TEMP_DIR/bin/ps" <<'EOF'
+#!/usr/bin/env bash
+case "$2" in
+  ppid=) echo "${FAKE_PPID}" ;;
+  comm=) echo "${FAKE_PCOMM}" ;;
+esac
+EOF
+    chmod +x "$TEST_TEMP_DIR/bin/pgrep" "$TEST_TEMP_DIR/bin/ps"
+    PATH="$TEST_TEMP_DIR/bin:$PATH"
+}
+
+@test "ralph_reap_orphaned_claude_workers: no-op (returns 0) when no workers match" {
+    _install_reaper_mocks
+    export FAKE_CLAUDE_PID=""   # pgrep -f returns nothing
+    run ralph_reap_orphaned_claude_workers
+    [[ "$status" -eq 0 ]] || fail "reaper must always return 0"
+}
+
+@test "ralph_reap_orphaned_claude_workers: does NOT kill a worker with a live non-reaper parent" {
+    _install_reaper_mocks
+    sleep 300 &
+    local target=$!
+    export FAKE_CLAUDE_PID="$target"
+    export FAKE_PPID="$$"        # live, non-reaper parent
+    export FAKE_PCOMM="bash"
+    ralph_reap_orphaned_claude_workers
+    kill -0 "$target" 2>/dev/null || fail "non-orphan worker must NOT be killed"
+    kill "$target" 2>/dev/null || true
+}
+
+@test "ralph_reap_orphaned_claude_workers: kills an orphaned (ppid=1) worker" {
+    _install_reaper_mocks
+    sleep 300 &
+    local target=$!
+    export FAKE_CLAUDE_PID="$target"
+    export FAKE_PPID="1"         # reparented to init => orphan
+    export FAKE_PCOMM="init"
+    ralph_reap_orphaned_claude_workers
+    sleep 0.2
+    if kill -0 "$target" 2>/dev/null; then
+        kill "$target" 2>/dev/null || true
+        fail "orphaned worker must be killed"
+    fi
+}

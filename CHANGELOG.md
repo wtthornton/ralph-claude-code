@@ -10,6 +10,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.24.0] — 2026-06-01
+
+Patch release — fixes the MCP-disconnect retry worker leak (TAP-2777). The 2.22.0 retry path re-launched Claude on a disconnect but never reaped the prior wedged worker, so a long campaign accumulated live `claude --agent ralph` workers + their `uv run … serve` MCP servers until the host thrashed (observed: 13 workers + 28 MCP servers, load average 56, swap exhausted). No SDK changes.
+
+### Fixed
+
+- **TAP-2777 — MCP-disconnect retry leaks Claude worker processes.** Three complementary guards, all in `ralph_loop.sh` / `lib/timeout_utils.sh`:
+  1. **Reap before respawn.** New `ralph_reap_orphaned_claude_workers` terminates any orphaned `claude --agent ralph…` worker tree (worker + its uv-run MCP servers) left behind by a wedged/disconnected invocation. It is called on the MCP-disconnect retry path *before* the next iteration launches a fresh Claude, after every CLI invocation, and in the exit trap. Safety envelope mirrors `ralph_cleanup_orphaned_mcp`: it kills only workers whose parent is a reaper (PID 1 / dead / init-like), so an interactive Claude Code session — never `--agent ralph` and never orphaned — is doubly protected.
+  2. **Force-kill grace via `--kill-after`.** `portable_timeout` now follows the deadline SIGTERM with a SIGKILL after `RALPH_TIMEOUT_KILL_AFTER` (default `15s`), so a worker wedged on dead MCP connections cannot ignore SIGTERM and linger to the full (up to 60m) adaptive timeout.
+  3. **Short hard timeout for post-disconnect retries.** A retry that follows a disconnect (`.mcp_blocked_count >= 1`) is capped at `RALPH_MCP_DISCONNECT_TIMEOUT_SECONDS` (default `120`) via `ralph_mcp_disconnect_timeout` — it has no working tools, so there is nothing to wait for.
+
+### Added
+
+- **Config knobs.** `RALPH_TIMEOUT_KILL_AFTER` (default `15s`, exported) and `RALPH_MCP_DISCONNECT_TIMEOUT_SECONDS` (default `120`).
+- **Tests.** 9 new BATS cases in `tests/unit/test_mcp_disconnect_retry.bats` covering the disconnect-timeout cap, `portable_timeout --kill-after` wiring, and the reaper's safety (non-orphan preserved) + kill (orphan reaped) paths.
+
+---
+
 ## [2.23.0] — 2026-06-01
 
 Minor release — global skill library refresh + adoption of orphaned pre-sidecar installs. No harness loop-behavior changes; SDK unchanged.
