@@ -17,10 +17,12 @@ from ralph_sdk.agent_models import (
     ProgressSnapshot,
     TaskInput,
     TaskResult,
+)
+from ralph_sdk.context import PromptCacheStats
+from ralph_sdk.decomposition import (
     _estimate_complexity,
     _estimate_file_count,
 )
-from ralph_sdk.context import PromptCacheStats
 from ralph_sdk.metrics import MetricEvent
 from ralph_sdk.status import RalphStatus
 from ralph_sdk.tools import (
