@@ -10,6 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.21.5] — 2026-06-01
+
+Patch release — harness fix. The coordinator could delegate HIGH-risk tasks to `ralph-architect`, but the harness never acted on it. SDK unchanged.
+
+### Fixed
+
+- **Brief `delegate_to` is now honored — `ralph-architect` actually runs for HIGH-risk tasks.** The coordinator writes `delegate_to: "ralph-architect"` into `.ralph/brief.json` and `lib/brief.sh` validated it, but nothing mapped the field onto the launched agent — every loop relaunched `--agent ralph`. A delegated brief then produced a BLOCK→re-select→BLOCK spin that burned no-progress loops toward the circuit breaker, and the architect agent never ran. `build_claude_command` now reads `.delegate_to` and overrides the `--agent` flag via a loop-local var (never mutating `RALPH_AGENT_NAME`, so a stale brief can't pin the architect across iterations), falling back to `ralph` with a WARN when the delegated agent file is absent. Composes with the TAP-1686 plan-mode override (both keyed off the same HIGH-risk brief). Implemented in `build_claude_command` rather than `build_loop_context` because the latter runs in a command-substitution subshell, where an `export` is lost before `--agent` is assembled.
+
+---
+
 ## [2.21.4] — 2026-06-01
 
 Patch release — Ralph Continuous Coding backlog sweep. The substantive change ships in the `PROMPT.md` template; the rest is test coverage and repo hygiene. SDK unchanged.
