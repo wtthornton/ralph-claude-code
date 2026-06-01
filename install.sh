@@ -733,6 +733,39 @@ else
         echo "         repo to re-template PROMPT.md and ralph.md against the linear branch."
     fi
 fi
+
+echo ""
+echo "Global Claude skills (TAP-574 sidecar):"
+SKILLS_DST="$HOME/.claude/skills"
+SKILLS_SRC="$HOME/.ralph/templates/skills/global"
+if [[ ! -d "$SKILLS_SRC" ]]; then
+    echo "  [SKIP] no shipped skill templates at $SKILLS_SRC"
+elif [[ ! -d "$SKILLS_DST" ]]; then
+    echo "  [SKIP] no installed skills at $SKILLS_DST"
+else
+    orphaned_skills=()
+    for skill_src in "$SKILLS_SRC"/*/; do
+        [[ -d "$skill_src" ]] || continue
+        skill_name=$(basename "$skill_src")
+        skill_dest="$SKILLS_DST/$skill_name"
+        if [[ -d "$skill_dest" && ! -f "$skill_dest/.ralph-managed" ]]; then
+            orphaned_skills+=("$skill_name")
+        fi
+    done
+    if (( ${#orphaned_skills[@]} == 0 )); then
+        echo "  [OK] all installed Ralph skills carry the .ralph-managed sidecar"
+    else
+        for skill_name in "${orphaned_skills[@]}"; do
+            echo "  [WARN] $skill_name: installed copy has no .ralph-managed sidecar (orphaned pre-sidecar install)."
+        done
+        echo "         Ralph ships these skill names but cannot update the installed copies —"
+        echo "         a plain 'ralph-upgrade' leaves them as-is (treated as user-authored), so"
+        echo "         they drift permanently. If one is genuinely your own skill, ignore it."
+        echo "         Remediation: RALPH_SKILLS_ADOPT=1 ralph-upgrade"
+        echo "         (backs each existing copy up under $SKILLS_DST/.ralph-backup/ then"
+        echo "         re-installs the Ralph baseline + sidecar)."
+    fi
+fi
 DOCTOREOF
     chmod +x "$INSTALL_DIR/ralph-doctor"
 
@@ -918,6 +951,9 @@ install_global_skills() {
     # shellcheck disable=SC1091
     source "$SCRIPT_DIR/lib/skills_install.sh"
 
+    if [[ "${RALPH_SKILLS_ADOPT:-}" == "1" ]]; then
+        log "INFO" "RALPH_SKILLS_ADOPT=1 — orphaned pre-sidecar skills will be adopted (previous copies backed up under $skills_dst/.ralph-backup/)"
+    fi
     log "INFO" "Syncing global Claude skills into $skills_dst ..."
     if skills_install_global "$skills_src" "$skills_dst" "$version"; then
         log "SUCCESS" "Global skills synced"

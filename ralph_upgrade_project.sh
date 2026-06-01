@@ -1084,6 +1084,9 @@ upgrade_global_skills_tier_s() {
     fi
     [[ -z "$ralph_ver" ]] && ralph_ver="unknown"
 
+    if [[ "${RALPH_SKILLS_ADOPT:-}" == "1" ]]; then
+        log INFO "RALPH_SKILLS_ADOPT=1 — orphaned pre-sidecar skills will be adopted (previous copies backed up under $dst/.ralph-backup/)"
+    fi
     log INFO "Syncing global Claude skills into $dst (ralph_version=$ralph_ver)"
     if skills_install_global "$src" "$dst" "$ralph_ver"; then
         log SUCCESS "Global skills synced"

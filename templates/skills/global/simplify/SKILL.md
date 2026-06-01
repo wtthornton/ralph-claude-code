@@ -1,13 +1,14 @@
 ---
 name: simplify
 description: >
-  Pre-commit / epic-boundary quality pass. Look for dead code, duplicated
-  logic, unused imports, redundant comments, and speculative error handling
-  introduced during the loop's Green phase. Removes, never adds. Produces
-  a smaller diff than what you started with.
-version: 1.0.0
+  Pre-commit / epic-boundary quality pass for the Ralph loop. This skill
+  should be used at an epic boundary to prune dead code, duplicated logic,
+  unused imports, redundant comments, and speculative error handling
+  introduced during the loop's Green phase. It removes, never adds — the
+  diff should end smaller than it started.
+version: 1.1.0
 ralph: true
-ralph_version_min: "1.9.0"
+ralph_version_min: "2.17.0"
 attribution: "Authored for Ralph runtime, inspired by Kent Beck's refactor step and the YAGNI tradition"
 user-invocable: true
 disable-model-invocation: false
@@ -78,11 +79,11 @@ loop with `ralph-architect`.
 
 ## Integration with sub-agents
 
-- **ralph-reviewer** (Sonnet, read-only) — immediately after your pass,
+- **ralph-reviewer** (Opus 4.8, read-only) — immediately after your pass,
   invoke the reviewer on the epic's consolidated diff. Reviewer will
   confirm nothing load-bearing was pruned; if it was, revert that one
   chunk and re-commit.
-- **ralph-tester** (Sonnet) — **mandatory** after simplify. Deleted code
+- **ralph-tester** (Opus 4.8) — **mandatory** after simplify. Deleted code
   can fail tests the loop didn't realize were leaning on it. Run the
   targeted test file, then the full suite at the epic boundary.
 - **ralph-explorer** (Haiku) — if you're unsure whether a helper has

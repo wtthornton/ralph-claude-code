@@ -1,14 +1,15 @@
 ---
 name: search-first
 description: >
-  Research-before-coding workflow. Before writing a new utility, helper, or
-  abstraction in the Ralph loop, search the repo, installed libraries, and
-  public registries for an existing solution. Delegates deep search to the
-  ralph-explorer sub-agent (Haiku). Use whenever a fix_plan task says
+  Research-before-coding workflow for the Ralph loop. This skill should be
+  used before writing a new utility, helper, or abstraction: it searches the
+  repo, installed libraries, and public registries for an existing solution
+  first, delegating deep search to the ralph-explorer sub-agent (Haiku). Use
+  it whenever the next task — a fix_plan item or a Linear issue — says
   "add/implement/build/wrap/integrate" something that sounds generic.
-version: 1.0.0
+version: 1.1.0
 ralph: true
-ralph_version_min: "1.9.0"
+ralph_version_min: "2.17.0"
 attribution: "Forked from the ECC search-first pattern and hardened for Ralph's autonomous loop"
 user-invocable: true
 disable-model-invocation: false
@@ -32,9 +33,9 @@ that duplicates an existing library.
 
 Trigger this skill when any of these signals fire in a loop:
 
-- The next `- [ ]` task in `fix_plan.md` (or the next Linear issue) uses verbs
-  like "add", "implement", "build", "wrap", "integrate", "create a utility
-  for ...", "write a helper to ...".
+- The next task — the next `- [ ]` in `fix_plan.md` or the next Linear
+  issue — uses verbs like "add", "implement", "build", "wrap", "integrate",
+  "create a utility for ...", "write a helper to ...".
 - The task touches a generic capability: HTTP client, retry logic, JSON
   schema validation, cache, rate limiter, CLI parser, date math.
 - You're about to create a new file under `lib/`, `sdk/`, or a new `utils/`
@@ -84,7 +85,7 @@ Ranking for the decision:
   adopting the external option requires a non-trivial architectural change
   (breaking the trust boundary, introducing async where there was none,
   etc.). Architect gets mandatory review afterward.
-- **ralph-reviewer** (Sonnet) — if you decide to **Build**, attach the
+- **ralph-reviewer** (Opus 4.8) — if you decide to **Build**, attach the
   search findings to the PR/commit so the reviewer can confirm the
   decision was informed, not defaulted.
 

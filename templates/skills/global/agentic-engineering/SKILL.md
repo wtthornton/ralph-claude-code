@@ -2,13 +2,14 @@
 name: agentic-engineering
 description: >
   Eval-first principles and cost-aware model routing for the Ralph loop.
-  Before writing code, articulate the behavior you want to verify. Route
-  work by complexity: TRIVIAL/SMALL to Haiku, MEDIUM to Sonnet,
-  LARGE/ARCHITECTURAL to Opus via ralph-architect. Integrates with
-  sdk/ralph_sdk/cost.py::select_model and lib/complexity.sh.
-version: 1.0.0
+  This skill should be used before committing budget to a MEDIUM+ task or
+  when choosing a sub-agent: articulate the behavior to verify first, then
+  route by task type (docs/tools → Haiku, code → Sonnet, arch → Opus, with
+  an Opus escalation after repeated QA failures). Integrates with
+  lib/complexity.sh and the optional sdk/ralph_sdk/cost.py::select_model.
+version: 1.1.0
 ralph: true
-ralph_version_min: "1.9.0"
+ralph_version_min: "2.17.0"
 attribution: "Authored for Ralph runtime, drawing on Karpathy's agentic engineering guidance and Anthropic's model routing patterns"
 user-invocable: true
 disable-model-invocation: false
@@ -31,8 +32,9 @@ start) and **cost-aware routing** (match model tier to task tier).
 Trigger this skill when **any** of these hold:
 
 - You're about to invoke a sub-agent and you haven't decided which one.
-- The task in `fix_plan.md` is marked with `<!-- complexity: LARGE -->`
-  or `<!-- complexity: ARCHITECTURAL -->` annotation.
+- The task is scoped LARGE/ARCHITECTURAL — a `<!-- complexity: LARGE -->`
+  / `<!-- complexity: ARCHITECTURAL -->` annotation in `fix_plan.md`, or a
+  Linear issue that big.
 - You just saw the cost tracker in `.ralph/metrics/*.jsonl` flag a
   budget warning.
 - The task description is vague ("improve X", "make Y better") — needs
@@ -65,20 +67,36 @@ vibe. Don't commit budget to a vibe.
 
 ### Cost-aware model routing
 
-Ralph routes by complexity via `sdk/ralph_sdk/cost.py::select_model`
-(the optional SDK path). The live bash harness routes by **task type**
-instead — `lib/complexity.sh::ralph_classify_task_type` maps
-docs/tools → Haiku, code → Sonnet, arch → Opus, with a force-Opus
-escalation after 3 QA failures. Both schemes share the same intent;
-mirror that reasoning when you decide which sub-agent to invoke:
+Two distinct routing decisions live here — don't conflate them.
 
-| Complexity       | Agent               | Model  | When                                   |
-| ---------------- | ------------------- | ------ | -------------------------------------- |
-| TRIVIAL / SMALL  | ralph-explorer      | Haiku  | search, scan, file discovery           |
-| SMALL / MEDIUM   | main loop (Sonnet)  | Sonnet | batched edits, routine implementation  |
-| MEDIUM           | ralph-tester        | Sonnet | run tests, report failures             |
-| MEDIUM           | ralph-reviewer      | Sonnet | read-only code review                  |
-| LARGE / ARCH.    | ralph-architect     | Opus   | cross-module refactors, design         |
+**1. The main loop's own model — routed by task type (live harness).**
+`lib/complexity.sh::ralph_classify_task_type` classifies the next task and
+`ralph_select_model` picks the model. Default on via
+`RALPH_MODEL_ROUTING_ENABLED`:
+
+| Task type            | Model  | Why                                       |
+| -------------------- | ------ | ----------------------------------------- |
+| docs                 | haiku  | prose / markdown — ~1/5 the cost          |
+| tools                | haiku  | config, scripts, scaffolding              |
+| code                 | sonnet | the floor for real implementation         |
+| arch                 | opus   | cross-module / design-bearing changes     |
+| any, QA-failed ≥3    | opus   | safety escalation after repeated QA fails |
+
+The SDK path (`sdk/ralph_sdk/cost.py::select_model`) routes by a 5-level
+complexity band (TRIVIAL→ARCHITECTURAL) instead — same intent, optional,
+not the live default.
+
+**2. Which sub-agent to delegate to — each has a fixed model.**
+You don't pick these models; the agent files set them (single source of
+truth: `agent-models.json`). Pick the agent by the job:
+
+| Sub-agent       | Model    | When                                   |
+| --------------- | -------- | -------------------------------------- |
+| ralph-explorer  | Haiku    | search, scan, file discovery           |
+| main loop       | Sonnet   | batched edits, routine implementation  |
+| ralph-tester    | Opus 4.8 | run tests at the epic boundary         |
+| ralph-reviewer  | Opus 4.8 | read-only code review                  |
+| ralph-architect | Opus 4.8 | cross-module refactors, design         |
 
 Rules of thumb:
 
@@ -101,10 +119,10 @@ Rules of thumb:
 - **ralph-architect** (Opus) — only for LARGE / ARCHITECTURAL tasks with
   an explicit design question ("should X live in lib/ or sdk/?").
   Architect's review step is mandatory; budget accordingly.
-- **ralph-tester** (Sonnet, worktree-isolated) — **required** at epic
+- **ralph-tester** (Opus 4.8, worktree-isolated) — **required** at epic
   boundaries and before any `EXIT_SIGNAL: true`. Never ship green
   without a tester pass on the boundary.
-- **ralph-reviewer** (Sonnet, read-only) — required after any architect
+- **ralph-reviewer** (Opus 4.8, read-only) — required after any architect
   task, recommended after simplify, optional for clean SMALL tasks.
 
 ## Exit criteria

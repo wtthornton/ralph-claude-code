@@ -1,15 +1,16 @@
 ---
 name: context-audit
 description: >
-  Token-hygiene pass for the Ralph loop. Before reading another large
-  file, audit what's already in context: drop stale file reads, prefer
-  targeted Grep over full-file Read, and consolidate repeated file-scan
-  patterns. Prevents the 3-loop drift where each iteration re-reads the
-  same file and burns cache. Works with the SDK ContextManager
-  (sdk/ralph_sdk/context.py) and the Continue-As-New trigger.
-version: 1.0.0
+  Token-hygiene pass for the Ralph loop. This skill should be used before
+  reading another large file or near the end of a Continue-As-New window:
+  it drops stale file reads, prefers targeted Grep over full-file Read, and
+  consolidates repeated file-scan patterns to stop the drift where each
+  iteration re-reads the same file and burns prompt cache. Works with the
+  SDK ContextManager (sdk/ralph_sdk/context.py) and the Continue-As-New
+  trigger.
+version: 1.1.0
 ralph: true
-ralph_version_min: "1.9.0"
+ralph_version_min: "2.17.0"
 attribution: "Authored for Ralph runtime, drawing on prompt-cache best practices for Claude"
 user-invocable: true
 disable-model-invocation: false

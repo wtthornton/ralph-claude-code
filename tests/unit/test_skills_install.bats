@@ -152,6 +152,87 @@ make_source_skill() {
         || fail "unexpected files under dest"
 }
 
+# ---------- install: adopt mode (RALPH_SKILLS_ADOPT) ----------
+# Closes the pre-sidecar adoption gap: a Ralph-shipped skill installed before
+# the sidecar mechanism existed has no .ralph-managed manifest, so Case 3 skips
+# it forever. RALPH_SKILLS_ADOPT=1 takes it over safely (stow --adopt model):
+# back up the existing dir, then install fresh + write the sidecar.
+
+@test "ADOPT: default mode skips orphaned skill, makes no backup, prints remediation hint" {
+    # Orphaned: dest exists, no sidecar, but Ralph DOES ship this name (src exists).
+    mkdir -p "dest/search-first"
+    printf 'OLD pre-sidecar body\n' > "dest/search-first/SKILL.md"
+    make_source_skill "search-first" "NEW ralph body"
+
+    run skills_install_one "src/search-first" "dest/search-first" "2.17.0"
+    assert_success
+    [[ "$(cat dest/search-first/SKILL.md)" == "OLD pre-sidecar body" ]] \
+        || fail "default mode modified the skipped dir"
+    [[ ! -f "dest/search-first/.ralph-managed" ]] || fail "default mode planted a sidecar"
+    [[ ! -d "dest/.ralph-backup" ]] || fail "default mode created a backup"
+    [[ "$output" == *"RALPH_SKILLS_ADOPT=1"* ]] || fail "remediation hint missing. output=$output"
+}
+
+@test "ADOPT: RALPH_SKILLS_ADOPT=1 backs up orphaned skill then installs fresh + sidecar" {
+    export RALPH_SKILLS_ADOPT=1
+    mkdir -p "dest/search-first"
+    printf 'OLD pre-sidecar body\n' > "dest/search-first/SKILL.md"
+    make_source_skill "search-first" "NEW ralph body"
+
+    run skills_install_one "src/search-first" "dest/search-first" "2.17.0"
+    assert_success
+    # Fresh Ralph baseline now in place.
+    [[ "$(cat dest/search-first/SKILL.md)" == "NEW ralph body" ]] \
+        || fail "skill not refreshed to Ralph baseline after adopt"
+    # Sidecar planted so future upgrades flow through Case 2.
+    [[ -f "dest/search-first/.ralph-managed" ]] || fail "sidecar not written after adopt"
+    run jq -r '.ralph_version' "dest/search-first/.ralph-managed"
+    [[ "$output" == "2.17.0" ]] || fail "sidecar version wrong: $output"
+}
+
+@test "ADOPT: adopt preserves the original content in a timestamped backup" {
+    export RALPH_SKILLS_ADOPT=1
+    mkdir -p "dest/search-first"
+    printf 'OLD pre-sidecar body\n' > "dest/search-first/SKILL.md"
+    make_source_skill "search-first" "NEW ralph body"
+
+    run skills_install_one "src/search-first" "dest/search-first" "2.17.0"
+    assert_success
+    local bdir
+    bdir=$(find dest/.ralph-backup -maxdepth 1 -type d -name 'search-first-*' 2>/dev/null | head -1)
+    [[ -n "$bdir" ]] || fail "backup dir not created"
+    [[ "$(cat "$bdir/SKILL.md")" == "OLD pre-sidecar body" ]] \
+        || fail "backup did not preserve original content"
+}
+
+@test "ADOPT: adopt does nothing when Ralph ships no such skill (src missing)" {
+    export RALPH_SKILLS_ADOPT=1
+    mkdir -p "dest/totally-custom"
+    printf 'user content\n' > "dest/totally-custom/SKILL.md"
+    # No src/totally-custom — not a Ralph-shipped skill.
+    run skills_install_one "src/totally-custom" "dest/totally-custom" "2.17.0"
+    assert_success
+    [[ "$(cat dest/totally-custom/SKILL.md)" == "user content" ]] \
+        || fail "non-shipped user dir was touched"
+    [[ ! -d "dest/.ralph-backup" ]] || fail "backup created for a non-shipped skill"
+}
+
+@test "ADOPT: skills_install_global adopts orphaned Ralph skill, leaves unrelated user skill alone" {
+    export RALPH_SKILLS_ADOPT=1
+    make_source_skill "search-first" "ralph body"
+    # Orphaned Ralph skill (name matches src, no sidecar).
+    mkdir -p "dest/search-first"; printf 'old\n' > "dest/search-first/SKILL.md"
+    # Unrelated user skill (no matching src).
+    mkdir -p "dest/my-own-skill"; printf 'mine\n' > "dest/my-own-skill/SKILL.md"
+
+    run skills_install_global "src" "dest" "2.17.0"
+    assert_success
+    [[ -f "dest/search-first/.ralph-managed" ]] || fail "orphaned Ralph skill not adopted"
+    [[ "$(cat dest/search-first/SKILL.md)" == "ralph body" ]] || fail "adopted skill not refreshed"
+    [[ "$(cat dest/my-own-skill/SKILL.md)" == "mine" ]] || fail "unrelated user skill was touched"
+    [[ ! -f "dest/my-own-skill/.ralph-managed" ]] || fail "sidecar planted on unrelated user skill"
+}
+
 # ---------- uninstall ----------
 
 @test "TAP-574: uninstall removes only Ralph-owned files" {

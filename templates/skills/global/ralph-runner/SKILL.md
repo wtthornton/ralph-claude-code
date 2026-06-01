@@ -2,8 +2,8 @@
 name: ralph-runner
 description: >
   Run, monitor, and continuously improve Ralph (autonomous dev loop for
-  Claude Code) against a Linear backlog. Use when the user says
-  "run ralph", "start ralph", "ralph campaign", "monitor ralph",
+  Claude Code) against a Linear backlog. This skill should be used when the
+  user says "run ralph", "start ralph", "ralph campaign", "monitor ralph",
   "restart ralph", "ralph against TAP-### / ENG-### / <ISSUE-ID>", or
   wants Ralph to chew through filed epics autonomously with the
   orchestrator filing follow-up Linear issues for the friction patterns
@@ -11,7 +11,7 @@ description: >
   subagent-delegation patterns. Keeps the orchestrator's context window
   tiny by delegating Linear writes, commit verification, and bulk log
   analysis to subagents.
-version: 1.1.0
+version: 1.1.1
 ralph: true
 ralph_version_min: "2.17.0"
 attribution: "Authored for Ralph operator-side autonomous-loop orchestration"

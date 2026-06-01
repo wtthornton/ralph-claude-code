@@ -208,6 +208,39 @@ Note the trailing `/.` — that copies the contents of the backup tree
 (preserving the relative project layout) over your working tree. Diff
 afterwards (`git diff`) to confirm the result before committing.
 
+### Adopting orphaned global skills
+
+Global Claude skills in `~/.claude/skills/` are tracked with a
+`.ralph-managed` sidecar so upgrades only touch Ralph-owned files. A skill
+installed **before** that mechanism existed has no sidecar, so the installer
+treats it as user-authored and skips it on every `ralph-upgrade` — it drifts
+permanently. `ralph-doctor` surfaces these:
+
+```
+Global Claude skills (TAP-574 sidecar):
+  [WARN] search-first: installed copy has no .ralph-managed sidecar (orphaned pre-sidecar install).
+         Remediation: RALPH_SKILLS_ADOPT=1 ralph-upgrade
+```
+
+To adopt them, set `RALPH_SKILLS_ADOPT=1` for one upgrade run:
+
+```bash
+RALPH_SKILLS_ADOPT=1 ralph-upgrade
+```
+
+Each orphaned copy is moved to
+`~/.claude/skills/.ralph-backup/<name>-<timestamp>-<pid>/` and re-installed
+fresh with a sidecar. Nothing is destroyed — if a flagged skill was actually
+your own (a name collision with a Ralph skill), its content is preserved in
+the backup. Review the diff before deleting it:
+
+```bash
+diff -ru ~/.claude/skills/.ralph-backup/search-first-*/  ~/.claude/skills/search-first/
+```
+
+The default (env var unset) never auto-adopts — a name collision is never
+silently clobbered.
+
 ---
 
 ## Secrets Management

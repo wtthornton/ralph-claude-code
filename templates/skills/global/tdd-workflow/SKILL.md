@@ -1,14 +1,14 @@
 ---
 name: tdd-workflow
 description: >
-  Test-first discipline for the Ralph loop. Write a failing test that
-  reproduces the target behavior before implementing, then make it pass
-  with the smallest change. Stack-agnostic (BATS for shell, pytest for
-  the SDK, jest where present). Integrates with the ralph-tester
-  sub-agent at epic boundaries.
-version: 1.0.0
+  Test-first discipline for the Ralph loop. This skill should be used when
+  fixing a bug or adding behavior: write a failing test that reproduces the
+  target behavior before implementing, then make it pass with the smallest
+  change. Stack-agnostic (BATS for shell, pytest for the SDK, jest where
+  present). Integrates with the ralph-tester sub-agent at epic boundaries.
+version: 1.1.0
 ralph: true
-ralph_version_min: "1.9.0"
+ralph_version_min: "2.17.0"
 attribution: "Authored for Ralph runtime, drawing on Kent Beck's Test-Driven Development"
 user-invocable: true
 disable-model-invocation: false
@@ -85,11 +85,11 @@ Full suite runs at epic boundaries, via `ralph-tester`.
 
 ## Integration with sub-agents
 
-- **ralph-tester** (Sonnet, worktree-isolated) — **mandatory** at epic
+- **ralph-tester** (Opus 4.8, worktree-isolated) — **mandatory** at epic
   boundaries and before any loop that sets `EXIT_SIGNAL: true`. Set
   `TESTS_STATUS: DEFERRED` mid-epic; set `TESTS_STATUS: PASSING` only
   after ralph-tester returns green.
-- **ralph-reviewer** (Sonnet, read-only) — at epic boundaries, the
+- **ralph-reviewer** (Opus 4.8, read-only) — at epic boundaries, the
   reviewer will reject a diff with new behavior but no new test. Avoid
   that round-trip by writing the test in the same loop as the code.
 - **ralph-explorer** (Haiku) — when you're unsure which tests cover the

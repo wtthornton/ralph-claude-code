@@ -19,7 +19,14 @@
 #                                 sidecar manifest (Ralph still owns them),
 #                                 warn on user-modified files, then refresh
 #                                 the sidecar to the new Ralph baseline
-#   3. exists, no sidecar      -> user-authored, skip entirely
+#   3. exists, no sidecar      -> default: user-authored, skip entirely.
+#                                 RALPH_SKILLS_ADOPT=1: this is a Ralph-shipped
+#                                 name (we only reach here with a real src), so
+#                                 it is an orphaned pre-sidecar install — back
+#                                 the existing dir up to <dest_root>/.ralph-backup/
+#                                 and fall through to a fresh install (Case 1).
+#                                 Opt-in + reversible (stow --adopt model); the
+#                                 default never auto-clobbers a name collision.
 
 # Guard against double-source.
 [[ -n "${SKILLS_INSTALL_SOURCED:-}" ]] && return 0
@@ -78,10 +85,29 @@ skills_install_one() {
 
     [[ -d "$src" ]] || return 0
 
-    # Case 3: dest exists without sidecar -> user-authored, skip.
+    # Case 3: dest exists without sidecar.
     if [[ -d "$dest" && ! -f "$dest/.ralph-managed" ]]; then
-        echo "INFO: user-authored skill already present, skipping: $name" >&2
-        return 0
+        if [[ "${RALPH_SKILLS_ADOPT:-}" != "1" ]]; then
+            # Default: treat as user-authored, skip. Never auto-clobber a
+            # name collision.
+            echo "INFO: user-authored skill already present, skipping: $name (set RALPH_SKILLS_ADOPT=1 to adopt as a Ralph-shipped skill)" >&2
+            return 0
+        fi
+        # Adopt: we only reach skills_install_one with an existing src, so
+        # $name IS a Ralph-shipped skill — this dir is an orphaned pre-sidecar
+        # install. Back it up (reversible), then fall through to a fresh install.
+        local backup_root backup_dir ts
+        backup_root="$(dirname "$dest")/.ralph-backup"
+        ts="$(date -u +"%Y%m%dT%H%M%SZ")"
+        backup_dir="$backup_root/${name}-${ts}-$$"
+        mkdir -p "$backup_root"
+        if mv "$dest" "$backup_dir" 2>/dev/null; then
+            echo "INFO: adopting orphaned skill '$name' — previous copy backed up to $backup_dir" >&2
+        else
+            echo "WARN: could not back up '$dest' for adoption; leaving it untouched" >&2
+            return 0
+        fi
+        # $dest no longer exists -> the Case 1 fresh-install block runs below.
     fi
 
     # Case 1: fresh install.
