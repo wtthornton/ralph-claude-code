@@ -61,6 +61,36 @@ teardown() {
 }
 
 # =============================================================================
+# TAP-2678: a client-side circuit-breaker-open skip (http 200) is logged with a
+# distinct op:cb_open_skip, NOT op:failure, so audits don't read a healthy brain
+# as unhealthy.
+# =============================================================================
+
+@test "TAP-2678: CB-open at http 200 logs op:cb_open_skip, not failure" {
+    source "$BRAIN_CLIENT"
+    brain_client_record_metric "$RALPH_DIR" "failure" "200" "12" "circuit_breaker_open"
+    local row
+    row=$(cat "$RALPH_DIR/metrics/brain.jsonl")
+    echo "$row" | grep -q '"op":"cb_open_skip"'
+    echo "$row" | grep -q '"http_code":"200"'
+    # And it must NOT be recorded as a failure.
+    ! echo "$row" | grep -q '"op":"failure"'
+}
+
+@test "TAP-2678: a genuine failure (non-200) still logs op:failure" {
+    source "$BRAIN_CLIENT"
+    brain_client_record_metric "$RALPH_DIR" "failure" "500" "40" "server_error"
+    grep -q '"op":"failure"' "$RALPH_DIR/metrics/brain.jsonl"
+}
+
+@test "TAP-2678: CB-open reason at non-200 is left as-is (not rewritten)" {
+    source "$BRAIN_CLIENT"
+    # A CB-open skip that coincided with a real error code keeps op:failure.
+    brain_client_record_metric "$RALPH_DIR" "failure" "000" "0" "circuit_breaker_open"
+    grep -q '"op":"failure"' "$RALPH_DIR/metrics/brain.jsonl"
+}
+
+# =============================================================================
 # TAP-750: secrets.env sourcing in the template hook
 # =============================================================================
 
