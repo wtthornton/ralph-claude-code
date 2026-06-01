@@ -11,7 +11,9 @@ Provides a Protocol-based metrics pipeline with two concrete implementations:
 from __future__ import annotations
 
 import logging
+import operator
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -156,15 +158,15 @@ class JsonlMetricsCollector:
         if filter is None:
             return True
 
-        if "event_type" in filter and event.event_type != filter["event_type"]:
-            return False
-        if "loop_count" in filter and event.loop_count != filter["loop_count"]:
-            return False
-        if "work_type" in filter and event.work_type != filter["work_type"]:
-            return False
-        if "since" in filter and event.timestamp < filter["since"]:
-            return False
-        if "until" in filter and event.timestamp > filter["until"]:
-            return False
-
-        return True
+        # (filter_key, attr_value, comparator) — comparator returns True on mismatch
+        checks: list[tuple[str, Any, Callable[[Any, Any], bool]]] = [
+            ("event_type", event.event_type, operator.ne),
+            ("loop_count", event.loop_count, operator.ne),
+            ("work_type", event.work_type, operator.ne),
+            ("since", event.timestamp, operator.lt),
+            ("until", event.timestamp, operator.gt),
+        ]
+        return not any(
+            key in filter and mismatch(value, filter[key])
+            for key, value, mismatch in checks
+        )

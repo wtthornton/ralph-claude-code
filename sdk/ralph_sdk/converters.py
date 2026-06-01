@@ -99,29 +99,12 @@ TRUST_PERMISSION_MAP = {
 }
 
 
-def from_task_packet(
-    packet: TaskPacketInput,
-    intent: IntentSpecInput | None = None,
-    *,
-    loopback_context: str = "",
-    expert_outputs: list[dict[str, Any]] | None = None,
-) -> TaskInput:
-    """Convert TaskPacket + IntentSpec into Ralph TaskInput (v2 signature).
-
-    Args:
-        packet: The TaskPacket envelope.
-        intent: IntentSpec (defaults to packet.intent if not provided).
-        loopback_context: Override for retry context (defaults to packet.loopback_context).
-        expert_outputs: Expert agent outputs to include in context.
-
-    Returns:
-        TaskInput ready for RalphAgent.run_iteration().
-    """
-    intent = intent or packet.intent
-    loopback = loopback_context or packet.loopback_context
-    experts = expert_outputs or packet.expert_outputs
-
-    # Build prompt from goal
+def _build_prompt(
+    intent: IntentSpecInput,
+    loopback: str,
+    experts: list[dict[str, Any]],
+) -> str:
+    """Assemble the prompt from loopback context, goal, criteria, and expert outputs."""
     prompt_parts = []
 
     # Prepend loopback context for retries
@@ -144,31 +127,63 @@ def from_task_packet(
         )
         prompt_parts.append(f"\n\n## Expert Analysis\n\n{expert_text}")
 
-    prompt = "\n".join(prompt_parts)
+    return "\n".join(prompt_parts)
 
-    # Build constraints (constraints + non_goals as exclusions + risk flags as safety)
-    constraint_parts = []
-    if intent.constraints:
-        constraint_parts.extend(intent.constraints)
-    if intent.non_goals:
-        constraint_parts.extend(f"DO NOT: {ng}" for ng in intent.non_goals)
-    if intent.risk_flags:
-        for rf in intent.risk_flags:
-            if rf.severity in ("high", "critical"):
-                constraint_parts.append(f"SAFETY: {rf.description} ({rf.category})")
 
-    # Build agent instructions from constraints and context packs
+def _build_constraints(intent: IntentSpecInput) -> list[str]:
+    """Collect constraints, non-goal exclusions, and high-severity risk flags."""
+    constraint_parts: list[str] = []
+    constraint_parts.extend(intent.constraints)
+    constraint_parts.extend(f"DO NOT: {ng}" for ng in intent.non_goals)
+    constraint_parts.extend(
+        f"SAFETY: {rf.description} ({rf.category})"
+        for rf in intent.risk_flags
+        if rf.severity in ("high", "critical")
+    )
+    return constraint_parts
+
+
+def _build_instructions(intent: IntentSpecInput, constraint_parts: list[str]) -> str:
+    """Assemble agent instructions from constraints and context packs."""
     instructions_parts = []
     if constraint_parts:
         constraints_text = "\n".join(f"- {c}" for c in constraint_parts)
         instructions_parts.append(f"## Constraints\n\n{constraints_text}")
 
-    if intent.context_packs:
-        for cp in intent.context_packs:
-            if cp.content:
-                instructions_parts.append(f"## Context: {cp.path}\n\n{cp.content}")
+    instructions_parts.extend(
+        f"## Context: {cp.path}\n\n{cp.content}"
+        for cp in intent.context_packs
+        if cp.content
+    )
 
-    agent_instructions = "\n\n".join(instructions_parts) if instructions_parts else ""
+    return "\n\n".join(instructions_parts) if instructions_parts else ""
+
+
+def from_task_packet(
+    packet: TaskPacketInput,
+    intent: IntentSpecInput | None = None,
+    *,
+    loopback_context: str = "",
+    expert_outputs: list[dict[str, Any]] | None = None,
+) -> TaskInput:
+    """Convert TaskPacket + IntentSpec into Ralph TaskInput (v2 signature).
+
+    Args:
+        packet: The TaskPacket envelope.
+        intent: IntentSpec (defaults to packet.intent if not provided).
+        loopback_context: Override for retry context (defaults to packet.loopback_context).
+        expert_outputs: Expert agent outputs to include in context.
+
+    Returns:
+        TaskInput ready for RalphAgent.run_iteration().
+    """
+    intent = intent or packet.intent
+    loopback = loopback_context or packet.loopback_context
+    experts = expert_outputs or packet.expert_outputs
+
+    prompt = _build_prompt(intent, loopback, experts)
+    constraint_parts = _build_constraints(intent)
+    agent_instructions = _build_instructions(intent, constraint_parts)
 
     return TaskInput(
         prompt=prompt,

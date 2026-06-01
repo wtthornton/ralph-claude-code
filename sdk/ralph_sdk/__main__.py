@@ -11,8 +11,8 @@ from ralph_sdk.agent import RalphAgent
 from ralph_sdk.config import RalphConfig
 
 
-def main(argv: list[str] | None = None) -> int:
-    """SDK-mode CLI entry point."""
+def _build_parser() -> argparse.ArgumentParser:
+    """Construct the SDK CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="ralph-sdk",
         description="Ralph Agent SDK — autonomous development loop (Python mode)",
@@ -70,20 +70,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Reset circuit breaker and exit",
     )
+    return parser
 
-    args = parser.parse_args(argv)
 
-    # Configure logging
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
-    # Load config
-    config = RalphConfig.load(args.project_dir)
-
-    # Apply CLI overrides
+def _apply_overrides(config: RalphConfig, args: argparse.Namespace) -> None:
+    """Apply CLI argument overrides onto the loaded config."""
     if args.dry_run:
         config.dry_run = True
     if args.calls is not None:
@@ -97,15 +88,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.verbose:
         config.verbose = True
 
-    # Status check
+
+def _handle_early_exit(args: argparse.Namespace) -> int | None:
+    """Handle --status / --reset-circuit early-exit subcommands. Returns exit code or None."""
     if args.status:
+        import json
+
         from ralph_sdk.status import RalphStatus
         status = RalphStatus.load(f"{args.project_dir}/.ralph")
-        import json
         print(json.dumps(status.to_dict(), indent=2))
         return 0
 
-    # Reset circuit breaker
     if args.reset_circuit:
         from ralph_sdk.status import CircuitBreakerState
         cb = CircuitBreakerState.load(f"{args.project_dir}/.ralph")
@@ -113,6 +106,27 @@ def main(argv: list[str] | None = None) -> int:
         cb.save(f"{args.project_dir}/.ralph")
         print("Circuit breaker reset to CLOSED")
         return 0
+
+    return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    """SDK-mode CLI entry point."""
+    args = _build_parser().parse_args(argv)
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    config = RalphConfig.load(args.project_dir)
+    _apply_overrides(config, args)
+
+    early_exit = _handle_early_exit(args)
+    if early_exit is not None:
+        return early_exit
 
     # Run the agent (sync wrapper around async loop)
     agent = RalphAgent(config=config, project_dir=args.project_dir)
