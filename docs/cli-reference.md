@@ -156,6 +156,7 @@ Bash file sourced at startup. See `templates/ralphrc.template` for all options.
 | `RALPH_SKILL_AUTO_TUNE` | Auto-install 1 recommended skill per loop based on friction | false |
 | `RALPH_SKILL_RETRO_WINDOW` | Loops to examine for friction pattern detection | 5 |
 | `RALPH_SKILL_REDETECT_INTERVAL` | Re-run Tier A skill detection every N loops | 10 |
+| `RALPH_SKILLS_ADOPT` | Adopt orphaned pre-sidecar global skills on upgrade (backs each up under `~/.claude/skills/.ralph-backup/` then re-installs fresh + sidecar). e.g. `RALPH_SKILLS_ADOPT=1 ralph-upgrade` | unset |
 
 ### ralph.config.json
 

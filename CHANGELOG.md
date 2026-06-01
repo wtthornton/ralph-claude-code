@@ -10,6 +10,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.23.0] — 2026-06-01
+
+Minor release — global skill library refresh + adoption of orphaned pre-sidecar installs. No harness loop-behavior changes; SDK unchanged.
+
+### Added
+
+- **`RALPH_SKILLS_ADOPT` — adopt orphaned pre-sidecar skills.** `skills_install_global` previously skipped any `~/.claude/skills/<name>` dir without a `.ralph-managed` sidecar as user-authored. Skills installed before the sidecar mechanism (TAP-574) therefore drifted forever — a plain `ralph-upgrade` never updated them. With `RALPH_SKILLS_ADOPT=1`, a no-sidecar dir whose name matches a Ralph-shipped skill (the installer is only ever called with a real source, so the name is provably Ralph's) is moved to `~/.claude/skills/.ralph-backup/<name>-<ts>-<pid>/` and re-installed fresh + sidecar. Opt-in and reversible (stow `--adopt` model); the default never auto-clobbers a name collision. Threads through `ralph-upgrade` / `ralph-upgrade-project` via the environment.
+- **`ralph-doctor` orphaned-skill detector.** Flags any installed Ralph-shipped skill missing its `.ralph-managed` sidecar and prints the `RALPH_SKILLS_ADOPT=1 ralph-upgrade` remediation.
+
+### Changed
+
+- **Global skill content refreshed** (`templates/skills/global/*`): corrected the stale model lineup (ralph-tester/ralph-reviewer/ralph-architect are Opus 4.8 per `agent-models.json`, not Sonnet); rewrote `agentic-engineering`'s routing table to lead with the live task-type routing (docs/tools→haiku, code→sonnet, arch→opus, +QA escalation); made trigger language task-source-agnostic (Linear or `fix_plan.md`); converted descriptions to third-person per Anthropic's 2026 skill-authoring guidance for better routing accuracy. Skill versions bumped; the stale `ralph_version_min` floor raised 1.9.0 → 2.17.0.
+
+### Tests
+
+- 5 new adopt cases in `test_skills_install.bats`; new `test_ralph_doctor_skills.bats` (4 cases). Full unit suite green.
+
+---
+
 ## [2.22.0] — 2026-06-01
 
 Minor release — MCP-disconnect resilience. A fresh `claude` invocation that comes up with all of its MCP servers disconnected at loop start is now retried instead of counted as no-progress, so transient MCP-client flakiness can no longer trip the circuit breaker on an otherwise-healthy campaign. SDK unchanged.
