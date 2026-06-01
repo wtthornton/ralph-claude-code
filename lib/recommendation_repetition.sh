@@ -31,7 +31,11 @@ recommendation_normalize() {
         s/loop[[:space:]]*#?[0-9]+/loop/g
     ')
     # Collapse numeric counts in parentheses: "(4 live probes)" → "(X live probes)"
-    _text=$(printf '%s' "$_text" | sed -E 's/\(([0-9]+)([[:space:]])/(X\2/g')
+    # The boundary after the digits may be whitespace OR the closing paren, so a
+    # bare count like "(4)" / "(12)" is normalized too — otherwise two otherwise
+    # identical recommendations differing only by such a count hash differently
+    # and never accumulate toward the repetition threshold.
+    _text=$(printf '%s' "$_text" | sed -E 's/\(([0-9]+)([[:space:])])/(X\2/g')
     # Strip all whitespace runs to single space
     _text=$(printf '%s' "$_text" | tr -s '[:space:]' ' ')
     # Trim

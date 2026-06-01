@@ -39,15 +39,21 @@ _RPC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/coordinator_session.sh
 [[ -f "$_RPC_DIR/coordinator_session.sh" ]] && source "$_RPC_DIR/coordinator_session.sh"
 
+# Build the JSON with jq so a reason containing a quote / backslash / `%`
+# (e.g. a risk_level value interpolated below) cannot break the "stdout is
+# always one line of valid JSON" contract. Fall back to a generic-but-valid
+# object if jq is somehow unavailable.
 _rpc_skip() {
     local reason="$1"
-    printf '{"skipped":true,"reason":"%s"}\n' "$reason"
+    jq -cn --arg r "$reason" '{skipped:true,reason:$r}' 2>/dev/null \
+        || printf '{"skipped":true,"reason":"skipped"}\n'
     exit 0
 }
 
 _rpc_default_approve() {
     local reason="$1"
-    printf '{"verdict":"APPROVE","reason":"%s","alternative":null,"elevated_qa":false}\n' "$reason"
+    jq -cn --arg r "$reason" '{verdict:"APPROVE",reason:$r,alternative:null,elevated_qa:false}' 2>/dev/null \
+        || printf '{"verdict":"APPROVE","reason":"approved","alternative":null,"elevated_qa":false}\n'
 }
 
 # --- arg validation ---------------------------------------------------------

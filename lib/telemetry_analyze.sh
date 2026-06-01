@@ -47,18 +47,25 @@ _ta_add() {
 _ta_percentile() {
     local file="$1"
     [[ -f "$file" && -s "$file" ]] || return 0
+    # Collect the usable values FIRST, then index into them. Deriving the index
+    # from `wc -l` (every line) instead of the count of values that survive the
+    # `grep -E '^[0-9]+$'` filter overflows the index whenever any line lacks
+    # .duration_seconds (jq emits nothing for `empty`), so `sed` prints nothing
+    # and the whole rule silently degrades to SKIP despite ample timing data.
+    local vals
+    vals=$(jq -r '(if (.exit_code // 0) == 124
+            then ((.duration_seconds // 0) * 3 / 2 | floor)
+            else (.duration_seconds // empty) end)' "$file" 2>/dev/null \
+        | grep -E '^[0-9]+$' \
+        | sort -n)
+    [[ -n "$vals" ]] || return 0
     local count
-    count=$(wc -l < "$file" 2>/dev/null | tr -d '[:space:]')
+    count=$(printf '%s\n' "$vals" | wc -l | tr -d '[:space:]')
     [[ "${count:-0}" -ge 1 ]] || return 0
     local idx=$(( (count * 95 + 99) / 100 ))
     [[ "$idx" -lt 1 ]] && idx=1
     [[ "$idx" -gt "$count" ]] && idx=$count
-    jq -r '(if (.exit_code // 0) == 124
-            then ((.duration_seconds // 0) * 3 / 2 | floor)
-            else (.duration_seconds // empty) end)' "$file" 2>/dev/null \
-        | grep -E '^[0-9]+$' \
-        | sort -n \
-        | sed -n "${idx}p"
+    printf '%s\n' "$vals" | sed -n "${idx}p"
 }
 
 # Resolve the enforced budget by delegating to the harness functions when this

@@ -436,12 +436,20 @@ _gh_detect_repo() {
         return 1
     fi
 
-    # Extract owner/repo from various URL formats
-    local repo
-    # SSH: git@github.com:owner/repo.git
-    repo=$(echo "$remote_url" | sed -E 's|.*github\.com[:/]([^/]+/[^/.]+)(\.git)?$|\1|')
+    # Only GitHub remotes are supported — a non-github remote would otherwise
+    # slip past the old `== "$remote_url"` guard with a bogus value once the
+    # `.git` suffix was stripped.
+    [[ "$remote_url" == *github.com* ]] || return 1
 
-    if [[ -z "$repo" || "$repo" == "$remote_url" ]]; then
+    # Strip the host prefix (ssh `git@github.com:` or https `.../github.com/`),
+    # then a trailing `.git` and/or `/`. The repo-name class must allow dots
+    # (e.g. owner/my.config) — the old `[^/.]+` truncated at the first dot and
+    # returned a wrong owner/repo that downstream `gh --repo` calls 404'd on.
+    local repo
+    repo=$(echo "$remote_url" | sed -E 's#^.*github\.com[:/]+##; s#\.git$##; s#/$##')
+
+    # Must be exactly owner/repo: at least one slash, no more than one.
+    if [[ -z "$repo" || "$repo" != */* || "$repo" == */*/* ]]; then
         return 1
     fi
 

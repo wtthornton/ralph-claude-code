@@ -536,6 +536,13 @@ deduplicate_tasks() {
         return 0
     fi
 
+    # Per-process temp file for the awk removed-count side channel. A fixed
+    # `/tmp/ralph_dedup_count` raced between concurrent imports (cross-reading
+    # each other's count) and was a predictable, world-writable path another
+    # user could pre-create to plant/redirect the value.
+    local _dcnt
+    _dcnt=$(mktemp "${TMPDIR:-/tmp}/ralph_dedup.XXXXXX") || _dcnt="/tmp/ralph_dedup_count.$$"
+
     # Use awk for single-pass dedup on normalized keys
     echo "$tasks" | awk '
     BEGIN { removed = 0 }
@@ -566,12 +573,12 @@ deduplicate_tasks() {
         }
     }
     END { print "###DEDUP_REMOVED=" removed > "/dev/stderr" }
-    ' 2>/tmp/ralph_dedup_count
+    ' 2>"$_dcnt"
 
     # Parse removed count
-    if [[ -f /tmp/ralph_dedup_count ]]; then
-        DEDUP_REMOVED_COUNT=$(sed -n 's/###DEDUP_REMOVED=//p' /tmp/ralph_dedup_count 2>/dev/null || echo "0")
-        rm -f /tmp/ralph_dedup_count
+    if [[ -f "$_dcnt" ]]; then
+        DEDUP_REMOVED_COUNT=$(sed -n 's/###DEDUP_REMOVED=//p' "$_dcnt" 2>/dev/null || echo "0")
+        rm -f "$_dcnt"
     fi
 }
 

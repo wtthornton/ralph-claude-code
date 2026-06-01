@@ -97,15 +97,14 @@ JSON
         || fail "CB_STATE_FILE should not be written at 1× threshold"
 }
 
-# The 2×-threshold branch ends with `break`, which behaves differently inside a
-# test context (no enclosing loop). Wrap the call in a synthetic while loop so
-# `break` exits cleanly and we can inspect side effects after.
+# The 2×-threshold branch returns sentinel 3 to signal a CB trip — `break`
+# cannot cross a function boundary in bash, so the function returns 3 and
+# execute_claude_code propagates it so main()'s loop breaks. Capture the rc
+# in LAST_DEFER_RC so callers can both inspect side effects and assert the
+# trip signal.
 run_with_break_loop() {
-    local i=0
-    while [[ $i -lt 1 ]]; do
-        i=$((i + 1))
-        exec_track_deferred_tests "$1"
-    done
+    LAST_DEFER_RC=0
+    exec_track_deferred_tests "$1" || LAST_DEFER_RC=$?
 }
 
 @test "TAP-1475: DEFERRED at 2× threshold trips CB and writes CB_STATE_FILE" {
@@ -113,6 +112,8 @@ run_with_break_loop() {
     write_status "DEFERRED"
     run_with_break_loop 7
 
+    [[ "$LAST_DEFER_RC" -eq 3 ]] \
+        || fail "expected CB-trip sentinel rc=3, got $LAST_DEFER_RC"
     [[ "$CONSECUTIVE_DEFERRED_TEST_COUNT" -eq $((CB_MAX_DEFERRED_TESTS * 2)) ]] \
         || fail "expected counter=$((CB_MAX_DEFERRED_TESTS * 2)), got $CONSECUTIVE_DEFERRED_TEST_COUNT"
     [[ "$LAST_LOG_LEVEL" == "ERROR" ]] \
