@@ -164,7 +164,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.24.0"
+RALPH_VERSION="2.25.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -1273,7 +1273,7 @@ update_exit_signals_from_status() {
     fi
 
     # PERF: Read ALL status.json fields in single jq call (was: 6 separate jq spawns)
-    local exit_signal status tasks_completed files_modified work_type loop_number
+    local exit_signal status tasks_completed files_modified work_type loop_number mcp_disconnect
     local _status_tsv
     _status_tsv=$(jq -r '[
       (.exit_signal // "false"),
@@ -1281,9 +1281,10 @@ update_exit_signals_from_status() {
       (.tasks_completed // 0 | tostring),
       (.files_modified // 0 | tostring),
       (.work_type // "UNKNOWN"),
-      (.loop_count // 0 | tostring)
-    ] | @tsv' "$status_file" 2>/dev/null || echo "false	UNKNOWN	0	0	UNKNOWN	0")
-    IFS=$'\t' read -r exit_signal status tasks_completed files_modified work_type loop_number <<< "$_status_tsv"
+      (.loop_count // 0 | tostring),
+      (.mcp_disconnect // false | tostring)
+    ] | @tsv' "$status_file" 2>/dev/null || echo "false	UNKNOWN	0	0	UNKNOWN	0	false")
+    IFS=$'\t' read -r exit_signal status tasks_completed files_modified work_type loop_number mcp_disconnect <<< "$_status_tsv"
 
     # Determine derived flags
     local is_test_only="false"
@@ -1302,12 +1303,13 @@ update_exit_signals_from_status() {
         --arg test_only "$is_test_only" \
         --arg complete "$has_completion_signal" \
         --arg exit_sig "$exit_signal" \
-        --arg progress "$has_progress" '
+        --arg progress "$has_progress" \
+        --arg mcp_dc "$mcp_disconnect" '
       (if $test_only == "true" then .test_only_loops += [$loop]
        elif $progress == "true" then .test_only_loops = []
        else . end) |
       (if $complete == "true" then .done_signals += [$loop] else . end) |
-      (if $exit_sig == "true" then .completion_indicators += [$loop]
+      (if $exit_sig == "true" and $mcp_dc != "true" then .completion_indicators += [$loop]
        elif $progress == "true" then .completion_indicators = []
        else . end) |
       .test_only_loops = .test_only_loops[-5:] |
@@ -1317,6 +1319,36 @@ update_exit_signals_from_status() {
 
     echo "$signals" > "$exit_signals_file"
     return 0
+}
+
+# TAP-2735: fail-closed backlog verification for exit_signal_quorum.
+#
+# The agent can emit EXIT_SIGNAL: true ("all work complete") while the Linear
+# backlog still has actionable issues — a transient MCP read failure or an
+# over-eager per-loop "looks done" assessment. Three such false signals reach
+# exit_signal_quorum (3) and could HALT a campaign with real work left (the
+# 2026-05-27 false "backlog empty" halt: recommendation claimed empty while 46
+# issues existed). The quorum must require a RELIABLE open_count == 0, not the
+# agent's say-so.
+#
+# Returns (no stdout):
+#   0 — backlog VERIFIED empty (Linear open_count == 0): an exit is authorized.
+#   1 — backlog VERIFIED non-empty (open_count > 0): a false exit signal —
+#       caller discards the votes and keeps working.
+#   2 — backlog UNVERIFIED (count unavailable: MCP disconnect / query error /
+#       stale): fail closed — caller does NOT exit, leaves votes intact, retries.
+#
+# File mode is out of scope (no "unverified count" failure mode — the plan is
+# the local source of truth and the pre-flight empty-plan check gates it), so it
+# returns 0 to preserve the prior behavior exactly.
+ralph_backlog_verified_empty() {
+    [[ "${RALPH_TASK_SOURCE:-file}" == "linear" ]] || return 0
+    local _open
+    if ! _open=$(linear_get_open_count 2>/dev/null); then
+        return 2
+    fi
+    [[ "$_open" =~ ^[0-9]+$ ]] || return 2
+    [[ "$_open" -eq 0 ]] && return 0 || return 1
 }
 
 # Log analysis summary from status.json (replaces log_analysis_summary from response_analyzer.sh)
@@ -1693,9 +1725,19 @@ should_exit_gracefully() {
     fi
 
     if [[ $recent_completion_indicators -ge 2 ]] && [[ "$claude_exit_signal" == "true" ]]; then
-        log_status "WARN" "Exit condition: Strong completion indicators ($recent_completion_indicators) with EXIT_SIGNAL=true" >&2
-        echo "project_complete"
-        return 0
+        # TAP-2735: do NOT let the agent's say-so short-circuit ahead of the
+        # authoritative count check below. Honor "project_complete" only when the
+        # backlog is verifiably empty; otherwise fall through to the Linear-count
+        # branch (which abstains on an unverified count and reports remaining work
+        # on a non-empty one). File mode returns 0 here, preserving prior behavior.
+        ralph_backlog_verified_empty
+        local _bve_pc=$?
+        if [[ "$_bve_pc" -eq 0 ]]; then
+            log_status "WARN" "Exit condition: Strong completion indicators ($recent_completion_indicators) with EXIT_SIGNAL=true (backlog verified empty)" >&2
+            echo "project_complete"
+            return 0
+        fi
+        log_status "INFO" "Strong completion indicators with EXIT_SIGNAL=true but backlog not verified empty (state=$_bve_pc) — deferring to authoritative count check (TAP-2735)" >&2
     fi
     
     # 5. Check task source for completion
@@ -5992,10 +6034,25 @@ main() {
             [[ "$_quorum_count" =~ ^[0-9]+$ ]] || _quorum_count=0
             local _quorum_threshold=${EXIT_SIGNAL_HALT_THRESHOLD:-3}
             if [[ "$_quorum_count" -ge "$_quorum_threshold" ]]; then
-                ralph_audit "exit_decision" "exit_signal_quorum" "graceful_exit" "loop_count=$loop_count,indicators=$_quorum_count" "completed" 2>/dev/null
-                update_status "$loop_count" "$(_read_call_count)" "exit_signal_quorum" "completed" "exit_signal_quorum"
-                log_status "SUCCESS" "🏁 Exit-signal quorum reached ($_quorum_count >= $_quorum_threshold) — agent asked to halt, harness complied"
-                break
+                # TAP-2735: fail closed. Honor the quorum halt ONLY when the
+                # backlog is verifiably empty (Linear open_count == 0). On a
+                # verified-non-empty backlog the quorum was a false "all done" —
+                # discard the votes and keep working; on an unverified count
+                # (MCP disconnect / query error) do NOT exit and leave the votes
+                # intact so the next loop re-checks once the count recovers.
+                ralph_backlog_verified_empty
+                local _bve_q=$?
+                if [[ "$_bve_q" -eq 0 ]]; then
+                    ralph_audit "exit_decision" "exit_signal_quorum" "graceful_exit" "loop_count=$loop_count,indicators=$_quorum_count" "completed" 2>/dev/null
+                    update_status "$loop_count" "$(_read_call_count)" "exit_signal_quorum" "completed" "exit_signal_quorum"
+                    log_status "SUCCESS" "🏁 Exit-signal quorum reached ($_quorum_count >= $_quorum_threshold) and backlog verified empty — agent asked to halt, harness complied"
+                    break
+                elif [[ "$_bve_q" -eq 1 ]]; then
+                    log_status "WARN" "Exit-signal quorum reached ($_quorum_count) but Linear backlog is NOT empty — discarding false exit signals and continuing (TAP-2735)"
+                    echo '{"test_only_loops":[],"done_signals":[],"completion_indicators":[]}' > "$RALPH_DIR/.exit_signals"
+                else
+                    log_status "WARN" "Exit-signal quorum reached ($_quorum_count) but Linear open-count is unverified — failing closed (not exiting), will re-check next loop (TAP-2735)"
+                fi
             fi
         fi
 
@@ -6012,12 +6069,28 @@ main() {
             # the generic ERROR/halted shape, and self-clear the sentinel so
             # the next ralph invocation against a populated backlog starts fresh.
             if [[ "$halt_reason" == "exit_signal_quorum" ]]; then
-                ralph_audit "exit_decision" "exit_signal_quorum" "graceful_exit" "loop_count=$loop_count" "completed" 2>/dev/null
-                update_status "$loop_count" "$(_read_call_count)" "exit_signal_quorum" "completed" "exit_signal_quorum"
-                log_status "SUCCESS" "🏁 Exit-signal quorum honored — agent asked to halt, harness complied"
-                log_status "INFO" "  Sentinel cleared. Re-run ralph to start a new session."
-                rm -f "$RALPH_DIR/.harness_halt_reason" 2>/dev/null
-                break
+                # TAP-2735: fail closed. A quorum sentinel (written by
+                # lib/circuit_breaker.sh:init_circuit_breaker or a prior session)
+                # is honored ONLY when the backlog is verifiably empty. If the
+                # count says there is open work, the quorum was a false positive
+                # — clear the sentinel + the stale votes and keep working. If the
+                # count is unverified, refuse the halt but leave state intact.
+                ralph_backlog_verified_empty
+                local _bve_s=$?
+                if [[ "$_bve_s" -eq 0 ]]; then
+                    ralph_audit "exit_decision" "exit_signal_quorum" "graceful_exit" "loop_count=$loop_count" "completed" 2>/dev/null
+                    update_status "$loop_count" "$(_read_call_count)" "exit_signal_quorum" "completed" "exit_signal_quorum"
+                    log_status "SUCCESS" "🏁 Exit-signal quorum honored (backlog verified empty) — agent asked to halt, harness complied"
+                    log_status "INFO" "  Sentinel cleared. Re-run ralph to start a new session."
+                    rm -f "$RALPH_DIR/.harness_halt_reason" 2>/dev/null
+                    break
+                elif [[ "$_bve_s" -eq 1 ]]; then
+                    log_status "WARN" "Exit-signal quorum sentinel present but Linear backlog is NOT empty — refusing the halt, clearing the false sentinel + votes, and continuing (TAP-2735)"
+                    rm -f "$RALPH_DIR/.harness_halt_reason" 2>/dev/null
+                    echo '{"test_only_loops":[],"done_signals":[],"completion_indicators":[]}' > "$RALPH_DIR/.exit_signals"
+                else
+                    log_status "WARN" "Exit-signal quorum sentinel present but Linear open-count is unverified — failing closed (not exiting), re-checking next loop (TAP-2735)"
+                fi
             fi
             # TAP-2636: a no_status_block_Nx halt that fired on the tail of a
             # SUCCESSFUL campaign should not block the NEXT (fresh-session)
@@ -6028,7 +6101,14 @@ main() {
             # proceed instead of refusing to run. Genuine no-progress halts
             # (status.json shows 0 files, 0 tasks, no exit signal) keep the
             # hard halt.
-            if [[ "$halt_reason" == no_status_block_* ]] && ralph_no_status_halt_is_benign; then
+            if [[ "$halt_reason" == "exit_signal_quorum" ]]; then
+                # TAP-2735: already fully handled above — either honored (broke)
+                # when the backlog was verified empty, or refused (fall through,
+                # continue the loop) when it was non-empty/unverified. Must NOT
+                # reach the generic halt below, which would halt on the same
+                # unverified signal this fix exists to suppress.
+                :
+            elif [[ "$halt_reason" == no_status_block_* ]] && ralph_no_status_halt_is_benign; then
                 log_status "INFO" "♻️  Clearing benign $halt_reason halt — last loop's status.json shows success (tasks/files/exit-signal)"
                 ralph_audit "harness_halt" "on_stop_hook" "auto_cleared" "reason=$halt_reason,loop_count=$loop_count" "recovered" 2>/dev/null
                 rm -f "$RALPH_DIR/.harness_halt_reason" "$RALPH_DIR/.no_status_block_count" 2>/dev/null

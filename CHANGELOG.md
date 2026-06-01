@@ -10,6 +10,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.25.0] — 2026-06-01
+
+Fixes the exit-gate fail-open (TAP-2735). Ralph's agent could emit `EXIT_SIGNAL: true` ("all work complete") while the Linear backlog still had actionable issues; three such false signals reached `exit_signal_quorum` (3) and halted the campaign (the 2026-05-27 false "backlog empty" halt claimed empty while 46 issues existed). The quorum is now **fail-closed**. No SDK changes. Stacks on 2.24.0 (TAP-2777).
+
+### Fixed
+
+- **TAP-2735 — exit_signal_quorum honored only on a verified empty backlog.** New `ralph_backlog_verified_empty` is a 3-state gate (0 = Linear `open_count == 0` verified empty; 1 = verified non-empty; 2 = unverified/unavailable). All three exit-on-say-so sites in `ralph_loop.sh` now consult it:
+  1. The per-loop `exit_signal_quorum` halt — honored only when the backlog is verified empty. On a verified-non-empty backlog the false votes are discarded and the loop continues; on an unverified count it fails closed (does not exit, leaves votes intact to re-check next loop).
+  2. The `.harness_halt_reason=exit_signal_quorum` sentinel honor (written by `lib/circuit_breaker.sh:init_circuit_breaker`) — same gate; a false sentinel is cleared and the campaign continues.
+  3. The `should_exit_gracefully` "strong completion indicators + EXIT_SIGNAL=true" branch — no longer short-circuits ahead of the authoritative Linear count check.
+- **`mcp_disconnect` loops cast no exit_signal vote.** `update_exit_signals_from_status` now reads `.mcp_disconnect` and suppresses the `completion_indicators` append when set, so a transient all-MCP-disconnected loop (TAP-2715) can never contribute toward a false quorum.
+
+  File mode is out of scope (the plan is the local source of truth, gated by the pre-flight empty-plan check) — `ralph_backlog_verified_empty` returns "verified empty" there to preserve prior behavior exactly.
+
+### Added
+
+- **Tests.** `tests/unit/test_exit_gate_fail_closed.bats` (9 cases): the 3-state verification gate, `mcp_disconnect` vote suppression, and a structural guard that all three quorum sites stay wired to the helper.
+
+---
+
 ## [2.24.0] — 2026-06-01
 
 Patch release — fixes the MCP-disconnect retry worker leak (TAP-2777). The 2.22.0 retry path re-launched Claude on a disconnect but never reaped the prior wedged worker, so a long campaign accumulated live `claude --agent ralph` workers + their `uv run … serve` MCP servers until the host thrashed (observed: 13 workers + 28 MCP servers, load average 56, swap exhausted). No SDK changes.
