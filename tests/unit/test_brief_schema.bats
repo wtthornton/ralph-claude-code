@@ -114,6 +114,23 @@ EOF
     [[ "$output" == *"delegate_to"* ]] || fail "got: $output"
 }
 
+# TAP-2510: the delegate→dispatch path. build_claude_command maps a valid
+# .delegate_to onto the --agent flag, so both accepted values must validate
+# and be readable from the brief.
+@test "TAP-2510: brief_validate accepts delegate_to=ralph-architect (dispatch value)" {
+    local p="$RALPH_DIR/brief.json"
+    valid_brief_json | jq '.delegate_to = "ralph-architect"' > "$p"
+    run brief_validate "$p"
+    assert_success
+}
+
+@test "TAP-2510: brief_read_field surfaces delegate_to=ralph-architect for dispatch" {
+    valid_brief_json | jq '.delegate_to = "ralph-architect"' > "$RALPH_DIR/brief.json"
+    run brief_read_field "delegate_to"
+    assert_success
+    assert_output "ralph-architect"
+}
+
 @test "TAP-914: brief_validate rejects coordinator_confidence < 0" {
     local p="$RALPH_DIR/brief.json"
     valid_brief_json | jq '.coordinator_confidence = -0.1' > "$p"

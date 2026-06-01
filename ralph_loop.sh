@@ -3893,7 +3893,41 @@ build_claude_command() {
     fi
 
     # Agent invocation
-    CLAUDE_CMD_ARGS+=("--agent" "${RALPH_AGENT_NAME:-ralph}")
+    #
+    # TAP-2510: honor the coordinator's brief delegation. When the brief
+    # marks a task HIGH-risk it can set `delegate_to: "ralph-architect"`
+    # (lib/brief.sh validates the field to ralph|ralph-architect) to route
+    # this loop to the heavy-duty architect agent. Map that field onto the
+    # --agent flag here — without it the harness always relaunched
+    # `--agent ralph`, so a delegated brief produced a BLOCK→re-select→BLOCK
+    # spin that burned no-progress loops toward the circuit breaker and the
+    # architect agent never actually ran.
+    #
+    # The override is a LOCAL var, not a mutation of RALPH_AGENT_NAME, so it
+    # is naturally scoped to this loop: build_claude_command re-reads
+    # brief.json every iteration, and a stale brief can never pin the
+    # architect forever. Composes with the TAP-1686 plan-mode flag appended
+    # above (both keyed off the same HIGH-risk brief). Falls back to the
+    # static agent with a WARN when the delegated agent file is absent in
+    # the target project.
+    local _effective_agent="${RALPH_AGENT_NAME:-ralph}"
+    if [[ -s "$RALPH_DIR/brief.json" ]]; then
+        local _brief_delegate
+        _brief_delegate=$(jq -r '.delegate_to // empty' "$RALPH_DIR/brief.json" 2>/dev/null) || _brief_delegate=""
+        case "$_brief_delegate" in
+            ralph|ralph-architect)
+                if [[ "$_brief_delegate" != "$_effective_agent" ]]; then
+                    if [[ -f ".claude/agents/${_brief_delegate}.md" ]]; then
+                        log_status "INFO" "coordinator: brief delegate_to=$_brief_delegate → overriding agent for this loop"
+                        _effective_agent="$_brief_delegate"
+                    else
+                        log_status "WARN" "coordinator: brief delegate_to=$_brief_delegate but .claude/agents/${_brief_delegate}.md missing — falling back to $_effective_agent"
+                    fi
+                fi
+                ;;
+        esac
+    fi
+    CLAUDE_CMD_ARGS+=("--agent" "$_effective_agent")
 
     # Output format (json implies --print, which requires explicit input)
     if [[ "$CLAUDE_OUTPUT_FORMAT" == "json" ]]; then

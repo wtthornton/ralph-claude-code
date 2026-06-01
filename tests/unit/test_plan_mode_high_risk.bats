@@ -109,6 +109,46 @@ _source_build_claude_command() {
     [[ "$joined" == *"--permission-mode acceptEdits"* ]]
 }
 
+# -----------------------------------------------------------------------------
+# TAP-2510 — brief delegate_to composes with the TAP-1686 plan-mode override.
+# A HIGH-risk brief can both flip permission-mode to plan AND delegate to
+# ralph-architect; build_claude_command must apply both for the same loop.
+# -----------------------------------------------------------------------------
+
+_write_high_risk_delegate_brief() {
+    mkdir -p "$TEST_TEMP_DIR/.ralph"
+    cat > "$TEST_TEMP_DIR/.ralph/brief.json" <<'EOF'
+{
+  "schema_version": 1,
+  "task_id": "TAP-1",
+  "task_source": "linear",
+  "task_summary": "complex cross-module refactor",
+  "risk_level": "HIGH",
+  "affected_modules": ["lib/foo.sh", "lib/bar.sh"],
+  "acceptance_criteria": ["AC1"],
+  "qa_required": true,
+  "delegate_to": "ralph-architect",
+  "coordinator_confidence": 0.8,
+  "created_at": "2026-06-01T00:00:00Z"
+}
+EOF
+}
+
+@test "TAP-2510: HIGH-risk delegate brief flips --agent AND honors plan mode together" {
+    _source_build_claude_command
+    _write_high_risk_delegate_brief
+    mkdir -p "$TEST_TEMP_DIR/.claude/agents"
+    : > "$TEST_TEMP_DIR/.claude/agents/ralph-architect.md"
+    # build_loop_context would have set this for a HIGH-risk brief; pin it
+    # directly here since we exercise build_claude_command in isolation.
+    export RALPH_PERMISSION_MODE="plan"
+
+    build_claude_command "$TEST_TEMP_DIR/PROMPT.md" "" "" 1 >/dev/null 2>&1 || true
+    local joined="${CLAUDE_CMD_ARGS[*]}"
+    [[ "$joined" == *"--agent ralph-architect"* ]]
+    [[ "$joined" == *"--permission-mode plan"* ]]
+}
+
 # =============================================================================
 # build_loop_context — risk_level=HIGH → RALPH_PERMISSION_MODE=plan
 # =============================================================================
