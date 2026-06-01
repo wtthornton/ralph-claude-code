@@ -11,6 +11,26 @@ For the canonical TappsMCP / agent contract, see [`../AGENTS.md`](../AGENTS.md).
 - **Pluggable interfaces:** state backend (`state.py`), metrics collector (`metrics.py`), memory backend (`memory.py`), import graph cache (`import_graph.py`)
 - **Tests:** `tests/` (pytest + pytest-asyncio). Run via `uv run --frozen pytest`.
 
+## Quality scoring prerequisites (TAP-2775)
+
+`tapps_score_file` / `tapps_quick_check` resolve `ruff` and `mypy` as **bare
+subprocesses via `PATH`** — unlike `tapps_session_start`, the scorer does *not*
+fall back to the tapps-mcp tool-env `bin/`. If the binaries are only inside the
+SDK's `.venv`, the scorer reports `ruff: not_found` / `mypy: not_found`, runs
+`degraded`, and silently skips lint + type findings (the quality gate then
+reflects complexity/maintainability only — a false-confidence blind spot).
+
+Install both on `PATH` (the same place tapps-mcp itself lives):
+
+```bash
+uv tool install ruff    # -> ~/.local/bin/ruff   (match tapps: ruff 0.15.15)
+uv tool install mypy    # -> ~/.local/bin/mypy   (match tapps: mypy 2.1.0)
+```
+
+Verify with `tapps_score_file` on any SDK module — `tool_errors` must not
+contain `ruff` or `mypy`. (`perflint` is an optional `tapps-mcp[perf]` extra and
+is out of scope here.)
+
 ## Conventions
 
 - All models are Pydantic v2 `BaseModel`s.
