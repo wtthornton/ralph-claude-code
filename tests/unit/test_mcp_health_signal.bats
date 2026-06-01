@@ -152,3 +152,127 @@ RECOMMENDATION: every issue has blocked:waiting-for-credentials, no work possibl
     # No mcp counter file (different branch fired)
     [[ ! -f "$TEST_TEMP_DIR/.ralph/.mcp_blocked_count" ]] || { echo "mcp counter should not exist for non-mcp BLOCKED"; return 1; }
 }
+
+# =============================================================================
+# MCP-DISCONNECT (2026-06-01): free-text disconnect summary (the agent does NOT
+# emit RECOMMENDATION: mcp_unreachable) must still be recognized as a disconnect.
+# This is the observed bug — the disconnect-exempt path.
+# =============================================================================
+
+# Helper: synthesize an all-MCP-disconnected response WITHOUT the canonical
+# mcp_unreachable recommendation keyword — the disconnect is only in free text.
+_emit_mcp_disconnect_freetext() {
+    local _body="All MCP servers disconnected at loop start (tapps-mcp, docs-mcp, linear, brain). Cannot session_start, cannot read Linear, cannot run the quality gate. Harness should restart the Claude Code session to allow reconnect.
+
+---RALPH_STATUS---
+STATUS: BLOCKED
+TASKS_COMPLETED_THIS_LOOP: 0
+FILES_MODIFIED: 0
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: false
+RECOMMENDATION: restart session to allow MCP servers to reconnect
+---END_RALPH_STATUS---"
+    local _input
+    _input=$(jq -Rs '{result: .}' <<<"$_body")
+    printf '%s' "$_input" | bash "$HOOK"
+}
+
+@test "MCP-DISCONNECT: free-text disconnect (no mcp_unreachable keyword) sets status.json mcp_disconnect=true" {
+    _emit_mcp_disconnect_freetext
+    local _md
+    _md=$(jq -r '.mcp_disconnect' "$TEST_TEMP_DIR/.ralph/status.json")
+    [[ "$_md" == "true" ]] || { echo "expected mcp_disconnect=true, got $_md"; return 1; }
+}
+
+@test "MCP-DISCONNECT: free-text disconnect increments .mcp_blocked_count (treated as disconnect)" {
+    _emit_mcp_disconnect_freetext
+    [[ -f "$TEST_TEMP_DIR/.ralph/.mcp_blocked_count" ]] || { echo "counter file missing"; return 1; }
+    local _count
+    read -r _count < "$TEST_TEMP_DIR/.ralph/.mcp_blocked_count"
+    [[ "$_count" == "1" ]] || { echo "expected 1, got $_count"; return 1; }
+}
+
+@test "MCP-DISCONNECT: free-text disconnect does NOT increment consecutive_no_progress" {
+    _emit_mcp_disconnect_freetext
+    local _np
+    _np=$(jq -r '.consecutive_no_progress' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state")
+    [[ "$_np" == "0" ]] || { echo "expected 0, got $_np"; return 1; }
+}
+
+# =============================================================================
+# MCP-DISCONNECT: a genuine no-progress loop (MCP healthy, no disconnect text)
+# still counts. The disconnect exemption must not leak onto ordinary stalls.
+# =============================================================================
+@test "MCP-DISCONNECT: genuine no-progress loop DOES increment consecutive_no_progress" {
+    local _body="Investigated TAP-9001 but could not find a reproduction. No code changed.
+
+---RALPH_STATUS---
+STATUS: IN_PROGRESS
+TASKS_COMPLETED_THIS_LOOP: 0
+FILES_MODIFIED: 0
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: false
+RECOMMENDATION: keep digging next loop
+---END_RALPH_STATUS---"
+    local _input
+    _input=$(jq -Rs '{result: .}' <<<"$_body")
+    printf '%s' "$_input" | bash "$HOOK"
+    local _np _md
+    _np=$(jq -r '.consecutive_no_progress' "$TEST_TEMP_DIR/.ralph/.circuit_breaker_state")
+    _md=$(jq -r '.mcp_disconnect' "$TEST_TEMP_DIR/.ralph/status.json")
+    [[ "$_np" == "1" ]] || { echo "expected consecutive_no_progress=1, got $_np"; return 1; }
+    [[ "$_md" == "false" ]] || { echo "expected mcp_disconnect=false, got $_md"; return 1; }
+    [[ ! -f "$TEST_TEMP_DIR/.ralph/.mcp_blocked_count" ]] || { echo "mcp counter should not exist for genuine no-progress"; return 1; }
+}
+
+# =============================================================================
+# MCP-DISCONNECT: RALPH_MCP_RETRY_MAX governs the give-up threshold and takes
+# precedence over the legacy RALPH_MCP_BLOCKED_QUORUM alias.
+# =============================================================================
+@test "MCP-DISCONNECT: RALPH_MCP_RETRY_MAX=2 → 2 disconnects write the give-up halt sentinel" {
+    export RALPH_MCP_RETRY_MAX=2
+    _emit_mcp_disconnect_freetext
+    [[ ! -f "$TEST_TEMP_DIR/.ralph/.harness_halt_reason" ]] || { echo "halt sentinel should be absent after 1"; return 1; }
+    _emit_mcp_disconnect_freetext
+    [[ -f "$TEST_TEMP_DIR/.ralph/.harness_halt_reason" ]] || { echo "halt sentinel missing after 2"; return 1; }
+    local _reason
+    _reason=$(cat "$TEST_TEMP_DIR/.ralph/.harness_halt_reason")
+    [[ "$_reason" == "mcp_unreachable_quorum" ]] || { echo "expected mcp_unreachable_quorum, got $_reason"; return 1; }
+}
+
+@test "MCP-DISCONNECT: RALPH_MCP_RETRY_MAX overrides legacy RALPH_MCP_BLOCKED_QUORUM" {
+    export RALPH_MCP_RETRY_MAX=5
+    export RALPH_MCP_BLOCKED_QUORUM=2
+    _emit_mcp_disconnect_freetext
+    _emit_mcp_disconnect_freetext
+    _emit_mcp_disconnect_freetext
+    # 3 disconnects, RETRY_MAX=5 wins over BLOCKED_QUORUM=2 → no halt yet
+    local _count
+    read -r _count < "$TEST_TEMP_DIR/.ralph/.mcp_blocked_count"
+    [[ "$_count" == "3" ]] || { echo "expected 3, got $_count"; return 1; }
+    [[ ! -f "$TEST_TEMP_DIR/.ralph/.harness_halt_reason" ]] || { echo "halt sentinel should be absent (3 < 5)"; return 1; }
+}
+
+# =============================================================================
+# MCP-DISCONNECT: a clean exit (EXIT_SIGNAL: true) is never misread as a
+# disconnect even if 0 files / 0 tasks and MCP prose is present.
+# =============================================================================
+@test "MCP-DISCONNECT: EXIT_SIGNAL true with 0/0 is not a disconnect" {
+    local _body="Backlog confirmed empty. MCP servers all connected, nothing left to do.
+
+---RALPH_STATUS---
+STATUS: COMPLETE
+TASKS_COMPLETED_THIS_LOOP: 0
+FILES_MODIFIED: 0
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: true
+RECOMMENDATION: all done
+---END_RALPH_STATUS---"
+    local _input
+    _input=$(jq -Rs '{result: .}' <<<"$_body")
+    printf '%s' "$_input" | bash "$HOOK"
+    local _md
+    _md=$(jq -r '.mcp_disconnect' "$TEST_TEMP_DIR/.ralph/status.json")
+    [[ "$_md" == "false" ]] || { echo "expected mcp_disconnect=false for clean exit, got $_md"; return 1; }
+    [[ ! -f "$TEST_TEMP_DIR/.ralph/.mcp_blocked_count" ]] || { echo "mcp counter should not exist for clean exit"; return 1; }
+}

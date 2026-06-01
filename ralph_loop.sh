@@ -164,7 +164,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.21.5"
+RALPH_VERSION="2.22.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -4406,6 +4406,73 @@ ralph_print_mcp_status() {
 }
 
 # =============================================================================
+# MCP-DISCONNECT-RETRY (2026-06-01): transient MCP-client startup flakiness.
+#
+# Intermittently a fresh `claude -p` invocation comes up with all of its MCP
+# servers disconnected at loop start. The agent can't session_start, read
+# Linear, run the quality gate, or mark work done, so it emits STATUS: BLOCKED,
+# TASKS=0, FILES=0. on-stop.sh recognizes this (status.json .mcp_disconnect=true)
+# and declines to count it as no-progress; the harness retries the loop with a
+# fresh Claude session because a cold start almost always reconnects. Bounded by
+# RALPH_MCP_RETRY_MAX consecutive disconnects (on-stop.sh writes the give-up
+# halt sentinel once the cap is reached).
+# =============================================================================
+
+# Did the loop that just ran report an all-MCP-disconnected condition?
+# Reads the structured flag on-stop.sh wrote into status.json.
+ralph_loop_was_mcp_disconnect() {
+    [[ -f "$RALPH_DIR/status.json" ]] || return 1
+    local _md
+    _md=$(jq -r '.mcp_disconnect // false' "$RALPH_DIR/status.json" 2>/dev/null)
+    [[ "$_md" == "true" ]]
+}
+
+# Escalating backoff before the fresh-session retry: 2s, 5s, then 10s for any
+# later attempt. Argument is the consecutive-disconnect count (1-based).
+ralph_mcp_retry_backoff() {
+    local _attempt="${1:-1}"
+    local _sleep
+    case "$_attempt" in
+        1) _sleep=2 ;;
+        2) _sleep=5 ;;
+        *) _sleep=10 ;;
+    esac
+    log_status "INFO" "  Backing off ${_sleep}s before fresh-session retry"
+    sleep "$_sleep"
+}
+
+# Optional pre-loop MCP health gate. When RALPH_MCP_HEALTH_GATE=true (default
+# false — the live `claude mcp list` probe adds latency to every loop), re-probe
+# the required MCP servers before spending a Claude invocation. If a required
+# server is unreachable, wait a short backoff and re-probe, up to
+# RALPH_MCP_RETRY_MAX times. Always returns 0: if the servers are still down
+# after the retries we proceed anyway and let MCP-DISCONNECT-RETRY handle the
+# post-loop outcome. The probe is forced fresh (sentinel cache bypassed) so the
+# gate reflects live transport health, not a cached startup result.
+ralph_mcp_health_gate() {
+    [[ "${RALPH_MCP_HEALTH_GATE:-false}" == "true" ]] || return 0
+
+    local _max="${RALPH_MCP_RETRY_MAX:-${RALPH_MCP_BLOCKED_QUORUM:-3}}"
+    [[ "$_max" =~ ^[0-9]+$ ]] || _max=3
+    local _attempt=1
+    while (( _attempt <= _max )); do
+        RALPH_MCP_PROBE_SKIP_IF_UNCHANGED=false ralph_probe_mcp_servers
+        # tapps-mcp is the required server for the quality pipeline; treat it as
+        # the health signal. (Linear is OAuth-via-plugin and has no probe flag.)
+        if [[ "${RALPH_MCP_TAPPS_AVAILABLE:-false}" == "true" ]]; then
+            (( _attempt > 1 )) && log_status "INFO" "🔌 MCP health gate: servers reachable after ${_attempt} probe(s)"
+            return 0
+        fi
+        log_status "WARN" "🔌 MCP health gate: required server unreachable (probe ${_attempt}/${_max})"
+        (( _attempt >= _max )) && break
+        ralph_mcp_retry_backoff "$_attempt"
+        _attempt=$((_attempt + 1))
+    done
+    log_status "WARN" "🔌 MCP health gate: still unreachable after ${_max} probes — launching anyway (post-loop retry will handle a disconnect)"
+    return 0
+}
+
+# =============================================================================
 # MCP-CLEANUP: Kill orphaned MCP server processes between loop iterations.
 # Claude Code spawns MCP servers (tapps-mcp, docsmcp) as grandchild processes.
 # On Windows, these survive after the CLI exits because process group teardown
@@ -5951,6 +6018,13 @@ main() {
             pending_merges_poll
         fi
 
+        # MCP-DISCONNECT-RETRY: optional pre-loop MCP health gate. When
+        # RALPH_MCP_HEALTH_GATE=true, re-probe the required MCP servers and wait
+        # out transient disconnects before spending a Claude invocation (and
+        # before the coordinator's brain_recall). No-op by default. Always
+        # returns 0 — a still-down launch is handled by the post-loop retry.
+        ralph_mcp_health_gate
+
         # TAP-915: spawn coordinator to populate .ralph/brief.json before the
         # main agent runs. Best-effort — failure does not block the loop.
         ralph_spawn_coordinator "$loop_count"
@@ -5977,7 +6051,34 @@ main() {
         # Execute Claude Code
         execute_claude_code "$loop_count"
         local exec_result=$?
-        
+
+        # MCP-DISCONNECT-RETRY: a loop where all MCP servers disconnected at
+        # startup is transient infra flakiness, not stagnation. on-stop.sh has
+        # already declined to count it as no-progress (it bumped
+        # .mcp_blocked_count instead). Recover by dropping the possibly-poisoned
+        # session and re-invoking Claude fresh next iteration after a short
+        # backoff — a cold start almost always reconnects. If on-stop.sh wrote
+        # the give-up halt sentinel (RALPH_MCP_RETRY_MAX consecutive disconnects),
+        # skip the backoff and let the top-of-loop harness-halt check stop us.
+        if [[ $exec_result -eq 0 ]] && ralph_loop_was_mcp_disconnect; then
+            local _mcp_dc_count=0
+            [[ -f "$RALPH_DIR/.mcp_blocked_count" ]] && read -r _mcp_dc_count < "$RALPH_DIR/.mcp_blocked_count" 2>/dev/null
+            [[ "$_mcp_dc_count" =~ ^[0-9]+$ ]] || _mcp_dc_count=0
+            local _mcp_dc_max="${RALPH_MCP_RETRY_MAX:-${RALPH_MCP_BLOCKED_QUORUM:-3}}"
+            [[ "$_mcp_dc_max" =~ ^[0-9]+$ ]] || _mcp_dc_max=3
+            ralph_audit "mcp_disconnect" "ralph_loop" "retry" "loop_count=$loop_count,attempt=$_mcp_dc_count,max=$_mcp_dc_max" "retrying" 2>/dev/null
+            reset_session "mcp_disconnect"
+            if [[ -f "$RALPH_DIR/.harness_halt_reason" ]]; then
+                log_status "ERROR" "🔌 MCP disconnect persisted ${_mcp_dc_count} loops (>= ${_mcp_dc_max}) — giving up; harness will halt"
+                update_status "$loop_count" "$(_read_call_count)" "mcp_disconnect_giveup" "halted" "mcp_unreachable_quorum"
+            else
+                log_status "WARN" "🔌 MCP servers disconnected at loop start (attempt ${_mcp_dc_count}/${_mcp_dc_max}) — not counting as no-progress; resetting session and retrying with a fresh Claude invocation"
+                update_status "$loop_count" "$(_read_call_count)" "mcp_disconnect_retry" "running" "mcp_disconnect"
+                ralph_mcp_retry_backoff "$_mcp_dc_count"
+            fi
+            continue
+        fi
+
         if [ $exec_result -eq 0 ]; then
             update_status "$loop_count" "$(_read_call_count)" "completed" "success"
             # GUARD-2: Reset consecutive timeout counter on successful completion

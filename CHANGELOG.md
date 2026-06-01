@@ -10,6 +10,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.22.0] — 2026-06-01
+
+Minor release — MCP-disconnect resilience. A fresh `claude` invocation that comes up with all of its MCP servers disconnected at loop start is now retried instead of counted as no-progress, so transient MCP-client flakiness can no longer trip the circuit breaker on an otherwise-healthy campaign. SDK unchanged.
+
+### Added
+
+- **MCP disconnect retry (MCP-DISCONNECT-RETRY).** Intermittently `claude -p` starts a loop with all MCP servers disconnected (transient client flakiness — not a zombie/resource leak); the agent can't `session_start`, read Linear, or run the quality gate, so it emits `STATUS: BLOCKED` with 0 files / 0 tasks. Two complementary mechanisms keep this from tripping the no-progress circuit breaker:
+  - **Detection + no-penalize (`on-stop.sh`).** A new structured flag `mcp_disconnect: true` is written into `status.json` when the loop reports a disconnect — recognized via the canonical `RECOMMENDATION: mcp_unreachable` **or** a free-text fallback (`mcp…(disconnect|unreachable|not connected|failed to connect)` / `all mcp servers`), gated on files=0 ∧ tasks=0 ∧ `EXIT_SIGNAL ≠ true` so a productive or clean-exit loop can never trip it. Such a loop bumps `.mcp_blocked_count` **without** incrementing `consecutive_no_progress`. A genuinely-blocked backlog (no mcp/disconnect token) still counts as no-progress.
+  - **Retry, don't halt (`ralph_loop.sh`).** The main loop reads `status.json.mcp_disconnect`, drops the possibly-poisoned session, backs off (2s/5s/10s), and re-invokes Claude fresh next iteration (a cold start almost always reconnects). After `RALPH_MCP_RETRY_MAX` consecutive disconnects the harness gives up and halts (`exit_reason=mcp_unreachable_quorum`).
+- **`RALPH_MCP_RETRY_MAX` (default 3).** Max consecutive MCP-disconnect loops tolerated before giving up; the loops leading up to the cap are retried and never penalized. Legacy alias `RALPH_MCP_BLOCKED_QUORUM` (the new name takes precedence when both are set).
+- **`RALPH_MCP_HEALTH_GATE` (default false).** Optional pre-loop MCP health gate that re-probes the required MCP servers (with the same backoff) before spending a Claude invocation. Off by default because the live `claude mcp list` probe adds per-loop latency; the post-loop retry recovers disconnects without it.
+
+### Tests
+
+- `tests/unit/test_mcp_health_signal.bats` — 7 new cases covering the free-text disconnect-exempt path, the genuine-no-progress path, `RALPH_MCP_RETRY_MAX` threshold precedence, and the clean-exit guard.
+- `tests/unit/test_mcp_disconnect_retry.bats` — new file covering the loop-side helpers (`ralph_loop_was_mcp_disconnect`, `ralph_mcp_retry_backoff`, `ralph_mcp_health_gate`).
+
+---
+
 ## [2.21.5] — 2026-06-01
 
 Patch release — harness fix. The coordinator could delegate HIGH-risk tasks to `ralph-architect`, but the harness never acted on it. SDK unchanged.
