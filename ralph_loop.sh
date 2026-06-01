@@ -164,7 +164,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.21.2"
+RALPH_VERSION="2.21.3"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -5117,8 +5117,10 @@ execute_claude_code() {
 
         # LOGFIX-6: track consecutive TESTS_STATUS: DEFERRED to detect environment
         # stalls. Extracted to lib/exec_helpers.sh (TAP-1475) — trips the circuit
-        # breaker at 2× CB_MAX_DEFERRED_TESTS and `break`s the main loop.
-        exec_track_deferred_tests "$loop_count"
+        # breaker at 2× CB_MAX_DEFERRED_TESTS and returns sentinel 3, which we
+        # propagate so main()'s loop breaks (a bare `break` cannot cross the
+        # function boundary).
+        exec_track_deferred_tests "$loop_count" || { local _dt_rc=$?; [[ $_dt_rc -eq 3 ]] && return 3; }
 
         # Log analysis summary (non-critical)
         if ! log_status_summary; then

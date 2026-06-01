@@ -451,9 +451,11 @@ exec_track_deferred_tests() {
 CBEOF
         reset_session "persistent_test_deferral"
         update_status "$loop_count" "$(_read_call_count)" "circuit_breaker_open" "halted" "persistent_test_deferral"
-        # break propagates up the active loop stack to the main while loop in
-        # ralph_loop.sh, exiting it cleanly. Same behavior as the inline block.
-        break
+        # Signal the CB trip to the caller. `break` does NOT cross the function
+        # boundary in bash (it errors "only meaningful in a loop" and the caller
+        # keeps iterating), so return the same sentinel (3) the timeout/rate-limit
+        # helpers use; execute_claude_code propagates it and main()'s loop breaks.
+        return 3
     elif [[ "$CONSECUTIVE_DEFERRED_TEST_COUNT" -ge "$CB_MAX_DEFERRED_TESTS" ]]; then
         log_status "WARN" "Tests deferred for $CONSECUTIVE_DEFERRED_TEST_COUNT consecutive loops — possible environment issue"
     fi

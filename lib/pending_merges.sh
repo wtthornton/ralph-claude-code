@@ -126,16 +126,23 @@ pending_merges_add() {
     return 0
 }
 
-# _pending_merges_update_entry <pr_number> <jq_expression>
+# _pending_merges_update_entry <pr_number> <jq_expression> [jq-arg ...]
 #   Internal: apply a jq expression to the entry with matching pr_number.
+#   Any trailing args (e.g. `--arg reason "$x"`) are forwarded to jq verbatim,
+#   so dynamic values MUST be passed as jq variables and referenced in the
+#   expression — never interpolated into the program text. A `gh` error message
+#   containing a backslash / `$` / quote would otherwise break the jq parse, the
+#   entry would never be marked failed, and pending_merges_poll would re-attempt
+#   the same broken merge on every loop forever.
 _pending_merges_update_entry() {
     local pr_number="$1"
     local jq_expr="$2"
+    shift 2
     [[ -s "$PENDING_MERGES_FILE" ]] || return 1
     local now
     now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     local updated
-    updated=$(jq --argjson n "$pr_number" --arg ts "$now" "
+    updated=$(jq --argjson n "$pr_number" --arg ts "$now" "$@" "
         .entries |= map(
             if .pr_number == \$n then
                 ($jq_expr) | .last_check_at = \$ts
@@ -196,14 +203,16 @@ pending_merges_poll() {
                     local merge_sha
                     merge_sha=$(gh pr view "$pr_number" --json mergeCommit -q '.mergeCommit.oid // ""' 2>/dev/null)
                     _pending_merges_update_entry "$pr_number" \
-                        ".merge_status = \"merged\" | .ci_status = \"green\" | .merge_sha = \"$merge_sha\""
+                        '.merge_status = "merged" | .ci_status = "green" | .merge_sha = $sha' \
+                        --arg sha "$merge_sha"
                     _pending_merges_log "INFO" "PR #$pr_number merged (sha=$merge_sha)"
                 else
                     # 422 "auto-merge not allowed" or other failure — log + mark failed.
                     local short_err
-                    short_err=$(printf '%s' "$merge_err" | head -1 | tr '"' "'" | cut -c1-120)
+                    short_err=$(printf '%s' "$merge_err" | head -1 | cut -c1-120)
                     _pending_merges_update_entry "$pr_number" \
-                        ".merge_status = \"failed\" | .ci_status = \"green\" | .failure_reason = \"merge_call_failed: $short_err\""
+                        '.merge_status = "failed" | .ci_status = "green" | .failure_reason = ("merge_call_failed: " + $reason)' \
+                        --arg reason "$short_err"
                     _pending_merges_log "WARN" "PR #$pr_number merge failed: $short_err"
                 fi
                 ;;

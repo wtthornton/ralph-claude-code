@@ -800,10 +800,15 @@ plan_changed_sections() {
     local previous_hashes
     previous_hashes=$(cat "$hash_file")
 
-    # Diff to find changed sections
+    # Diff to find changed sections. Match the stored line by EXACT field
+    # equality (awk), not `grep "^${section}\t"` — a section header is a Markdown
+    # title that routinely contains regex metacharacters (`[`, `.`, `*`), which
+    # the grep BRE would misinterpret: metachar headers never matched their own
+    # stored line (always reported "changed"), and `.*`-bearing headers could
+    # match the wrong line (a genuinely-changed section reported "unchanged").
     while IFS=$'\t' read -r section hash; do
         local prev_hash
-        prev_hash=$(echo "$previous_hashes" | grep "^${section}	" | cut -f2)
+        prev_hash=$(awk -F'\t' -v s="$section" '$1==s{print $2; exit}' <<< "$previous_hashes")
         if [[ "$hash" != "$prev_hash" ]]; then
             echo "$section"
         fi

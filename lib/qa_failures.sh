@@ -42,6 +42,10 @@ qa_failures_increment() {
 
     local current_count
     current_count=$(jq -r ".\"$issue_id\" // 0" "$state_file" 2>/dev/null) || current_count=0
+    # The `|| ...=0` only fires on jq exit-nonzero. A valid-JSON-but-non-numeric
+    # value (string/null from external corruption) passes through and crashes the
+    # arithmetic below — guard it the same way circuit_breaker.sh does.
+    [[ "$current_count" =~ ^[0-9]+$ ]] || current_count=0
 
     local new_count=$((current_count + 1))
 

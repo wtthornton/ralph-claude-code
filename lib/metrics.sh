@@ -79,6 +79,16 @@ record_metric() {
     # escaped and multi-byte UTF-8 isn't truncated mid-character. jq's
     # string slicing is codepoint-aware.
     local metric_line
+    # `exit_signal` is stored as a STRING in status.json (on-stop.sh writes it
+    # via `--arg es`), so it can be any token Claude emitted ("UNKNOWN", "TRUE",
+    # "yes", …). Passing such a value to `--argjson exit_signal` below would be
+    # invalid JSON, the whole `jq -cn` build would fail, and an empty line would
+    # be appended — inflating `wc -l` run counts and poisoning `jq -s`
+    # aggregation. Coerce to a real boolean (only lowercase "true" counts, to
+    # match the dual-condition gate's `== "true"` semantics elsewhere).
+    local exit_signal_json=false
+    [[ "${exit_signal:-false}" == "true" ]] && exit_signal_json=true
+
     metric_line=$(jq -cn \
         --arg timestamp "$timestamp" \
         --arg session_id "$session_id" \
@@ -86,7 +96,7 @@ record_metric() {
         --arg cb_state "$cb_state" \
         --arg completed_task "$completed_task" \
         --argjson loop_count "${loop_count:-0}" \
-        --argjson exit_signal "${exit_signal:-false}" \
+        --argjson exit_signal "$exit_signal_json" \
         --argjson call_count "${call_count:-0}" \
         --argjson mcp_tapps_calls "${mcp_tapps_calls:-0}" \
         --argjson mcp_docs_calls "${mcp_docs_calls:-0}" \
@@ -101,7 +111,9 @@ record_metric() {
           mcp_tapps_calls: $mcp_tapps_calls,
           mcp_docs_calls: $mcp_docs_calls}')
 
-    echo "$metric_line" >> "$month_file"
+    # Never append an empty/garbage line — a failed jq build would corrupt the
+    # JSONL file for every downstream reader.
+    [[ -n "$metric_line" ]] && echo "$metric_line" >> "$month_file"
 }
 
 # ralph_show_stats — Display human-readable metrics summary
@@ -176,9 +188,12 @@ ralph_show_stats() {
 
     local total_runs avg_loops success_rate cb_trips total_calls
 
-    total_runs=$(echo "$all_metrics" | wc -l | tr -d ' ')
+    # Count actual JSON records, not raw lines — a stray blank line (from an
+    # older buggy writer) would otherwise inflate the run count.
+    total_runs=$(echo "$all_metrics" | jq -s 'length' 2>/dev/null)
     total_calls=$(echo "$all_metrics" | jq -s '[.[].api_calls] | add // 0' 2>/dev/null)
-    success_rate=$(echo "$all_metrics" | jq -s '[.[].exit_signal] | map(select(. == true)) | length as $s | ($s / (length | if . == 0 then 1 else . end) * 100) | floor' 2>/dev/null)
+    # Tolerate both boolean true and historical string "true" rows.
+    success_rate=$(echo "$all_metrics" | jq -s '[.[].exit_signal] | map(select(. == true or . == "true")) | length as $s | ($s / (length | if . == 0 then 1 else . end) * 100) | floor' 2>/dev/null)
     cb_trips=$(echo "$all_metrics" | jq -s '[.[].circuit_breaker_state] | map(select(. == "OPEN")) | length' 2>/dev/null)
     avg_loops=$(echo "$all_metrics" | jq -s '[.[].loop_count] | (add / (length | if . == 0 then 1 else . end)) | floor' 2>/dev/null)
 
@@ -188,12 +203,12 @@ ralph_show_stats() {
 
     if [[ "$format" == "json" ]]; then
         jq -n \
-            --argjson total "$total_runs" \
+            --argjson total "${total_runs:-0}" \
             --argjson avg_loops "${avg_loops:-0}" \
             --argjson success "${success_rate:-0}" \
             --argjson cb "${cb_trips:-0}" \
             --argjson calls "${total_calls:-0}" \
-            --argjson breakdown "$work_breakdown" \
+            --argjson breakdown "${work_breakdown:-[]}" \
             '{
                 totalRuns: $total,
                 avgLoopsPerRun: $avg_loops,
