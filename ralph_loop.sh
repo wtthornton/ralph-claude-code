@@ -164,7 +164,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.23.0"
+RALPH_VERSION="2.24.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -275,6 +275,18 @@ ADAPTIVE_TIMEOUT_MULTIPLIER="${ADAPTIVE_TIMEOUT_MULTIPLIER:-2}"
 ADAPTIVE_TIMEOUT_MIN_MINUTES="${ADAPTIVE_TIMEOUT_MIN_MINUTES:-10}"
 ADAPTIVE_TIMEOUT_MAX_MINUTES="${ADAPTIVE_TIMEOUT_MAX_MINUTES:-60}"
 ADAPTIVE_TIMEOUT_MIN_SAMPLES="${ADAPTIVE_TIMEOUT_MIN_SAMPLES:-5}"
+
+# TAP-2777: MCP-disconnect worker-leak guards.
+#   RALPH_TIMEOUT_KILL_AFTER  — grace after the deadline SIGTERM before
+#       portable_timeout escalates to SIGKILL, so a worker wedged on dead MCP
+#       connections cannot ignore SIGTERM and linger to the full timeout.
+#       Exported so it is visible inside the pipeline subshells in
+#       exec_run_live / exec_run_background. Set empty to restore plain SIGTERM.
+#   RALPH_MCP_DISCONNECT_TIMEOUT_SECONDS — short hard timeout applied to a
+#       post-disconnect retry invocation (it comes up with no working tools, so
+#       there is nothing to wait for) instead of the full adaptive value.
+export RALPH_TIMEOUT_KILL_AFTER="${RALPH_TIMEOUT_KILL_AFTER:-15s}"
+RALPH_MCP_DISCONNECT_TIMEOUT_SECONDS="${RALPH_MCP_DISCONNECT_TIMEOUT_SECONDS:-120}"
 
 # Session management configuration (Phase 1.2)
 SESSION_EXPIRATION_SECONDS=86400  # 24 hours
@@ -4472,6 +4484,87 @@ ralph_mcp_health_gate() {
     return 0
 }
 
+# TAP-2777: cap the timeout for a post-disconnect retry invocation. When the
+# previous loop reported all MCP servers disconnected, on-stop.sh leaves a
+# .mcp_blocked_count >= 1 (cleared on the first clean loop). Such a retry almost
+# always comes up disconnected again — it has no working tools, so there is
+# nothing to wait for. Returning a short timeout instead of the full adaptive
+# value keeps a wedged worker from lingering up to 60m and leaking.
+#   $1 = nominal timeout seconds, $2 = .mcp_blocked_count value (default 0).
+# Echoes the effective timeout seconds.
+ralph_mcp_disconnect_timeout() {
+    local _nominal="$1" _blocked="${2:-0}"
+    local _short="${RALPH_MCP_DISCONNECT_TIMEOUT_SECONDS:-120}"
+    [[ "$_blocked" =~ ^[0-9]+$ ]] || _blocked=0
+    [[ "$_nominal" =~ ^[0-9]+$ ]] || { echo "$_nominal"; return; }
+    if [[ "$_blocked" -ge 1 && "$_nominal" -gt "$_short" ]]; then
+        echo "$_short"
+    else
+        echo "$_nominal"
+    fi
+}
+
+# TAP-2777: reap leaked Claude worker processes.
+#
+# The MCP-disconnect retry — and any timed-out/wedged invocation — can leave a
+# `claude --agent ralph…` worker, plus the `uv run … serve` MCP servers it
+# spawned, alive after execute_claude_code has returned. A wedged worker does
+# not exit promptly, so over a long campaign these accumulate and thrash the
+# host (observed 2026-06-01: 13 workers + 28 MCP servers under one session,
+# load average 56, swap exhausted).
+#
+# This reaper kills ONLY orphaned Ralph workers: a `claude` process invoked with
+# `--agent ralph…` whose parent is a reaper (PID 1 / already dead / init-like).
+# An interactive Claude Code session is never `--agent ralph` and is never
+# orphaned, so it is doubly protected — the same safety envelope
+# ralph_cleanup_orphaned_mcp uses for MCP servers. Each killed worker's direct
+# children (its uv MCP servers) are TERMed first; ralph_cleanup_orphaned_mcp,
+# called alongside, mops up any deeper re-parented servers. Linux/macOS/WSL only
+# (pgrep); on Windows the MCP grandchildren are handled by the PowerShell branch
+# of ralph_cleanup_orphaned_mcp.
+ralph_reap_orphaned_claude_workers() {
+    command -v pgrep &>/dev/null || return 0
+
+    local killed=0 pid
+    local claude_pids
+    claude_pids=$(pgrep -f 'claude.*--agent ralph' 2>/dev/null) || true
+    for pid in $claude_pids; do
+        # Never touch ourselves.
+        [[ "$pid" == "$$" ]] && continue
+
+        local ppid pcomm
+        ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+        # Skip unreadable ppid (process exited mid-check).
+        [[ -z "$ppid" ]] && continue
+        pcomm=$(ps -o comm= -p "$ppid" 2>/dev/null | tr -d ' ')
+
+        # Orphan signal (mirrors ralph_cleanup_orphaned_mcp): parent is PID 1,
+        # already dead, or a known reaper. A live non-reaper parent means the
+        # worker is still legitimately owned (an active invocation or a user
+        # session), so it is left alone.
+        if [[ "$ppid" == "1" ]] \
+           || ! kill -0 "$ppid" 2>/dev/null \
+           || [[ "$pcomm" =~ ^(systemd|init|tini|launchd|upstart)$ ]]; then
+            local kids
+            kids=$(pgrep -P "$pid" 2>/dev/null | tr '\n' ' ') || true
+            # shellcheck disable=SC2086 — word-split the child PID list on purpose.
+            kill -TERM "$pid" $kids 2>/dev/null || true
+            local _w
+            for _w in 1 2 3; do
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 1
+            done
+            # shellcheck disable=SC2086
+            kill -KILL "$pid" $kids 2>/dev/null || true
+            killed=$((killed + 1))
+        fi
+    done
+
+    if [[ "${killed:-0}" -gt 0 ]]; then
+        log_status "WARN" "TAP-2777: reaped $killed orphaned Claude worker process tree(s) (leaked by MCP-disconnect/timeout)"
+    fi
+}
+
 # =============================================================================
 # MCP-CLEANUP: Kill orphaned MCP server processes between loop iterations.
 # Claude Code spawns MCP servers (tapps-mcp, docsmcp) as grandchild processes.
@@ -5012,7 +5105,19 @@ execute_claude_code() {
     local adaptive_timeout
     adaptive_timeout=$(ralph_compute_adaptive_timeout)
     local timeout_seconds=$((adaptive_timeout * 60))
-    log_status "INFO" "⏳ Starting Claude Code execution... (timeout: ${adaptive_timeout}m)"
+
+    # TAP-2777: a post-disconnect retry has no working tools — cap it short so a
+    # wedged worker cannot linger up to the full adaptive timeout and leak.
+    local _mcp_blocked=0
+    [[ -f "$RALPH_DIR/.mcp_blocked_count" ]] && read -r _mcp_blocked < "$RALPH_DIR/.mcp_blocked_count" 2>/dev/null
+    local _nominal_timeout=$timeout_seconds
+    timeout_seconds=$(ralph_mcp_disconnect_timeout "$timeout_seconds" "$_mcp_blocked")
+    if [[ "$timeout_seconds" -lt "$_nominal_timeout" ]]; then
+        adaptive_timeout=$(( (timeout_seconds + 59) / 60 ))
+        log_status "INFO" "⏳ Starting Claude Code execution... (post-disconnect retry — short timeout: ${timeout_seconds}s)"
+    else
+        log_status "INFO" "⏳ Starting Claude Code execution... (timeout: ${adaptive_timeout}m)"
+    fi
 
     # Track invocation start time for latency recording
     local invocation_start_epoch
@@ -5099,6 +5204,9 @@ execute_claude_code() {
     # MCP-CLEANUP: Kill orphaned MCP server processes after each CLI invocation.
     # Claude Code spawns these as grandchildren that survive CLI exit on Windows.
     ralph_cleanup_orphaned_mcp
+    # TAP-2777: also reap any orphaned `claude --agent ralph…` worker the
+    # invocation left behind (a wedged/disconnected worker that did not exit).
+    ralph_reap_orphaned_claude_workers
 
     # MCP-RESUME (Issue 1): a resumed session can come up WITHOUT its STDIO MCP
     # tool catalog (tapps-mcp / docs-mcp die with the prior process on --resume
@@ -5131,6 +5239,7 @@ execute_claude_code() {
             [[ $exit_code -eq 99 ]] && return 1
         fi
         ralph_cleanup_orphaned_mcp
+        ralph_reap_orphaned_claude_workers  # TAP-2777
         if exec_mcp_catalog_lost "$output_file"; then
             # Fresh session STILL has no catalog → the MCP transport is
             # genuinely down, not a resume artifact. Keep the sentinel so
@@ -5321,6 +5430,8 @@ cleanup() {
 
     # MCP-CLEANUP: Kill orphaned MCP server processes on exit
     ralph_cleanup_orphaned_mcp 2>/dev/null || true
+    # TAP-2777: reap any leaked Claude worker tree on exit too.
+    ralph_reap_orphaned_claude_workers 2>/dev/null || true
 
     # CAPTURE-1: Sync filesystem to flush buffered writes on SIGTERM
     sync 2>/dev/null || true
@@ -6068,6 +6179,13 @@ main() {
             [[ "$_mcp_dc_max" =~ ^[0-9]+$ ]] || _mcp_dc_max=3
             ralph_audit "mcp_disconnect" "ralph_loop" "retry" "loop_count=$loop_count,attempt=$_mcp_dc_count,max=$_mcp_dc_max" "retrying" 2>/dev/null
             reset_session "mcp_disconnect"
+            # TAP-2777: reap before respawn. The disconnected worker that just
+            # ran (and any it leaked) must be terminated — worker + its uv-run
+            # MCP servers — BEFORE the next iteration launches a fresh Claude, or
+            # repeated disconnect→retry cycles pile up live workers and thrash
+            # the host. ralph_cleanup_orphaned_mcp mops the re-parented servers.
+            ralph_reap_orphaned_claude_workers
+            ralph_cleanup_orphaned_mcp
             if [[ -f "$RALPH_DIR/.harness_halt_reason" ]]; then
                 log_status "ERROR" "🔌 MCP disconnect persisted ${_mcp_dc_count} loops (>= ${_mcp_dc_max}) — giving up; harness will halt"
                 update_status "$loop_count" "$(_read_call_count)" "mcp_disconnect_giveup" "halted" "mcp_unreachable_quorum"

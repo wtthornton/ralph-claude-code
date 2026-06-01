@@ -128,8 +128,19 @@ portable_timeout() {
         return 1
     fi
 
+    # TAP-2777: when RALPH_TIMEOUT_KILL_AFTER is set, follow the SIGTERM that
+    # GNU timeout/gtimeout send at the deadline with a SIGKILL after the grace
+    # period. Without this, a `claude` worker wedged on dead MCP connections can
+    # ignore/slow-walk SIGTERM and linger until the (up to 60m) deadline, leaking
+    # the worker + its uv-run MCP servers. Both detected commands (timeout,
+    # gtimeout) are GNU and support --kill-after; empty value = unchanged.
+    local _kill_after_args=()
+    if [[ -n "${RALPH_TIMEOUT_KILL_AFTER:-}" ]]; then
+        _kill_after_args=(--kill-after="${RALPH_TIMEOUT_KILL_AFTER}")
+    fi
+
     # Execute the command with timeout
-    "$timeout_cmd" "$duration" "$@"
+    "$timeout_cmd" "${_kill_after_args[@]}" "$duration" "$@"
 }
 
 # Reset the cached timeout command (useful for testing)
