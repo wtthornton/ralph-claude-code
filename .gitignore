@@ -28,10 +28,13 @@
 .ralph/forensics/
 .ralph/.harness_halt_reason
 .ralph/.no_status_block_count
+.ralph/.consecutive_questions
 .claude/scheduled_tasks.lock
 
 # tapps-mcp runtime probe output (timestamped, host-specific)
 .tapps-mcp/
+# tapps-mcp local doc/lookup + linear-snapshot cache (regenerated on demand)
+.tapps-mcp-cache/
 
 # Ralph logs and generated docs
 .ralph/logs/*
