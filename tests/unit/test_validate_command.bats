@@ -422,6 +422,61 @@ EOF
         || fail "durable circuit-breaker state must stay protected, got $status: $output"
 }
 
+# ---- TAP-2345: Bash/Edit policy parity on .claude/ subdirs ------------------
+# validate-command.sh (Bash side) carves out .claude/rules/, .claude/skills/,
+# and .claude/commands/ so routine rule/skill/command writes stop being a
+# dead-end that forces a pivot to the Write tool — matching the Edit-side
+# carve-outs in protect-ralph-files.sh. settings*.json, agents/, and hooks/
+# stay blocked on both sides. Source friction: AgentForge 2026-05-22, F4.
+
+@test "TAP-2345: redirect to .claude/rules/foo.md via Bash is ALLOWED" {
+    run_hook "echo x > .claude/rules/foo.md"
+    [[ "$status" -eq 0 ]] \
+        || fail ".claude/rules/* redirect must be allowed via Bash, got $status: $output"
+}
+
+@test "TAP-2345: redirect to .claude/skills/foo/SKILL.md via Bash is ALLOWED" {
+    run_hook "echo x > .claude/skills/foo/SKILL.md"
+    [[ "$status" -eq 0 ]] \
+        || fail ".claude/skills/* redirect must be allowed via Bash, got $status: $output"
+}
+
+@test "TAP-2345: redirect to .claude/commands/foo.md via Bash is ALLOWED" {
+    run_hook "echo x > .claude/commands/foo.md"
+    [[ "$status" -eq 0 ]] \
+        || fail ".claude/commands/* redirect must be allowed via Bash, got $status: $output"
+}
+
+@test "TAP-2345: cp into .claude/rules/ via Bash is ALLOWED" {
+    run_hook "cp /tmp/x .claude/rules/foo.md"
+    [[ "$status" -eq 0 ]] \
+        || fail "cp into .claude/rules/ must be allowed via Bash, got $status: $output"
+}
+
+@test "TAP-2345: redirect to .claude/agents/ralph.md via Bash is STILL BLOCKED" {
+    run_hook "echo x > .claude/agents/ralph.md"
+    [[ "$status" -eq 2 ]] \
+        || fail ".claude/agents/ must stay blocked via Bash, got $status: $output"
+}
+
+@test "TAP-2345: redirect to .claude/hooks/on-stop.sh via Bash is STILL BLOCKED" {
+    run_hook "echo x > .claude/hooks/on-stop.sh"
+    [[ "$status" -eq 2 ]] \
+        || fail ".claude/hooks/ must stay blocked via Bash, got $status: $output"
+}
+
+@test "TAP-2345: redirect to .claude/settings.json via Bash is STILL BLOCKED" {
+    run_hook "echo x > .claude/settings.json"
+    [[ "$status" -eq 2 ]] \
+        || fail ".claude/settings.json must stay blocked via Bash, got $status: $output"
+}
+
+@test "TAP-2345: cp into .claude/hooks/ via Bash is STILL BLOCKED" {
+    run_hook "cp /tmp/x .claude/hooks/on-stop.sh"
+    [[ "$status" -eq 2 ]] \
+        || fail "cp into .claude/hooks/ must stay blocked via Bash, got $status: $output"
+}
+
 # ---- byte parity guard (TAP-1876 amendment to the TAP-624 parity rule) -------
 
 @test "TAP-1876: .ralph/hooks/validate-command.sh is byte-identical to template" {
