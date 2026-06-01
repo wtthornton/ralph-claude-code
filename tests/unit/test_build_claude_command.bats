@@ -116,3 +116,88 @@ _source_build_claude_command() {
     grep -q "RALPH_BETA_TOOL_SEARCH" "$REPO_ROOT/templates/ralphrc.template"
     grep -q "$TOOL_SEARCH_BETA" "$REPO_ROOT/templates/ralphrc.template"
 }
+
+# =============================================================================
+# TAP-2510 — brief delegate_to flips the --agent flag for this loop
+# =============================================================================
+
+_write_delegate_brief() {
+    local delegate="$1"
+    mkdir -p "$TEST_TEMP_DIR/.ralph"
+    cat > "$TEST_TEMP_DIR/.ralph/brief.json" <<EOF
+{
+  "schema_version": 1,
+  "task_id": "TAP-1",
+  "task_source": "linear",
+  "task_summary": "do the thing",
+  "risk_level": "HIGH",
+  "affected_modules": ["lib/foo.sh"],
+  "acceptance_criteria": ["AC1"],
+  "qa_required": false,
+  "delegate_to": "$delegate",
+  "coordinator_confidence": 0.9,
+  "created_at": "2026-06-01T00:00:00Z"
+}
+EOF
+}
+
+@test "TAP-2510: delegate_to=ralph-architect flips --agent to ralph-architect" {
+    _source_build_claude_command
+    _write_delegate_brief "ralph-architect"
+    mkdir -p "$TEST_TEMP_DIR/.claude/agents"
+    : > "$TEST_TEMP_DIR/.claude/agents/ralph-architect.md"
+
+    build_claude_command "$TEST_TEMP_DIR/PROMPT.md" "" "" 1 >/dev/null 2>&1 || true
+    local joined="${CLAUDE_CMD_ARGS[*]}"
+    [[ "$joined" == *"--agent ralph-architect"* ]]
+    [[ "$joined" != *"--agent ralph "* ]]
+}
+
+@test "TAP-2510: delegate_to=ralph leaves --agent at the static default" {
+    _source_build_claude_command
+    _write_delegate_brief "ralph"
+
+    build_claude_command "$TEST_TEMP_DIR/PROMPT.md" "" "" 1 >/dev/null 2>&1 || true
+    local joined="${CLAUDE_CMD_ARGS[*]}"
+    [[ "$joined" == *"--agent ralph"* ]]
+    [[ "$joined" != *"--agent ralph-architect"* ]]
+}
+
+@test "TAP-2510: absent brief.json leaves --agent at the static default" {
+    _source_build_claude_command
+    rm -f "$TEST_TEMP_DIR/.ralph/brief.json"
+
+    build_claude_command "$TEST_TEMP_DIR/PROMPT.md" "" "" 1 >/dev/null 2>&1 || true
+    local joined="${CLAUDE_CMD_ARGS[*]}"
+    [[ "$joined" == *"--agent ralph"* ]]
+    [[ "$joined" != *"--agent ralph-architect"* ]]
+}
+
+@test "TAP-2510: delegate_to=ralph-architect falls back to ralph when the agent file is missing" {
+    _source_build_claude_command
+    _write_delegate_brief "ralph-architect"
+    # No .claude/agents/ralph-architect.md created in the target project.
+
+    build_claude_command "$TEST_TEMP_DIR/PROMPT.md" "" "" 1 >/dev/null 2>&1 || true
+    local joined="${CLAUDE_CMD_ARGS[*]}"
+    [[ "$joined" == *"--agent ralph"* ]]
+    [[ "$joined" != *"--agent ralph-architect"* ]]
+}
+
+@test "TAP-2510: RALPH_AGENT_NAME is not persistently mutated (no cross-loop pinning)" {
+    _source_build_claude_command
+    _write_delegate_brief "ralph-architect"
+    mkdir -p "$TEST_TEMP_DIR/.claude/agents"
+    : > "$TEST_TEMP_DIR/.claude/agents/ralph-architect.md"
+
+    build_claude_command "$TEST_TEMP_DIR/PROMPT.md" "" "" 1 >/dev/null 2>&1 || true
+    # The override is loop-local; the static config var stays "ralph".
+    [[ "$RALPH_AGENT_NAME" == "ralph" ]]
+
+    # Next loop: brief flips back to ralph → --agent reverts.
+    _write_delegate_brief "ralph"
+    declare -ga CLAUDE_CMD_ARGS=()
+    build_claude_command "$TEST_TEMP_DIR/PROMPT.md" "" "" 1 >/dev/null 2>&1 || true
+    local joined="${CLAUDE_CMD_ARGS[*]}"
+    [[ "$joined" != *"--agent ralph-architect"* ]]
+}
