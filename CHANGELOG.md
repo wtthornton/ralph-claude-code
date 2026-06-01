@@ -10,6 +10,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.21.4] — 2026-06-01
+
+Patch release — Ralph Continuous Coding backlog sweep. The substantive change ships in the `PROMPT.md` template; the rest is test coverage and repo hygiene. SDK unchanged.
+
+### Added
+
+- **`templates/PROMPT.md` editing-discipline rules (TAP-2333, upstreams TAP-2332).** Promoted two field-tested friction patterns from a per-project AgentForge edit into the upstream template's managed (`RALPH:START`/`RALPH:END`) section, so every Ralph-managed project inherits them on the next `ralph-upgrade-project`:
+  - **Read before first Edit** — issue a `Read` before the first Edit/Write to a file in a loop (avoids the recurring `File has not been read yet` Edit rejection).
+  - **Shared/busy-directory guard** — run `git status` before editing a shared directory; if unstaged changes don't trace to the current ticket, emit `STATUS: BLOCKED` and pivot. Busy-dir list is operator-configurable via the new `.ralphrc` knob `RALPH_BUSY_DIRS` (space/colon-separated; default empty — agent-honored, no harness change).
+  - Pattern 1 (`python3 -c` → `/tmp/snippet.py` / `python-introspection`) was already present; a `tests/unit/test_prompt_template.bats` regression guard now asserts all three patterns stay present.
+
+### Fixed
+
+- **TAP-2345 acceptance gap closed.** The Bash/Edit `.claude/` policy unification merged earlier (PR #33) shipped without test coverage; added 8 cases in `tests/unit/test_validate_command.bats` asserting `.claude/rules|skills|commands` are writable via Bash while `.claude/agents|hooks|settings.json` stay blocked.
+
+### Chore
+
+- **`.gitignore`** now ignores `.tapps-mcp-cache/` (tapps-mcp doc/lookup + linear-snapshot cache) and `.ralph/.consecutive_questions` (USYNC-1 question-loop counter) — ephemeral, host-specific runtime artifacts that were surfacing as untracked noise.
+
+> Backlog note: the other five open issues in this sweep (TAP-2471, TAP-2473, TAP-2485, TAP-2343, TAP-2341) were verified already-implemented on `main` (from PRs #49/#32 and the R0 enforcement path) and closed Done with file:line evidence — no code change required.
+
+---
+
+## [2.21.3] — 2026-05-31
+
+Patch release — harness correctness/security hardening: sweep of 15 correctness/security bugs across the loop, hooks, and libs (#66). See the PR for the per-bug detail.
+
+---
+
 ## [2.21.2] — 2026-05-31
 
 Patch release — documentation/config follow-up from a full verification pass on the `ralph-workflow` skill. Every harness-contract claim the skill makes (RALPH_STATUS schema, `no_status_block_3x` halt, TAP-1899 productivity guard, dual-condition EXIT_SIGNAL gate, `exec_aggregate_qa_results`, `pending_merges_add` caps, `validate-command.sh` blocks, `build_loop_context` injection lines, `NEXT_INTENDED_ISSUE`/`brief-next.json` lookahead, brief paths) was confirmed against the code and is accurate. CLI/docs-only — no behavior change; SDK remains at 2.2.0.
