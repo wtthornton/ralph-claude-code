@@ -119,12 +119,8 @@ class _LoopMixin(_AgentBase):
             )
             self._pending_decomposition_hint = hint
 
-    async def _execute_iteration(
-        self,
-        result: TaskResult,
-        all_files_changed: dict[str, None],
-    ) -> bool:
-        """Run one loop iteration. Returns True to continue, False to break."""
+    async def _preflight_checks(self, result: TaskResult) -> bool:
+        """Run rate-limit, budget, and circuit-breaker guards. Returns False to break."""
         if not await self._check_invocation_rate_limit(result):
             return False
         if not self._check_token_rate_limit(result):
@@ -134,6 +130,16 @@ class _LoopMixin(_AgentBase):
         if not await self.check_circuit_breaker():
             logger.warning("Circuit breaker OPEN, stopping")
             result.error = "Circuit breaker open"
+            return False
+        return True
+
+    async def _execute_iteration(
+        self,
+        result: TaskResult,
+        all_files_changed: dict[str, None],
+    ) -> bool:
+        """Run one loop iteration. Returns True to continue, False to break."""
+        if not await self._preflight_checks(result):
             return False
 
         if self.config.dry_run:

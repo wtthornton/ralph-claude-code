@@ -252,9 +252,7 @@ def _emit_active_body(
                 remaining += 1
             continue
         # Non-checkbox lines: include while inside the unchecked window
-        if 0 < unchecked_count <= max_items:
-            parts.append(line)
-        elif unchecked_count == 0 and not _CHECKED.match(line):
+        if unchecked_count <= max_items:
             parts.append(line)
 
     if checked > 0 and unchecked_count == 0:
@@ -287,21 +285,29 @@ def _format_active_section(
     if remaining > 0:
         parts.append(f"  ... and {remaining} more unchecked items")
 
-    sections_below = len(sections) - active_idx - 1
-    if sections_below > 0:
-        total_below = sum(
-            1
-            for _heading, body in sections[active_idx + 1:]
-            for line in body
-            if _UNCHECKED.match(line)
-        )
-        if total_below > 0:
-            parts.append("")
-            parts.append(
-                f"({sections_below} more sections below with {total_below} unchecked items)"
-            )
+    _emit_sections_below_summary(sections, active_idx, parts)
 
     return "\n".join(parts)
+
+
+def _emit_sections_below_summary(
+    sections: list[tuple[str, list[str]]], active_idx: int, parts: list[str]
+) -> None:
+    """Append a one-line summary of unchecked work in sections after the active one."""
+    sections_below = len(sections) - active_idx - 1
+    if sections_below <= 0:
+        return
+    total_below = sum(
+        1
+        for _heading, body in sections[active_idx + 1:]
+        for line in body
+        if _UNCHECKED.match(line)
+    )
+    if total_below > 0:
+        parts.append("")
+        parts.append(
+            f"({sections_below} more sections below with {total_below} unchecked items)"
+        )
 
 
 def estimate_tokens(text: str) -> int:

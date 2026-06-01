@@ -72,6 +72,38 @@ def build_python_graph(project_root: Path) -> dict[str, list[str]]:
     return graph
 
 
+_JS_IMPORT_RE = re.compile(
+    r"""(?:import\s+.*?from\s+['"](.+?)['"]|require\(['"](.+?)['"]\))"""
+)
+_JS_RESOLVE_EXTS = ["", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.js"]
+
+
+def _resolve_js_dep(candidate: Path, root: Path) -> str | None:
+    """Resolve a JS/TS relative import to a repo-relative path, or None."""
+    for try_ext in _JS_RESOLVE_EXTS:
+        full = Path(str(candidate) + try_ext)
+        if full.exists():
+            try:
+                return str(full.relative_to(root)).replace("\\", "/")
+            except ValueError:
+                return None
+    return None
+
+
+def _js_file_deps(f: Path, root: Path) -> list[str]:
+    """Extract resolved relative dependency paths from a single JS/TS file."""
+    content = f.read_text(encoding="utf-8", errors="ignore")
+    resolved: set[str] = set()
+    for m in _JS_IMPORT_RE.finditer(content):
+        dep = m.group(1) or m.group(2)
+        if not dep.startswith("."):
+            continue  # skip bare package imports
+        rel = _resolve_js_dep((f.parent / dep).resolve(), root)
+        if rel is not None:
+            resolved.add(rel)
+    return sorted(resolved)
+
+
 def build_js_graph(project_root: Path) -> dict[str, list[str]]:
     """Build import graph for JS/TS project via regex extraction.
 
@@ -80,37 +112,17 @@ def build_js_graph(project_root: Path) -> dict[str, list[str]]:
     """
     root = project_root.resolve()
     graph: dict[str, list[str]] = {}
-    import_re = re.compile(
-        r"""(?:import\s+.*?from\s+['"](.+?)['"]|require\(['"](.+?)['"]\))"""
-    )
     js_extensions = ["*.js", "*.jsx", "*.ts", "*.tsx"]
-    resolve_exts = ["", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.js"]
 
     for ext_pattern in js_extensions:
         for f in root.rglob(ext_pattern):
             if any(part in _SKIP_DIRS for part in f.parts):
                 continue
             try:
-                content = f.read_text(encoding="utf-8", errors="ignore")
-                resolved: list[str] = []
-                for m in import_re.finditer(content):
-                    dep = m.group(1) or m.group(2)
-                    if not dep.startswith("."):
-                        continue  # skip bare package imports
-                    candidate = (f.parent / dep).resolve()
-                    for try_ext in resolve_exts:
-                        full = Path(str(candidate) + try_ext)
-                        if full.exists():
-                            try:
-                                resolved.append(str(full.relative_to(root)))
-                            except ValueError:
-                                pass
-                            break
-                graph[str(f.relative_to(root)).replace("\\", "/")] = sorted(
-                    set(r.replace("\\", "/") for r in resolved)
-                )
+                deps = _js_file_deps(f, root)
             except (UnicodeDecodeError, OSError):
-                pass
+                continue
+            graph[str(f.relative_to(root)).replace("\\", "/")] = deps
 
     return graph
 

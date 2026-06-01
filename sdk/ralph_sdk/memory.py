@@ -323,22 +323,40 @@ def _detect_language(root: Path) -> str:
     return "unknown"
 
 
-def _detect_test_runner(root: Path) -> str:
+def _detect_js_test_runner(root: Path) -> str | None:
+    """Detect jest/vitest from package.json, or None."""
     pkg = root / "package.json"
-    if pkg.exists():
-        try:
-            text = pkg.read_text()
-            if '"jest"' in text or '"vitest"' in text:
-                return "jest" if '"jest"' in text else "vitest"
-        except OSError as e:
-            logger.debug("package.json read failed: %s", e)
+    if not pkg.exists():
+        return None
+    try:
+        text = pkg.read_text()
+    except OSError as e:
+        logger.debug("package.json read failed: %s", e)
+        return None
+    if '"jest"' in text:
+        return "jest"
+    if '"vitest"' in text:
+        return "vitest"
+    return None
+
+
+def _detect_py_test_runner(root: Path) -> str | None:
+    """Detect pytest from pyproject.toml, or None."""
     pyproj = root / "pyproject.toml"
-    if pyproj.exists():
-        try:
-            if "pytest" in pyproj.read_text():
-                return "pytest"
-        except OSError as e:
-            logger.debug("pyproject.toml read failed: %s", e)
+    if not pyproj.exists():
+        return None
+    try:
+        if "pytest" in pyproj.read_text():
+            return "pytest"
+    except OSError as e:
+        logger.debug("pyproject.toml read failed: %s", e)
+    return None
+
+
+def _detect_test_runner(root: Path) -> str:
+    runner = _detect_js_test_runner(root) or _detect_py_test_runner(root)
+    if runner:
+        return runner
     if list(root.glob("tests/*.bats"))[:1]:
         return "bats"
     if (root / "go.mod").exists():

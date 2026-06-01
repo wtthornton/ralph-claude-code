@@ -78,7 +78,19 @@ def classify_complexity(
         if pattern.search(task_text):
             return band
 
-    # 2. Keyword scoring (base = 3 = MEDIUM)
+    # 2-5. Heuristic scoring, clamped to 1-5
+    score = _score_complexity(task_text, retry_count)
+    score = max(1, min(5, score))
+
+    for threshold, band in _SCORE_TO_BAND:
+        if score <= threshold:
+            return band
+    return CostComplexityBand.ARCHITECTURAL
+
+
+def _score_complexity(task_text: str, retry_count: int) -> int:
+    """Heuristic complexity score from keywords, file count, steps, and retries."""
+    # Keyword scoring (base = 3 = MEDIUM)
     score = 3
 
     if _HIGH_KEYWORDS.search(task_text):
@@ -88,28 +100,21 @@ def classify_complexity(
     if _LOW_KEYWORDS.search(task_text):
         score -= 1
 
-    # 3. File count heuristic
+    # File count heuristic
     files = set(_FILE_PATTERN.findall(task_text))
     if len(files) >= 10:
         score += 2
     elif len(files) >= 5:
         score += 1
 
-    # 4. Multi-step indicators
-    steps = len(_STEP_PATTERN.findall(task_text))
-    if steps >= 5:
+    # Multi-step indicators
+    if len(_STEP_PATTERN.findall(task_text)) >= 5:
         score += 1
 
-    # 5. Retry escalation
+    # Retry escalation
     if retry_count >= 3:
         score += 2
     elif retry_count >= 1:
         score += 1
 
-    # Clamp to 1-5
-    score = max(1, min(5, score))
-
-    for threshold, band in _SCORE_TO_BAND:
-        if score <= threshold:
-            return band
-    return CostComplexityBand.ARCHITECTURAL
+    return score
