@@ -418,10 +418,17 @@ RALPH_MAX_PLAN_ITEMS=10
 # RALPH_MCP_BLOCKED_QUORUM (RALPH_MCP_RETRY_MAX takes precedence when both set).
 # RALPH_MCP_RETRY_MAX=3
 
-# Optional pre-loop MCP health gate. When true, re-probe the required MCP
-# servers (via a fresh `claude mcp list`) before each loop and wait out a
+# Pre-loop MCP health gate (TAP-2786: ON by default). Before each loop, re-probe
+# the required MCP servers (via a fresh `claude mcp list`) and wait out a
 # transient disconnect (escalating 2s/5s/10s backoff, up to RALPH_MCP_RETRY_MAX
-# probes) before spending a Claude invocation. Off by default because the live
-# probe adds latency to every loop; the post-loop retry above already recovers
-# disconnects without it.
-# RALPH_MCP_HEALTH_GATE=false
+# probes) before spending a Claude invocation. This cuts the disconnect spiral
+# at the source: a Claude invocation launched into an all-MCP-disconnected state
+# no-ops AND can hang up to the adaptive timeout, leaking a worker (TAP-2777) —
+# far more costly than the gate's ~1.3s warm probe (<1% of a multi-minute loop).
+#
+# The gate SELF-SKIPS on projects that don't use tapps-mcp (file-mode / no
+# tapps-mcp registered), so a non-MCP project is never charged the per-loop probe
+# or backoff. Set RALPH_MCP_HEALTH_GATE=false to opt out entirely — e.g. on a
+# host with highly variable MCP cold-start latency where the per-loop probe is
+# itself disruptive; the post-loop retry above still recovers disconnects.
+# RALPH_MCP_HEALTH_GATE=true

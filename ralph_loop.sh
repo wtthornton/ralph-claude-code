@@ -164,7 +164,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.26.0"
+RALPH_VERSION="2.27.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -4495,16 +4495,30 @@ ralph_mcp_retry_backoff() {
     sleep "$_sleep"
 }
 
-# Optional pre-loop MCP health gate. When RALPH_MCP_HEALTH_GATE=true (default
-# false — the live `claude mcp list` probe adds latency to every loop), re-probe
-# the required MCP servers before spending a Claude invocation. If a required
-# server is unreachable, wait a short backoff and re-probe, up to
-# RALPH_MCP_RETRY_MAX times. Always returns 0: if the servers are still down
-# after the retries we proceed anyway and let MCP-DISCONNECT-RETRY handle the
-# post-loop outcome. The probe is forced fresh (sentinel cache bypassed) so the
-# gate reflects live transport health, not a cached startup result.
+# Pre-loop MCP health gate. When RALPH_MCP_HEALTH_GATE=true (TAP-2786: default
+# ON — a warm `claude mcp list` probe costs ~1.3s, <1% of a multi-minute loop,
+# and pre-catching an all-MCP-disconnected loop avoids a wasted Claude
+# invocation that would no-op AND can hang up to the adaptive timeout, leaking a
+# worker per TAP-2777), re-probe the required MCP servers before spending a
+# Claude invocation. If a required server is unreachable, wait a short backoff
+# and re-probe, up to RALPH_MCP_RETRY_MAX times. Always returns 0: if the
+# servers are still down after the retries we proceed anyway and let
+# MCP-DISCONNECT-RETRY handle the post-loop outcome. The probe is forced fresh
+# (sentinel cache bypassed) so the gate reflects live transport health, not a
+# cached startup result.
+#
+# Set RALPH_MCP_HEALTH_GATE=false to opt out (e.g. a host with highly variable
+# MCP cold-start latency where the per-loop probe is itself disruptive).
 ralph_mcp_health_gate() {
-    [[ "${RALPH_MCP_HEALTH_GATE:-false}" == "true" ]] || return 0
+    [[ "${RALPH_MCP_HEALTH_GATE:-true}" == "true" ]] || return 0
+
+    # TAP-2786: only gate projects that actually depend on tapps-mcp. If the
+    # one-time startup probe never saw it (file-mode / no-tapps-mcp projects),
+    # skip — otherwise default-on would charge them ~3 fresh probes + 2 backoffs
+    # (~11s) of pure waste every loop. RALPH_MCP_TAPPS_EXPECTED is captured in
+    # main() right after the startup probe; fall back to the live flag when
+    # unset (e.g. unit tests that call the gate directly).
+    [[ "${RALPH_MCP_TAPPS_EXPECTED:-${RALPH_MCP_TAPPS_AVAILABLE:-false}}" == "true" ]] || return 0
 
     local _max="${RALPH_MCP_RETRY_MAX:-${RALPH_MCP_BLOCKED_QUORUM:-3}}"
     [[ "$_max" =~ ^[0-9]+$ ]] || _max=3
@@ -5756,6 +5770,12 @@ main() {
     # (TAP-585 prompt guidance, TAP-588 counters) can gate on the result.
     ralph_probe_mcp_servers
 
+    # TAP-2786: capture whether this project actually depends on tapps-mcp, from
+    # the one-time startup probe. The pre-loop health gate (now default-on) uses
+    # this to self-skip on file-mode / no-tapps-mcp projects so it never spends
+    # the per-loop probe + backoff on a project that doesn't use the server.
+    export RALPH_MCP_TAPPS_EXPECTED="${RALPH_MCP_TAPPS_AVAILABLE:-false}"
+
     # BRAIN-PHASE-B1: clear the session-scoped kill-switch so a new run isn't
     # stuck disabled from a prior session's HTTP failure. The switch re-arms
     # on the first failing write in this session.
@@ -6264,10 +6284,10 @@ main() {
             pending_merges_poll
         fi
 
-        # MCP-DISCONNECT-RETRY: optional pre-loop MCP health gate. When
-        # RALPH_MCP_HEALTH_GATE=true, re-probe the required MCP servers and wait
-        # out transient disconnects before spending a Claude invocation (and
-        # before the coordinator's brain_recall). No-op by default. Always
+        # MCP-DISCONNECT-RETRY: pre-loop MCP health gate (TAP-2786: default ON).
+        # Re-probes the required MCP servers and waits out transient disconnects
+        # before spending a Claude invocation (and before the coordinator's
+        # brain_recall). Self-skips on projects that don't use tapps-mcp. Always
         # returns 0 — a still-down launch is handled by the post-loop retry.
         ralph_mcp_health_gate
 

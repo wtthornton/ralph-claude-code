@@ -76,22 +76,50 @@ _write_status() {
 }
 
 # ---------------------------------------------------------------------------
-# ralph_mcp_health_gate: no-op (returns 0) unless explicitly enabled
+# ralph_mcp_health_gate (TAP-2786: default ON, self-skips when tapps not used)
 # ---------------------------------------------------------------------------
-@test "ralph_mcp_health_gate: no-op return 0 when RALPH_MCP_HEALTH_GATE unset" {
-    unset RALPH_MCP_HEALTH_GATE
-    # Fail loudly if it tries to probe — the gate must short-circuit first.
-    ralph_probe_mcp_servers() { echo "PROBE RAN" >&2; return 1; }
-    run ralph_mcp_health_gate
-    [[ "$status" -eq 0 ]] || fail "gate should be a no-op returning 0"
-    [[ "$output" != *"PROBE RAN"* ]] || fail "gate must not probe when disabled"
+@test "ralph_mcp_health_gate: default ON (no env) — structural default is :-true" {
+    # Guard against a silent revert of the TAP-2786 default flip.
+    run grep -E 'RALPH_MCP_HEALTH_GATE:-true' "$REPO_ROOT_FIXED/ralph_loop.sh"
+    [[ "$status" -eq 0 ]] || fail "expected RALPH_MCP_HEALTH_GATE default to be :-true"
 }
 
-@test "ralph_mcp_health_gate: returns 0 once tapps probe reports reachable" {
-    export RALPH_MCP_HEALTH_GATE=true
-    ralph_probe_mcp_servers() { export RALPH_MCP_TAPPS_AVAILABLE=true; }
+@test "ralph_mcp_health_gate: explicit opt-out (=false) is a no-op, no probe" {
+    export RALPH_MCP_HEALTH_GATE=false
+    export RALPH_MCP_TAPPS_EXPECTED=true
+    ralph_probe_mcp_servers() { echo "PROBE RAN" >&2; return 1; }
+    run ralph_mcp_health_gate
+    [[ "$status" -eq 0 ]] || fail "opt-out should return 0"
+    [[ "$output" != *"PROBE RAN"* ]] || fail "gate must not probe when opted out"
+}
+
+@test "ralph_mcp_health_gate: default ON but tapps not expected — self-skip, no probe" {
+    unset RALPH_MCP_HEALTH_GATE
+    export RALPH_MCP_TAPPS_EXPECTED=false   # file-mode / no-tapps-mcp project
+    ralph_probe_mcp_servers() { echo "PROBE RAN" >&2; return 1; }
+    run ralph_mcp_health_gate
+    [[ "$status" -eq 0 ]] || fail "self-skip should return 0"
+    [[ "$output" != *"PROBE RAN"* ]] || fail "gate must not probe a non-tapps project"
+}
+
+@test "ralph_mcp_health_gate: default ON + tapps expected + reachable — returns 0 (does probe)" {
+    unset RALPH_MCP_HEALTH_GATE
+    export RALPH_MCP_TAPPS_EXPECTED=true
+    ralph_probe_mcp_servers() { echo "PROBE RAN" >&2; export RALPH_MCP_TAPPS_AVAILABLE=true; }
     run ralph_mcp_health_gate
     [[ "$status" -eq 0 ]] || fail "healthy probe should return 0"
+    [[ "$output" == *"PROBE RAN"* ]] || fail "gate should probe when tapps is expected"
+}
+
+@test "ralph_mcp_health_gate: tapps expected but unreachable — returns 0 after retries" {
+    export RALPH_MCP_HEALTH_GATE=true
+    export RALPH_MCP_TAPPS_EXPECTED=true
+    export RALPH_MCP_RETRY_MAX=2
+    sleep() { :; }  # don't actually back off
+    ralph_probe_mcp_servers() { export RALPH_MCP_TAPPS_AVAILABLE=false; }
+    run ralph_mcp_health_gate
+    [[ "$status" -eq 0 ]] || fail "must always return 0 even when still down"
+    [[ "$output" == *"unreachable"* ]] || fail "expected an unreachable WARN"
 }
 
 # ---------------------------------------------------------------------------

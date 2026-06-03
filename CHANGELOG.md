@@ -10,6 +10,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.27.0] — 2026-06-02
+
+Defaults the pre-loop MCP health gate ON (TAP-2786). The gate (`ralph_mcp_health_gate`) re-probes the required MCP servers before each Claude invocation and waits out a transient disconnect, cutting the disconnect→retry spiral at the source instead of recovering from it after the fact (TAP-2777 worker leak / TAP-2735 degraded-count exit). Warm probe cost measured at ~1.3s (<1% of a multi-minute loop). No SDK changes. Stacks on 2.26.0 (TAP-2797).
+
+### Changed
+
+- **TAP-2786 — `RALPH_MCP_HEALTH_GATE` now defaults to `true`** (was `false`). A Claude invocation launched into an all-MCP-disconnected state no-ops AND can hang up to the adaptive timeout, leaking a worker — far more costly than the gate's warm `claude mcp list` probe.
+- **The gate self-skips on projects that don't use tapps-mcp.** `main()` captures `RALPH_MCP_TAPPS_EXPECTED` from the one-time startup probe (right after `ralph_probe_mcp_servers`); the gate returns early when it is not `true`, so file-mode / no-tapps-mcp projects are never charged the per-loop probe or the ~11s unreachable backoff. This is what makes "default on" safe universally rather than only for MCP-heavy projects.
+
+### Documented
+
+- `CLAUDE.md` MCP-DISCONNECT-RETRY section + a new Configuration knob entry; `templates/ralphrc.template` MCP DISCONNECT RESILIENCE block — all reflect the new default, the ~1.3s latency tradeoff, the self-skip behavior, and the `RALPH_MCP_HEALTH_GATE=false` opt-out.
+
+### Tests
+
+- `tests/unit/test_mcp_disconnect_retry.bats` updated: structural guard on the `:-true` default, explicit opt-out no-op, self-skip when tapps not expected, probe-runs-when-expected, and returns-0-after-retries-when-unreachable.
+
+---
+
 ## [2.26.0] — 2026-06-02
 
 Adds a shared-worktree foreign-WIP guard (TAP-2797). The instance lock stops a second `ralph_loop.sh` but is blind to a manual / interactive writer sharing the same git working tree — and the external **FleetView** orchestrator pauses loops by auto-stashing uncommitted work under `paused-ralph-loop-<branch>-wip-<ts>` and switching branches, which can silently bury work the campaign did not author (observed 2026-06-01). The harness never stashes/switches; this adds startup detection of foreign WIP plus the documented worktree-per-writer safe pattern. No SDK changes. Stacks on 2.25.0 (TAP-2735).
