@@ -164,7 +164,7 @@ atomic_write() {
 }
 
 # Version
-RALPH_VERSION="2.25.0"
+RALPH_VERSION="2.26.0"
 
 # Configuration
 # Ralph-specific files live in .ralph/ subfolder
@@ -5590,6 +5590,56 @@ acquire_instance_lock() {
     log_status "INFO" "Acquired instance lock (PID: $$)"
 }
 
+# =============================================================================
+# TAP-2797: Shared-worktree foreign-WIP guard
+# The instance lock (LOCK-1) stops two ralph_loop.sh processes on one project,
+# but NOT a manual/interactive writer sharing the same git working tree. When a
+# live campaign and a hand-editing session occupy one tree, the orchestrator
+# layer (FleetView — external to this repo; it, not the harness, produces the
+# `paused-ralph-loop-<branch>-wip-<ts>` stashes and branch switches) can
+# silently auto-stash and bury uncommitted work the campaign did not author.
+# The harness never stashes/switches, but it CAN refuse to start a campaign on
+# top of foreign WIP so the two writers never overlap. The safe pattern is a
+# dedicated `git worktree` per writer (see docs/OPERATIONS.md).
+# =============================================================================
+RALPH_REQUIRE_CLEAN_TREE="${RALPH_REQUIRE_CLEAN_TREE:-false}"
+RALPH_ALLOW_SHARED_TREE="${RALPH_ALLOW_SHARED_TREE:-false}"
+
+ralph_guard_shared_worktree() {
+    # No-op outside a git repo.
+    command -v git &>/dev/null || return 0
+    git rev-parse --git-dir &>/dev/null 2>&1 || return 0
+
+    # Operator override: shared-tree use explicitly acknowledged.
+    [[ "${RALPH_ALLOW_SHARED_TREE}" == "true" ]] && return 0
+
+    # Detect uncommitted changes to TRACKED files Ralph did not author. At
+    # campaign start Ralph's own work is committed, so tracked-file dirtiness
+    # here is a foreign-WIP signal (a manual session sharing the tree).
+    # `.ralph/` state (PROMPT.md/fix_plan.md/AGENT.md/hooks) is Ralph-owned, so
+    # it is excluded — only NON-.ralph dirtiness counts as foreign.
+    local foreign_wip
+    foreign_wip=$(git status --porcelain --untracked-files=no 2>/dev/null \
+        | grep -vE '(^...| )\.ralph/' || true)
+    [[ -z "$foreign_wip" ]] && return 0
+
+    local count
+    count=$(printf '%s\n' "$foreign_wip" | sed '/^$/d' | wc -l | tr -d ' ')
+
+    log_status "WARN" "TAP-2797: $count uncommitted tracked file(s) in this working tree were not authored by Ralph"
+    log_status "WARN" "A manual/interactive session may be sharing this git working tree with the campaign."
+    log_status "WARN" "Two writers in one tree is unsafe — the orchestrator's pause/auto-stash/branch-switch can bury uncommitted work."
+    log_status "WARN" "Safe pattern: run the campaign in a dedicated git worktree:"
+    log_status "WARN" "  git worktree add ../ralph-campaign \"\$(git branch --show-current)\" && cd ../ralph-campaign && ralph"
+    log_status "WARN" "Override: commit/stash the WIP, or set RALPH_ALLOW_SHARED_TREE=true to acknowledge and proceed."
+
+    if [[ "${RALPH_REQUIRE_CLEAN_TREE}" == "true" ]]; then
+        log_status "ERROR" "RALPH_REQUIRE_CLEAN_TREE=true and foreign WIP present — refusing to start the campaign."
+        exit 1
+    fi
+    return 0
+}
+
 # Global variable for loop count (needed by cleanup function)
 loop_count=0
 
@@ -5664,6 +5714,11 @@ main() {
 
     # LOCK-1: Acquire instance lock (prevents concurrent Ralph instances on same project)
     acquire_instance_lock
+
+    # TAP-2797: refuse/warn on a working tree shared with a foreign writer
+    # (manual or interactive session). The lock above only stops a second
+    # ralph_loop.sh — it cannot see a hand-editing writer in the same tree.
+    ralph_guard_shared_worktree
 
     # Issue #211: source the user's shell init file before validating the CLI.
     # Use case: zsh/Nix/asdf users whose `claude` lives on a PATH that is only

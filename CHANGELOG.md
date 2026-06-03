@@ -10,6 +10,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.26.0] — 2026-06-02
+
+Adds a shared-worktree foreign-WIP guard (TAP-2797). The instance lock stops a second `ralph_loop.sh` but is blind to a manual / interactive writer sharing the same git working tree — and the external **FleetView** orchestrator pauses loops by auto-stashing uncommitted work under `paused-ralph-loop-<branch>-wip-<ts>` and switching branches, which can silently bury work the campaign did not author (observed 2026-06-01). The harness never stashes/switches; this adds startup detection of foreign WIP plus the documented worktree-per-writer safe pattern. No SDK changes. Stacks on 2.25.0 (TAP-2735).
+
+### Added
+
+- **TAP-2797 — `ralph_guard_shared_worktree` startup guard.** Runs in `main()` immediately after `acquire_instance_lock`. Inspects `git status --porcelain` for uncommitted changes to tracked, **non-`.ralph/`** files (work Ralph did not author — `.ralph/` state is Ralph-owned and excluded). Default: loud `WARN` recommending a dedicated `git worktree`, then proceeds (non-destructive). `RALPH_REQUIRE_CLEAN_TREE=true` escalates to refuse-on-start (`exit 1`); `RALPH_ALLOW_SHARED_TREE=true` acknowledges and silences.
+- **Tests.** `tests/unit/test_shared_worktree_guard.bats` (8 cases): clean tree, foreign WIP (WARN/refuse/allow), `.ralph/`-only changes excluded, staged changes detected, non-git no-op, and a structural guard that the call follows `acquire_instance_lock` in `main()`.
+
+### Documented
+
+- **The `paused-ralph-loop-*` stash producer is FleetView, external to this repo.** Confirmed absent from all checked-in source on the host (`ralph_loop.sh`, `lib/`, `~/.ralph/`, `~/.claude/skills/`). It cannot be patched from `ralph-claude-code`; the durable fix is one git worktree per writer.
+- **Safe pattern in `docs/OPERATIONS.md` + `CLAUDE.md`:** never share one working tree between a campaign and a manual session; run the campaign in a dedicated `git worktree`. New env knobs `RALPH_REQUIRE_CLEAN_TREE` / `RALPH_ALLOW_SHARED_TREE` documented in the Configuration section.
+
+---
+
 ## [2.25.0] — 2026-06-01
 
 Fixes the exit-gate fail-open (TAP-2735). Ralph's agent could emit `EXIT_SIGNAL: true` ("all work complete") while the Linear backlog still had actionable issues; three such false signals reached `exit_signal_quorum` (3) and halted the campaign (the 2026-05-27 false "backlog empty" halt claimed empty while 46 issues existed). The quorum is now **fail-closed**. No SDK changes. Stacks on 2.24.0 (TAP-2777).

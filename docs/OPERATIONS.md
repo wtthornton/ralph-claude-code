@@ -63,6 +63,31 @@ cd ~/code/other-project && ralph --live
 
 Running Ralph twice against the **same** project is blocked by the lock file (`<project>/.ralph/.ralph.lock`). The second instance exits immediately with a `lock held` message.
 
+### Never share one working tree between a campaign and a manual session (TAP-2797)
+
+The instance lock stops a **second `ralph_loop.sh`** — it does **not** stop a human (or an interactive Claude Code session) editing the *same git working tree* while a campaign runs. Two writers in one tree race each other: the campaign's commit / push / branch-switch cadence collides with your hand edits. The orchestrator layer (**FleetView**, external to this repo) makes it worse — when it pauses a loop it auto-stashes uncommitted work under a stash named `paused-ralph-loop-<branch>-wip-<ts>` and switches branches, which can **silently bury work the campaign did not author**. (This was observed 2026-06-01: a manual harness-fix session had its WIP stashed and its branch switched out from under it by a concurrent campaign; the work survived only because it had been committed early.)
+
+**Safe pattern — one working tree per writer, via `git worktree`:**
+
+```bash
+# Operator keeps the primary checkout for hand edits / triage.
+# Run the campaign in a dedicated, isolated worktree so the trees never overlap:
+git worktree add ../myproject-campaign "$(git branch --show-current)"
+cd ../myproject-campaign && ralph --live
+
+# ...or detach from main for a throwaway campaign tree:
+git worktree add --detach /tmp/ralph-campaign origin/main
+cd /tmp/ralph-campaign && ralph --live
+```
+
+**Harness-side guard.** At startup (right after acquiring the instance lock) Ralph runs `ralph_guard_shared_worktree`: it inspects `git status` for uncommitted changes to **tracked, non-`.ralph/`** files — i.e. work Ralph did not author — and:
+
+- **Default:** emits a loud `WARN` recommending a dedicated worktree, then proceeds (non-destructive; the harness itself never stashes or switches branches).
+- **`RALPH_REQUIRE_CLEAN_TREE=true`:** refuses to start (`exit 1`) when foreign WIP is present — the strongest guard for unattended hosts where a manual session might be present.
+- **`RALPH_ALLOW_SHARED_TREE=true`:** acknowledge the shared tree and silence the guard (use only when you have deliberately accepted the risk).
+
+`.ralph/` state files (`PROMPT.md`, `fix_plan.md`, `AGENT.md`, `hooks/`) are Ralph-owned and never count as foreign WIP. The producer of the `paused-ralph-loop-*` stashes is the FleetView orchestrator, which is **not** part of `ralph-claude-code` and cannot be patched from this repo — the worktree-per-writer pattern above is the durable fix; the harness guard is defense-in-depth.
+
 ### Shared Anthropic rate-limit considerations
 
 Rate-limit counters (`.call_count`, `.token_count`) are per-project. If all your projects share one Anthropic account, the sum of concurrent Ralph instances can still exhaust the account quota. Options:
