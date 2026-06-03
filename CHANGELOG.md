@@ -10,6 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.27.1] — 2026-06-02
+
+Soak verification for TAP-2777 (the worker-leak fix shipped in 2.24.0). The fix's "no worker / MCP-server accumulation" acceptance item was never automated; this adds a deterministic soak so a future regression that drops the reap from the disconnect-retry path is caught in CI. No runtime behavior change.
+
+### Tests
+
+- **TAP-2777 — `tests/unit/test_mcp_disconnect_soak.bats` (5 cases).** Drives N disconnect→reap cycles against a mocked process table (the ticket's preferred deterministic shape over a real live run) and asserts the live `claude --agent ralph` worker count stays ~1 and orphaned `uv run … serve` MCP servers never accumulate. Includes a negative control (without the reap the counts climb to N — proving the soak is non-vacuous), a selective-reap case (live-parent workers survive, only orphans are killed), and two structural wiring guards (the `mcp_disconnect` retry branch reaps before `continue`; a disconnect-flagged loop gets the short hard timeout, not the full adaptive budget).
+
+---
+
 ## [2.27.0] — 2026-06-02
 
 Defaults the pre-loop MCP health gate ON (TAP-2786). The gate (`ralph_mcp_health_gate`) re-probes the required MCP servers before each Claude invocation and waits out a transient disconnect, cutting the disconnect→retry spiral at the source instead of recovering from it after the fact (TAP-2777 worker leak / TAP-2735 degraded-count exit). Warm probe cost measured at ~1.3s (<1% of a multi-minute loop). No SDK changes. Stacks on 2.26.0 (TAP-2797).
