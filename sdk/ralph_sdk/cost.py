@@ -9,110 +9,43 @@ Implements:
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
-from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+from ralph_sdk.cost_models import (
+    AlertLevel,
+    BudgetStatus,
+    IterationCost,
+    ModelCostBreakdown,
+    SessionCost,
+)
+from ralph_sdk.cost_pricing import DEFAULT_PRICING, ModelPricing
+from ralph_sdk.cost_routing import (
+    DEFAULT_MODEL_MAP,
+    CostComplexityBand,
+    select_model,
+)
+
+__all__ = [
+    "DEFAULT_MODEL_MAP",
+    "DEFAULT_PRICING",
+    "AlertLevel",
+    "BudgetStatus",
+    "CostComplexityBand",
+    "CostTracker",
+    "IterationCost",
+    "ModelCostBreakdown",
+    "ModelPricing",
+    "SessionCost",
+    "TokenRateLimiter",
+    "TokenUsage",
+    "select_model",
+]
 
 # =============================================================================
 # SDK-COST-1: Cost Tracking and Budget Guardrails
+# (value models moved to cost_models.py, re-exported via __all__)
 # =============================================================================
-
-
-@dataclass(frozen=True)
-class ModelPricing:
-    """Pricing per model in USD per 1M tokens."""
-
-    input_per_1m: float
-    output_per_1m: float
-    cache_write_per_1m: float = 0.0
-    cache_read_per_1m: float = 0.0
-
-
-# Default pricing for Claude models (USD per 1M tokens)
-DEFAULT_PRICING: dict[str, ModelPricing] = {
-    "claude-opus-4-8": ModelPricing(
-        input_per_1m=5.0,
-        output_per_1m=25.0,
-        cache_write_per_1m=6.25,
-        cache_read_per_1m=0.50,
-    ),
-    "claude-opus-4-7": ModelPricing(
-        input_per_1m=5.0,
-        output_per_1m=25.0,
-        cache_write_per_1m=6.25,
-        cache_read_per_1m=0.50,
-    ),
-    "claude-opus-4-6": ModelPricing(
-        input_per_1m=5.0,
-        output_per_1m=25.0,
-        cache_write_per_1m=6.25,
-        cache_read_per_1m=0.50,
-    ),
-    "claude-sonnet-4-6": ModelPricing(
-        input_per_1m=3.0,
-        output_per_1m=15.0,
-        cache_write_per_1m=3.75,
-        cache_read_per_1m=0.30,
-    ),
-    "claude-haiku-4-5": ModelPricing(
-        input_per_1m=1.0,
-        output_per_1m=5.0,
-        cache_write_per_1m=1.25,
-        cache_read_per_1m=0.10,
-    ),
-}
-
-
-class AlertLevel(str, Enum):
-    """Budget alert level."""
-
-    NONE = "NONE"
-    WARNING = "WARNING"
-    CRITICAL = "CRITICAL"
-    EXHAUSTED = "EXHAUSTED"
-
-
-class IterationCost(BaseModel):
-    """Cost for a single iteration."""
-
-    model: str
-    input_tokens: int
-    output_tokens: int
-    input_usd: float
-    output_usd: float
-    total_usd: float
-    iteration: int
-
-
-class ModelCostBreakdown(BaseModel):
-    """Cost breakdown for a single model."""
-
-    model: str
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_usd: float = 0.0
-    iterations: int = 0
-
-
-class SessionCost(BaseModel):
-    """Aggregate cost for the entire session."""
-
-    total_input_tokens: int = 0
-    total_output_tokens: int = 0
-    total_usd: float = 0.0
-    by_model: list[ModelCostBreakdown] = Field(default_factory=list)
-    iteration_count: int = 0
-
-
-class BudgetStatus(BaseModel):
-    """Budget status after a budget check."""
-
-    total_spent_usd: float = 0.0
-    max_budget_usd: float = 0.0
-    remaining_usd: float = 0.0
-    percentage_used: float = 0.0
-    alert_level: AlertLevel = AlertLevel.NONE
 
 
 class CostTracker:
@@ -246,84 +179,6 @@ class CostTracker:
             percentage_used=pct_used,
             alert_level=alert,
         )
-
-
-# =============================================================================
-# SDK-COST-2: Dynamic Model Routing
-# =============================================================================
-
-
-class CostComplexityBand(str, Enum):
-    """Five-level task complexity classification matching the CLI complexity.sh.
-
-    This is distinct from converters.ComplexityBand (which maps to max_turns).
-    CostComplexityBand drives model selection and cost optimization.
-    """
-
-    TRIVIAL = "TRIVIAL"
-    SMALL = "SMALL"
-    MEDIUM = "MEDIUM"
-    LARGE = "LARGE"
-    ARCHITECTURAL = "ARCHITECTURAL"
-
-
-# Default complexity -> model mapping
-DEFAULT_MODEL_MAP: dict[CostComplexityBand, str] = {
-    CostComplexityBand.TRIVIAL: "claude-haiku-4-5",
-    CostComplexityBand.SMALL: "claude-haiku-4-5",
-    CostComplexityBand.MEDIUM: "claude-sonnet-4-6",
-    CostComplexityBand.LARGE: "claude-opus-4-8",
-    CostComplexityBand.ARCHITECTURAL: "claude-opus-4-8",
-}
-
-# Retry escalation order
-_ESCALATION_ORDER = [
-    "claude-haiku-4-5",
-    "claude-sonnet-4-6",
-    "claude-opus-4-8",
-]
-
-
-def select_model(
-    complexity: CostComplexityBand,
-    retry_count: int = 0,
-    *,
-    model_map: dict[CostComplexityBand, str] | None = None,
-) -> str:
-    """Select the appropriate model based on complexity band and retry count.
-
-    Base mapping (configurable via model_map):
-    - TRIVIAL/SMALL -> haiku
-    - MEDIUM -> sonnet
-    - LARGE/ARCHITECTURAL -> opus
-
-    Retry escalation: each retry bumps the model one tier up the escalation
-    chain (haiku -> sonnet -> opus). Already at opus stays at opus.
-
-    Args:
-        complexity: The task complexity band.
-        retry_count: Number of previous failed attempts (0 = first try).
-        model_map: Override the default complexity-to-model mapping.
-
-    Returns:
-        Model identifier string.
-    """
-    effective_map = model_map or DEFAULT_MODEL_MAP
-    base_model = effective_map.get(complexity, "claude-sonnet-4-6")
-
-    if retry_count <= 0:
-        return base_model
-
-    # Find the base model's position in escalation order
-    try:
-        base_idx = _ESCALATION_ORDER.index(base_model)
-    except ValueError:
-        # Unknown model — no escalation possible
-        return base_model
-
-    # Escalate by retry_count, capped at max tier
-    escalated_idx = min(base_idx + retry_count, len(_ESCALATION_ORDER) - 1)
-    return _ESCALATION_ORDER[escalated_idx]
 
 
 # =============================================================================
