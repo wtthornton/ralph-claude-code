@@ -6,23 +6,27 @@ All agent methods are async. Use run_sync() for CLI synchronous execution.
 SDK-SAFETY-2: Task decomposition detection via 4-factor heuristic.
 SDK-SAFETY-3: Completion indicator decay — reset stale done signals
               when productive work occurs without exit_signal.
+
+TAP-2772: The RalphAgent class is composed from cohesive mixins
+(_SessionMixin, _InvocationMixin, _ReportingMixin, _LoopMixin) over a shared
+_AgentBase type surface. The public API and every `self.*` call are unchanged;
+the standalone models below are re-exported from agent_models.py.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 import signal
 import sys
-import time
 import uuid
 from pathlib import Path
-from typing import Any
 
+from ralph_sdk.agent_base import _AgentBase
+from ralph_sdk.agent_guards import _GuardMixin
+from ralph_sdk.agent_invocation import _InvocationMixin
+from ralph_sdk.agent_loop import _LoopMixin
 from ralph_sdk.agent_models import (
-    _ADAPTIVE_TIMEOUT_HISTORY_SIZE,
     CancelResult,
     ContinueAsNewState,
     DecompositionHint,
@@ -32,42 +36,16 @@ from ralph_sdk.agent_models import (
     TaskInput,
     TaskResult,
     TracerProtocol,
-    _estimate_complexity,
-    _estimate_file_count,
     compute_adaptive_timeout,
     detect_decomposition_needed,
 )
-from ralph_sdk.complexity import classify_complexity
-from ralph_sdk.config import RalphConfig, RalphConfigError
-from ralph_sdk.context import (
-    ContextManager,
-    PromptCacheStats,
-    estimate_tokens,
-    split_prompt,
-)
-from ralph_sdk.cost import AlertLevel, CostComplexityBand, CostTracker, TokenRateLimiter, select_model
-from ralph_sdk.import_graph import CachedImportGraph
-from ralph_sdk.metrics import MetricEvent, MetricsCollector, NullMetricsCollector
-from ralph_sdk.parsing import (
-    detect_permission_denials,
-    extract_files_changed,
-    parse_ralph_status,
-)
-from ralph_sdk.plan_optimizer import optimize_plan
+from ralph_sdk.agent_reporting import _ReportingMixin
+from ralph_sdk.agent_session import _SessionMixin
+from ralph_sdk.config import RalphConfig
+from ralph_sdk.context import ContextManager, PromptCacheStats
+from ralph_sdk.cost import CostTracker, TokenRateLimiter
+from ralph_sdk.metrics import MetricsCollector, NullMetricsCollector
 from ralph_sdk.state import FileStateBackend, RalphStateBackend
-from ralph_sdk.status import (
-    CircuitBreakerState,
-    ErrorCategory,
-    RalphStatus,
-    classify_error,
-)
-from ralph_sdk.tools import (
-    RALPH_TOOLS,
-    ralph_circuit_state_tool,
-    ralph_rate_check_tool,
-    ralph_status_tool,
-    ralph_task_update_tool,
-)
 
 logger = logging.getLogger("ralph.sdk")
 
@@ -87,17 +65,22 @@ __all__ = [
 ]
 
 
-
 # Standalone models / helpers live in agent_models.py and are re-exported above.
 # RalphAgent class follows.
-
 
 
 # =============================================================================
 # SDK Agent Implementation (SDK-1: Proof of Concept)
 # =============================================================================
 
-class RalphAgent:
+class RalphAgent(
+    _SessionMixin,
+    _InvocationMixin,
+    _ReportingMixin,
+    _GuardMixin,
+    _LoopMixin,
+    _AgentBase,
+):
     """Ralph Agent SDK implementation — replicates ralph_loop.sh core loop in Python.
 
     Core loop: Read PROMPT.md + fix_plan.md -> invoke Claude -> parse response ->
@@ -225,6 +208,98 @@ class RalphAgent:
         """
         return asyncio.run(self.run())
 
+    # -------------------------------------------------------------------------
+    # SDK-LIFECYCLE-1: Cancellation
+    # -------------------------------------------------------------------------
+
+    def _signal_terminate(self, proc: asyncio.subprocess.Process) -> None:
+        """Send SIGTERM (Unix) or terminate() (Windows) to ``proc``.
+
+        Never raises — cancel() is a cleanup path, not an error-discovery one.
+        """
+        try:
+            if sys.platform != "win32":
+                try:
+                    proc.send_signal(signal.SIGTERM)
+                except (ProcessLookupError, OSError):
+                    pass
+            else:
+                try:
+                    proc.terminate()
+                except (ProcessLookupError, OSError):
+                    pass
+        except Exception:
+            # Broad: cancel() must never propagate from a cleanup path —
+            # the caller is asking us to stop, not to discover new errors.
+            logger.exception("Failed to send termination signal")
+
+    def _schedule_or_force_kill(self, proc: asyncio.subprocess.Process) -> bool:
+        """Schedule a deferred grace-then-SIGKILL, or synchronously kill.
+
+        Returns ``was_forced`` — True only on the synchronous kill fallback
+        paths (no usable loop). The async deferred-kill path's forced-kill is
+        not observable in the returned result, matching prior behavior.
+        """
+        grace = self.config.cancel_grace_seconds
+
+        async def _deferred_kill() -> None:
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=grace)
+            except TimeoutError:
+                try:
+                    proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
+
+        try:
+            # Case A: we're being called from within the agent's own loop.
+            # `asyncio.get_running_loop()` returns it; schedule directly.
+            current_loop = asyncio.get_running_loop()
+            if self._loop is not None and current_loop is self._loop:
+                current_loop.create_task(_deferred_kill())
+                return False
+            # Running inside some other loop than the agent's.
+            # Fall through to the cross-thread path below.
+            raise RuntimeError("cancel called from a different loop")
+        except RuntimeError:
+            # Case B: no running loop in this thread (sync context or
+            # supervisor thread). Use the agent's stored loop via
+            # call_soon_threadsafe so scheduling is thread-safe.
+            agent_loop = self._loop
+            if agent_loop is not None and not agent_loop.is_closed():
+                try:
+                    agent_loop.call_soon_threadsafe(
+                        lambda: agent_loop.create_task(_deferred_kill())
+                    )
+                    return False
+                except RuntimeError:
+                    # Loop is closed/stopping -- fall back to sync kill.
+                    return self._sync_force_kill(proc)
+            # No loop at all (agent never started) -- synchronous kill.
+            return self._sync_force_kill(proc)
+
+    @staticmethod
+    def _sync_force_kill(proc: asyncio.subprocess.Process) -> bool:
+        """Synchronously SIGKILL ``proc``; return True if the kill was issued."""
+        try:
+            proc.kill()
+            return True
+        except (ProcessLookupError, OSError):
+            return False
+
+    def _capture_partial_output(
+        self, proc: asyncio.subprocess.Process
+    ) -> str | None:
+        """Best-effort read of the subprocess stdout buffer at cancel time."""
+        try:
+            if proc.stdout and hasattr(proc.stdout, "_buffer"):
+                return bytes(proc.stdout._buffer).decode("utf-8", errors="replace")
+        except (AttributeError, OSError, UnicodeDecodeError) as e:
+            # Best-effort buffer read; failure here just means the
+            # subprocess closed mid-decode. Surface at debug for triage.
+            logger.debug("partial_output capture failed: %s", e)
+        return None
+
     def cancel(self) -> CancelResult:
         """Request graceful cancellation of the running loop.
 
@@ -251,83 +326,9 @@ class RalphAgent:
         proc = self._current_proc
 
         if proc is not None and proc.returncode is None:
-            grace = self.config.cancel_grace_seconds
-
-            # Send SIGTERM (Unix) or terminate (Windows)
-            try:
-                if sys.platform != "win32":
-                    try:
-                        proc.send_signal(signal.SIGTERM)
-                    except (ProcessLookupError, OSError):
-                        pass
-                else:
-                    try:
-                        proc.terminate()
-                    except (ProcessLookupError, OSError):
-                        pass
-            except Exception:
-                # Broad: cancel() must never propagate from a cleanup path —
-                # the caller is asking us to stop, not to discover new errors.
-                logger.exception("Failed to send termination signal")
-
-            # Wait for graceful exit (TAP-675: use get_running_loop() +
-            # stored loop reference instead of deprecated get_event_loop()).
-            async def _deferred_kill() -> None:
-                nonlocal was_forced
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=grace)
-                except TimeoutError:
-                    try:
-                        proc.kill()
-                        was_forced = True
-                    except (ProcessLookupError, OSError):
-                        pass
-
-            try:
-                # Case A: we're being called from within the agent's own loop.
-                # `asyncio.get_running_loop()` returns it; schedule directly.
-                current_loop = asyncio.get_running_loop()
-                if self._loop is not None and current_loop is self._loop:
-                    current_loop.create_task(_deferred_kill())
-                else:
-                    # Running inside some other loop than the agent's.
-                    # Fall through to the cross-thread path below.
-                    raise RuntimeError("cancel called from a different loop")
-            except RuntimeError:
-                # Case B: no running loop in this thread (sync context or
-                # supervisor thread). Use the agent's stored loop via
-                # call_soon_threadsafe so scheduling is thread-safe.
-                agent_loop = self._loop
-                if agent_loop is not None and not agent_loop.is_closed():
-                    try:
-                        agent_loop.call_soon_threadsafe(
-                            lambda: agent_loop.create_task(_deferred_kill())
-                        )
-                    except RuntimeError:
-                        # Loop is closed/stopping -- fall back to sync kill.
-                        try:
-                            proc.kill()
-                            was_forced = True
-                        except (ProcessLookupError, OSError):
-                            pass
-                else:
-                    # No loop at all (agent never started) -- synchronous kill.
-                    try:
-                        proc.kill()
-                        was_forced = True
-                    except (ProcessLookupError, OSError):
-                        pass
-
-            # Try to capture partial output (best-effort)
-            try:
-                if proc.stdout and hasattr(proc.stdout, "_buffer"):
-                    partial_output = bytes(proc.stdout._buffer).decode(
-                        "utf-8", errors="replace"
-                    )
-            except (AttributeError, OSError, UnicodeDecodeError) as e:
-                # Best-effort buffer read; failure here just means the
-                # subprocess closed mid-decode. Surface at debug for triage.
-                logger.debug("partial_output capture failed: %s", e)
+            self._signal_terminate(proc)
+            was_forced = self._schedule_or_force_kill(proc)
+            partial_output = self._capture_partial_output(proc)
 
         # Fallback to last captured partial output
         if partial_output is None:
@@ -378,18 +379,6 @@ class RalphAgent:
         return cfg.timeout_minutes * 60.0
 
     # -------------------------------------------------------------------------
-    # SDK-OUTPUT-3: Progress Snapshot
-    # -------------------------------------------------------------------------
-
-    def get_progress(self) -> ProgressSnapshot:
-        """Return a point-in-time snapshot of agent progress.
-
-        SDK-OUTPUT-3: Updated after each iteration.  Safe to call from any
-        thread while the loop is running.
-        """
-        return self._progress.model_copy()
-
-    # -------------------------------------------------------------------------
     # SDK-COST: Cost and Token accessors
     # -------------------------------------------------------------------------
 
@@ -402,1058 +391,3 @@ class RalphAgent:
     def token_rate_limiter(self) -> TokenRateLimiter:
         """Return the token rate limiter for external usage queries."""
         return self._token_rate_limiter
-
-    # -------------------------------------------------------------------------
-    # Core Loop (async, replicates ralph_loop.sh main())
-    # -------------------------------------------------------------------------
-
-    async def _check_invocation_rate_limit(self, result: TaskResult) -> bool:
-        """Return False (caller breaks) if the hourly invocation cap is hit."""
-        if not await self.check_rate_limit():
-            logger.warning("Rate limit reached, waiting for reset")
-            result.error = "Rate limit reached"
-            result.status.error_category = ErrorCategory.RATE_LIMITED
-            return False
-        return True
-
-    def _check_token_rate_limit(self, result: TaskResult) -> bool:
-        if self._token_rate_limiter.can_proceed():
-            return True
-        usage = self._token_rate_limiter.get_usage()
-        logger.warning(
-            "Token rate limit reached: %d/%d tokens this hour",
-            usage.tokens_used_this_hour,
-            usage.limit,
-        )
-        result.error = "Token rate limit reached"
-        return False
-
-    def _check_budget(self, result: TaskResult) -> bool:
-        """Return False on EXHAUSTED budget. Logs CRITICAL/WARNING but does not stop."""
-        if self.config.max_budget_usd <= 0:
-            return True
-        budget = self._cost_tracker.check_budget(self.config.max_budget_usd)
-        msg = "Budget %s: $%.4f / $%.2f (%.1f%%)"
-        args = (
-            budget.total_spent_usd,
-            budget.max_budget_usd,
-            budget.percentage_used,
-        )
-        if budget.alert_level == AlertLevel.EXHAUSTED:
-            logger.warning(msg, "exhausted", *args)
-            result.error = "Budget exhausted"
-            return False
-        if budget.alert_level == AlertLevel.CRITICAL:
-            logger.warning(msg, "CRITICAL", *args)
-        elif budget.alert_level == AlertLevel.WARNING:
-            logger.info(msg, "WARNING", *args)
-        return True
-
-    async def _run_dry_iteration(self, result: TaskResult) -> None:
-        logger.info("Dry run mode — skipping API call")
-        status = RalphStatus(
-            status="DRY_RUN",
-            work_type="DRY_RUN",
-            loop_count=self.loop_count,
-            correlation_id=self.correlation_id,
-        )
-        await self.state_backend.write_status(status.to_dict())
-        result.status = status
-
-    async def _maybe_optimize_plan(self) -> None:
-        """Run plan optimizer before the first iteration if enabled."""
-        if not self.config.optimize_plan:
-            return
-        try:
-            fix_plan_path = self.ralph_dir / "fix_plan.md"
-            if not fix_plan_path.exists():
-                return
-            graph = CachedImportGraph(
-                self.project_dir,
-                max_age_seconds=self.config.optimize_plan_cache_seconds,
-                project_type=self.config.project_type or None,
-            )
-            opt_result = optimize_plan(
-                fix_plan_path,
-                project_root=self.project_dir,
-                import_graph=graph,
-            )
-            if opt_result.changed:
-                logger.info(
-                    "Plan optimized: %s",
-                    opt_result.reason,
-                    extra={"correlation_id": self.correlation_id},
-                )
-        except Exception as exc:
-            logger.debug("Plan optimization skipped: %s", exc)
-
-    async def _initialize_run(self) -> None:
-        """Pre-loop bookkeeping: preflight, session, CB reset, plan optimize."""
-        await self._preflight_claude_version()
-        logger.info(
-            "Ralph SDK starting (v%s) [%s]",
-            self.config.model,
-            self.correlation_id,
-            extra={"correlation_id": self.correlation_id},
-        )
-        logger.info(
-            "Project: %s (%s)",
-            self.config.project_name,
-            self.config.project_type,
-            extra={"correlation_id": self.correlation_id},
-        )
-        await self._load_session()
-        self._session_iteration_count = 0
-        self._session_start_time = time.time()
-        await self._initialize_session_metadata()
-
-        cb_data = await self.state_backend.read_circuit_breaker()
-        cb = (
-            CircuitBreakerState._from_state_dict(cb_data)
-            if cb_data
-            else CircuitBreakerState()
-        )
-        cb.no_progress_count = 0
-        cb.same_error_count = 0
-        await self.state_backend.write_circuit_breaker(cb._to_state_dict())
-
-        await self._maybe_optimize_plan()
-
-    def _post_iteration_decomposition_check(
-        self, iteration_status: RalphStatus
-    ) -> None:
-        hint = detect_decomposition_needed(
-            iteration_status, self._iteration_history, self.config
-        )
-        if hint.should_decompose:
-            logger.warning(
-                "SDK-SAFETY-2: %s (suggested_split=%d)",
-                hint.reason,
-                hint.suggested_split,
-            )
-            self._pending_decomposition_hint = hint
-
-    async def _execute_iteration(
-        self,
-        result: TaskResult,
-        all_files_changed: dict[str, None],
-    ) -> bool:
-        """Run one loop iteration. Returns True to continue, False to break."""
-        if not await self._check_invocation_rate_limit(result):
-            return False
-        if not self._check_token_rate_limit(result):
-            return False
-        if not self._check_budget(result):
-            return False
-        if not await self.check_circuit_breaker():
-            logger.warning("Circuit breaker OPEN, stopping")
-            result.error = "Circuit breaker open"
-            return False
-
-        if self.config.dry_run:
-            await self._run_dry_iteration(result)
-            return False
-
-        task_input = TaskInput.from_ralph_dir(str(self.ralph_dir))
-        if not task_input.prompt and not task_input.fix_plan:
-            logger.error("No PROMPT.md or fix_plan.md found")
-            result.error = "No task input found"
-            return False
-
-        iteration_status = await self.run_iteration(task_input)
-
-        self._session_iteration_count += 1
-        if await self._should_rotate_session():
-            logger.info(
-                "Session rotation triggered at iteration %d (session iterations=%d)",
-                self.loop_count,
-                self._session_iteration_count,
-            )
-            await self._rotate_session(iteration_status)
-
-        for fp in self._last_iteration_files:
-            all_files_changed.setdefault(fp, None)
-
-        self._record_iteration_history(iteration_status)
-        self._post_iteration_decomposition_check(iteration_status)
-
-        if await self.should_exit(iteration_status, self.loop_count):
-            logger.info("Exit conditions met after %d loops", self.loop_count)
-            result.status = iteration_status
-            return False
-
-        await asyncio.sleep(2)
-        return True
-
-    def _finalize_result(
-        self, result: TaskResult, all_files_changed: dict[str, None]
-    ) -> None:
-        self._running = False
-        result.loop_count = self.loop_count
-        result.duration_seconds = time.time() - self.start_time
-        result.tokens_in = self._last_tokens_in
-        result.tokens_out = self._last_tokens_out
-        result.files_changed = list(all_files_changed)
-        session_cost = self._cost_tracker.get_session_cost()
-        result.total_cost_usd = session_cost.total_usd
-
-    async def run(self) -> TaskResult:
-        """Execute the autonomous loop until exit conditions are met."""
-        self.start_time = time.time()
-        self._running = True
-        self._cancelled = False
-        # TAP-675: Capture the loop we're running on so cancel() from another
-        # thread can schedule work safely via call_soon_threadsafe.
-        self._loop = asyncio.get_running_loop()
-
-        await self._initialize_run()
-
-        result = TaskResult()
-        all_files_changed: dict[str, None] = {}
-
-        try:
-            while self._running:
-                self.loop_count += 1
-                logger.info("Loop iteration %d", self.loop_count)
-                if not await self._execute_iteration(result, all_files_changed):
-                    break
-        except KeyboardInterrupt:
-            logger.info("Interrupted by user")
-            result.error = "User interrupt"
-        except Exception as e:
-            logger.exception("Unexpected error in loop")
-            result.error = str(e)
-            result.status.error_category = classify_error(exception=e)
-        finally:
-            self._finalize_result(result, all_files_changed)
-
-        return result
-
-    async def run_iteration(
-        self,
-        task_input: TaskInput | None = None,
-        system_prompt: str | None = None,
-    ) -> RalphStatus:
-        """Execute a single loop iteration via Claude Code CLI.
-
-        Uses asyncio.create_subprocess_exec() with asyncio.wait_for() timeout.
-
-        Args:
-            task_input: Task input to process. Loads from .ralph/ if None.
-            system_prompt: Optional system prompt passed through to Claude CLI
-                via --system-prompt flag.
-        """
-        if task_input is None:
-            task_input = TaskInput.from_ralph_dir(str(self.ralph_dir))
-
-        # Build the prompt for this iteration
-        prompt = self._build_iteration_prompt(task_input)
-
-        # SDK-SAFETY-2: Inject decomposition hint into prompt if pending
-        if self._pending_decomposition_hint and self._pending_decomposition_hint.should_decompose:
-            hint = self._pending_decomposition_hint
-            prompt += (
-                f"\n\n## Decomposition Advisory\n\n"
-                f"**{hint.reason}**\n\n"
-                f"Consider splitting this work into ~{hint.suggested_split} smaller sub-tasks "
-                f"before proceeding. Focus on one logical unit of change per iteration."
-            )
-            self._pending_decomposition_hint = None  # Consumed
-
-        # Build Claude CLI command (task_text feeds per-task model routing)
-        cmd = self._build_claude_command(
-            prompt,
-            system_prompt=system_prompt,
-            task_text=self._extract_next_task_text(task_input),
-        )
-
-        logger.debug("Invoking: %s", " ".join(cmd[:5]) + "...")
-
-        iteration_start = time.time()
-
-        # SDK-LIFECYCLE-2: Compute effective timeout (adaptive or static)
-        timeout_seconds = self._get_effective_timeout_seconds()
-
-        # Execute Claude CLI asynchronously
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.project_dir),
-            )
-
-            # SDK-LIFECYCLE-1: Track current subprocess for cancel()
-            self._current_proc = proc
-
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout_seconds,
-            )
-
-            # SDK-LIFECYCLE-1: Clear subprocess reference
-            self._current_proc = None
-
-            stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
-            stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
-            returncode = proc.returncode or 0
-
-            # SDK-LIFECYCLE-1: Stash partial output for cancel()
-            self._last_partial_output = stdout if stdout else None
-
-            # SDK-LIFECYCLE-2: Record iteration duration for adaptive timeout
-            iteration_duration_for_history = time.time() - iteration_start
-            self._iteration_durations.append(iteration_duration_for_history)
-            if len(self._iteration_durations) > _ADAPTIVE_TIMEOUT_HISTORY_SIZE:
-                self._iteration_durations = self._iteration_durations[
-                    -_ADAPTIVE_TIMEOUT_HISTORY_SIZE:
-                ]
-
-            # Increment call count
-            await self._increment_call_count()
-
-            # Parse response (also extracts session_id and token counts)
-            status = self._parse_response(stdout, returncode)
-            status.loop_count = self.loop_count
-            status.session_id = self.session_id
-            status.correlation_id = self.correlation_id
-
-            # SDK-COST-1: Record cost for this iteration
-            if not self._tokens_extracted:
-                # TAP-662: distinguish "no usage block" from "0 tokens used"
-                logger.warning(
-                    "No token counts in CLI output; cost for this iteration not recorded"
-                )
-            elif self._last_tokens_in or self._last_tokens_out:
-                self._cost_tracker.record_iteration(
-                    model=self.config.model,
-                    input_tokens=self._last_tokens_in,
-                    output_tokens=self._last_tokens_out,
-                )
-
-            # SDK-COST-3: Record tokens for rate limiting
-            self._token_rate_limiter.record_tokens(
-                self._last_tokens_in,
-                self._last_tokens_out,
-            )
-
-            # SDK-OUTPUT-2: Classify errors on non-zero exit codes
-            if returncode != 0:
-                status.error_category = classify_error(
-                    exit_code=returncode,
-                    output=stdout + stderr,
-                )
-
-            # SDK-OUTPUT-1: Extract files_changed from JSONL tool_use records
-            iteration_files = extract_files_changed(stdout)
-
-            # SDK-LIFECYCLE-3: Detect permission denials
-            denials = detect_permission_denials(stdout)
-            if denials:
-                status.permission_denials = denials
-                logger.info(
-                    "Detected %d permission denial(s): %s",
-                    len(denials),
-                    ", ".join(
-                        f"{d.tool_name}({d.denied_pattern})"
-                        for d in denials
-                    ),
-                )
-
-            await self.state_backend.write_status(status.to_dict())
-
-            # Persist extracted session_id for continuity across restarts
-            if self.session_id:
-                await self._save_session()
-
-            # SDK-CONTEXT-3: Update session metadata
-            await self._update_session_metadata()
-
-            # SDK-OUTPUT-3: Update progress snapshot
-            self._update_progress(status, iteration_files)
-
-            # SDK-OUTPUT-4: Record metrics
-            iteration_duration = time.time() - iteration_start
-            self._record_iteration_metrics(
-                status=status,
-                files_changed=iteration_files,
-                duration_seconds=iteration_duration,
-            )
-
-            # Log output
-            self._log_output(stdout, stderr, self.loop_count)
-
-            # Stash iteration files on the result so callers of run() can access them
-            self._last_iteration_files = iteration_files
-
-            return status
-
-        except TimeoutError:
-            timeout_minutes_used = timeout_seconds / 60.0
-            logger.warning(
-                "Claude CLI timed out after %.1f minutes", timeout_minutes_used,
-            )
-            # SDK-LIFECYCLE-1: Clear subprocess reference
-            self._current_proc = None
-            # Kill the orphaned subprocess to prevent resource leaks
-            try:
-                proc.kill()
-                await proc.wait()
-            except (ProcessLookupError, OSError) as e:
-                # Process already dead or wait() race — both are benign on
-                # the timeout path; everything else has already given up.
-                logger.debug("post-timeout proc cleanup: %s", e)
-            status = RalphStatus(
-                status="TIMEOUT",
-                work_type="UNKNOWN",
-                error=f"Timeout after {timeout_minutes_used:.0f} minutes",
-                loop_count=self.loop_count,
-                error_category=ErrorCategory.TIMEOUT,
-            )
-            await self.state_backend.write_status(status.to_dict())
-            self._update_progress(status, [])
-            return status
-
-        except FileNotFoundError:
-            self._current_proc = None
-            logger.error("Claude CLI not found: %s", self.config.claude_code_cmd)
-            return RalphStatus(
-                status="ERROR",
-                error=f"Claude CLI not found: {self.config.claude_code_cmd}",
-                error_category=ErrorCategory.TOOL_UNAVAILABLE,
-            )
-
-    async def should_exit(self, status: RalphStatus, loop_count: int) -> bool:
-        """Dual-condition exit gate (matching bash implementation).
-
-        Requires BOTH:
-        1. completion_indicators >= 2 (NLP heuristics)
-        2. EXIT_SIGNAL: true (explicit from Claude)
-
-        SDK-SAFETY-3: Completion indicator decay -- when productive work
-        occurs (files_modified > 0 or tasks_completed > 0) AND exit_signal
-        is False, reset completion_indicators to prevent stale done signals
-        from combining with later signals for premature exit.
-        """
-        # SDK-SAFETY-3: Decay stale completion indicators on productive work
-        # without exit signal. This prevents premature exit when Claude said
-        # "done" earlier but then continued making real progress.
-        files_modified = len(self._last_iteration_files)
-        tasks_completed = 1 if status.completed_task else 0
-
-        if (files_modified > 0 or tasks_completed > 0) and not status.exit_signal:
-            if self._completion_indicators > 0:
-                logger.debug(
-                    "SDK-SAFETY-3: Resetting %d completion indicators "
-                    "(productive work without exit_signal: %d files, %d tasks)",
-                    self._completion_indicators,
-                    files_modified,
-                    tasks_completed,
-                )
-                self._completion_indicators = 0
-                self._completion_indicator_list.clear()
-
-        if status.exit_signal:
-            self._completion_indicators += 1
-            self._completion_indicator_list.append("exit_signal")
-
-        # Check for completion phrases in progress summary
-        completion_phrases = [
-            "all tasks complete",
-            "all tasks done",
-            "nothing left",
-            "no remaining tasks",
-            "work is complete",
-            "all items checked",
-        ]
-        summary_lower = status.progress_summary.lower()
-        if any(phrase in summary_lower for phrase in completion_phrases):
-            self._completion_indicators += 1
-            self._completion_indicator_list.append("completion_phrase")
-
-        # Dual condition: need both indicators and explicit exit signal
-        return self._completion_indicators >= 2 and status.exit_signal
-
-    async def check_rate_limit(self) -> bool:
-        """Check if within rate limits via state backend."""
-        call_count = await self.state_backend.read_call_count()
-        last_reset = await self.state_backend.read_last_reset()
-        now = int(time.time())
-        elapsed = now - last_reset if last_reset > 0 else 3600
-        remaining = max(0, self.config.max_calls_per_hour - call_count)
-        # If the hour has elapsed, we're not rate limited
-        if elapsed >= 3600:
-            return True
-        return remaining > 0
-
-    async def check_circuit_breaker(self) -> bool:
-        """Check circuit breaker via state backend — returns True if OK to proceed."""
-        cb_data = await self.state_backend.read_circuit_breaker()
-        state = cb_data.get("state", "CLOSED")
-        return state in ("CLOSED", "HALF_OPEN")
-
-    # -------------------------------------------------------------------------
-    # Private helpers
-    # -------------------------------------------------------------------------
-
-    def _build_iteration_prompt(self, task_input: TaskInput) -> str:
-        """Build the prompt for one iteration with progressive context loading.
-
-        SDK-CONTEXT-1: Trims fix_plan.md to the active section to reduce tokens.
-        SDK-CONTEXT-2: Splits into stable/dynamic parts and tracks cache stats.
-        """
-        parts = []
-        if task_input.prompt:
-            parts.append(task_input.prompt)
-        if task_input.fix_plan:
-            # SDK-CONTEXT-1: Progressive context loading — trim fix_plan
-            trimmed_plan = self._context_manager.trim_fix_plan(task_input.fix_plan)
-            token_estimate = estimate_tokens(trimmed_plan)
-            logger.debug(
-                "Fix plan trimmed: %d -> %d chars (~%d tokens)",
-                len(task_input.fix_plan),
-                len(trimmed_plan),
-                token_estimate,
-            )
-            parts.append(f"\n\n## Current Fix Plan\n\n{trimmed_plan}")
-        if task_input.agent_instructions:
-            parts.append(f"\n\n## Build/Run Instructions\n\n{task_input.agent_instructions}")
-
-        full_prompt = "\n".join(parts)
-
-        # SDK-CONTEXT-2: Prompt cache optimization — split and track
-        loop_context = {
-            "loop_count": self.loop_count,
-            "session_id": self.session_id,
-            "session_iteration": self._session_iteration_count,
-        }
-        prompt_parts = split_prompt(full_prompt, loop_context)
-        is_hit = self._prompt_cache_stats.record(prompt_parts.prefix_hash)
-        logger.debug(
-            "Prompt cache %s (hit_rate=%.1f%%, prefix_hash=%s)",
-            "HIT" if is_hit else "MISS",
-            self._prompt_cache_stats.hit_rate * 100,
-            prompt_parts.prefix_hash[:8],
-        )
-
-        return prompt_parts.full_prompt()
-
-    async def _preflight_claude_version(self) -> None:
-        """Verify Claude CLI >= config.claude_min_version, else raise.
-
-        TAP-1104: SDK only supports agent mode. The `--agent` flag landed in
-        Claude CLI 2.1.0; older binaries will silently ignore it and fall
-        back to legacy `-p` mode, which is the failure the bash side already
-        deleted via ADR-0006. We detect at startup and refuse to proceed.
-
-        Network/exec errors degrade to a WARN log (matches bash behavior at
-        ralph_loop.sh:1649-1652) — never raise on "could not detect".
-        """
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                self.config.claude_code_cmd, "--version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-        except (TimeoutError, FileNotFoundError, OSError) as e:
-            logger.warning("Cannot detect Claude CLI version (%s); assuming compatible", e)
-            return
-
-        match = re.search(rb"(\d+)\.(\d+)\.(\d+)", stdout)
-        if not match:
-            logger.warning("Cannot parse Claude CLI version from %r; assuming compatible", stdout[:80])
-            return
-
-        installed = tuple(int(g) for g in match.groups())
-        required = tuple(
-            int(g) for g in (self.config.claude_min_version.split(".") + ["0", "0", "0"])[:3]
-        )
-        if installed < required:
-            raise RalphConfigError(
-                f"Claude CLI version {'.'.join(map(str, installed))} is older than "
-                f"required {self.config.claude_min_version}. Agent mode (--agent) "
-                f"requires CLI >= 2.1.0. Upgrade with: "
-                f"npm update -g @anthropic-ai/claude-code"
-            )
-
-    def _build_claude_command(
-        self,
-        prompt: str,
-        system_prompt: str | None = None,
-        task_text: str = "",
-    ) -> list[str]:
-        """Build Claude CLI command (matching bash build_claude_command())."""
-        cmd = [self.config.claude_code_cmd]
-
-        # TAP-1104: agent mode is the only execution path. The
-        # `--allowedTools` flag is incompatible with `--agent` and is
-        # therefore intentionally not emitted; tool surface is set by the
-        # agent file's `tools:` allowlist + `disallowedTools:` blocklist.
-        cmd.extend(["--agent", self.config.agent_name])
-
-        # System prompt (for TheStudio DeveloperRoleConfig injection)
-        if system_prompt:
-            cmd.extend(["--system-prompt", system_prompt])
-
-        # Model: per-task complexity routing when enabled, else config.model.
-        # Falls back to config.model when task_text is empty so behavior matches
-        # the bash build_claude_command (lib/complexity.sh::ralph_select_model).
-        effective_model = self._select_effective_model(task_text)
-        if effective_model:
-            cmd.extend(["--model", effective_model])
-
-        # Prompt
-        cmd.extend(["-p", prompt])
-
-        # Output format
-        cmd.extend(["--output-format", self.config.output_format])
-
-        # Session continuity
-        if self.config.session_continuity and self.session_id:
-            cmd.extend(["--continue", self.session_id])
-
-        # Max turns
-        cmd.extend(["--max-turns", str(self.config.max_turns)])
-
-        return cmd
-
-    def _extract_next_task_text(self, task_input: TaskInput) -> str:
-        """Pull the first unchecked fix_plan.md task line for model routing.
-
-        Returns empty string when no plan/no unchecked tasks — caller treats
-        empty as "no routing input" and falls back to config.model.
-        """
-        if not task_input.fix_plan:
-            return ""
-        for line in task_input.fix_plan.splitlines():
-            stripped = line.lstrip()
-            if stripped.startswith("- [ ]"):
-                return stripped[5:].strip()[:300]
-        return ""
-
-    def _select_effective_model(self, task_text: str) -> str:
-        """Route to a model based on task complexity, or fall back to config.model.
-
-        Mirrors bash ralph_select_model: routing must be opted in
-        (model_routing_enabled=true) AND task_text must be non-empty. The
-        config.model_map_* fields determine the per-band targets.
-        """
-        if not self.config.model_routing_enabled or not task_text:
-            return self.config.model
-        try:
-            band = classify_complexity(task_text)
-            model_map = {
-                CostComplexityBand.TRIVIAL: self.config.model_map_trivial,
-                CostComplexityBand.SMALL: self.config.model_map_small,
-                CostComplexityBand.MEDIUM: self.config.model_map_medium,
-                CostComplexityBand.LARGE: self.config.model_map_large,
-                CostComplexityBand.ARCHITECTURAL: self.config.model_map_architectural,
-            }
-            routed = select_model(band, retry_count=0, model_map=model_map)
-        except Exception:
-            return self.config.model
-        if routed and routed != self.config.model:
-            logger.info(
-                "Model routed: %s (complexity=%s, override of %s)",
-                routed, band.value, self.config.model,
-            )
-        return routed or self.config.model
-
-    def _parse_response(self, stdout: str, return_code: int) -> RalphStatus:
-        """Parse Claude CLI response using 3-strategy chain (JSON block -> JSONL -> text).
-
-        Delegates to ralph_sdk.parsing.parse_ralph_status for the actual parsing,
-        with session_id extraction handled here.
-        """
-        status = RalphStatus()
-
-        if return_code != 0:
-            status.status = "ERROR"
-            status.error = f"Claude CLI exited with code {return_code}"
-            return status
-
-        # Extract session_id from JSONL before parsing status
-        self._extract_session_id(stdout)
-
-        # Use the 3-strategy parse chain
-        return parse_ralph_status(stdout)
-
-    def _extract_session_id(self, stdout: str) -> None:
-        """Extract session_id and token counts from JSONL result objects."""
-        self._last_tokens_in = 0
-        self._last_tokens_out = 0
-        self._tokens_extracted = False
-        for line in reversed(stdout.strip().splitlines()):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-                if obj.get("type") == "result":
-                    if "session_id" in obj:
-                        self.session_id = obj["session_id"]
-                    # Claude Code emits token counts nested under "usage".
-                    usage = obj.get("usage") or {}
-                    self._last_tokens_in += usage.get("input_tokens", 0)
-                    self._last_tokens_out += usage.get("output_tokens", 0)
-                    self._tokens_extracted = True
-                    return
-            except json.JSONDecodeError:
-                continue
-
-    async def _load_session(self) -> None:
-        """Load session ID via state backend."""
-        self.session_id = await self.state_backend.read_session_id()
-
-    async def _save_session(self) -> None:
-        """Save session ID via state backend."""
-        await self.state_backend.write_session_id(self.session_id)
-
-    async def _increment_call_count(self) -> None:
-        """Increment API call counter via state backend (matching bash rate limiting)."""
-        now = int(time.time())
-        last_reset = await self.state_backend.read_last_reset()
-
-        if now - last_reset >= 3600:
-            # Reset counter
-            await self.state_backend.write_call_count(1)
-            await self.state_backend.write_last_reset(now)
-        else:
-            # Increment
-            count = await self.state_backend.read_call_count()
-            await self.state_backend.write_call_count(count + 1)
-
-    def _log_output(self, stdout: str, stderr: str, loop_count: int) -> None:
-        """Log Claude output to .ralph/logs/."""
-        log_dir = self.ralph_dir / "logs"
-        log_dir.mkdir(exist_ok=True)
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        log_file = log_dir / f"claude_output_{loop_count:04d}_{timestamp}.log"
-        try:
-            with open(log_file, "w", encoding="utf-8") as f:
-                f.write(f"=== Loop {loop_count} — {timestamp} ===\n")
-                f.write(f"=== STDOUT ===\n{stdout}\n")
-                if stderr:
-                    f.write(f"=== STDERR ===\n{stderr}\n")
-        except OSError:
-            pass
-
-    # -------------------------------------------------------------------------
-    # SDK-SAFETY-2: Iteration history tracking
-    # -------------------------------------------------------------------------
-
-    def _record_iteration_history(self, status: RalphStatus) -> None:
-        """Record an IterationRecord for decomposition detection.
-
-        SDK-SAFETY-2: Builds up iteration_history so that
-        detect_decomposition_needed() can evaluate the 4-factor heuristic.
-        """
-        files_modified = len(self._last_iteration_files)
-        tasks_completed = 1 if status.completed_task else 0
-        had_progress = files_modified > 0 or tasks_completed > 0
-        timed_out = str(status.status).upper() == "TIMEOUT"
-
-        record = IterationRecord(
-            loop_count=self.loop_count,
-            files_modified=files_modified,
-            tasks_completed=tasks_completed,
-            timed_out=timed_out,
-            complexity=_estimate_complexity(status),
-            file_count=_estimate_file_count(status),
-            had_progress=had_progress,
-        )
-        self._iteration_history.append(record)
-
-        # Keep only last 20 records to bound memory
-        if len(self._iteration_history) > 20:
-            self._iteration_history = self._iteration_history[-20:]
-
-    # -------------------------------------------------------------------------
-    # SDK-OUTPUT-3: Progress snapshot update
-    # -------------------------------------------------------------------------
-
-    def _update_progress(
-        self,
-        status: RalphStatus,
-        files_modified: list[str],
-    ) -> None:
-        """Update the internal progress snapshot after an iteration.
-
-        SDK-OUTPUT-3: Called at the end of each run_iteration() so that
-        ``get_progress()`` always reflects the latest state.
-        """
-        self._progress = ProgressSnapshot(
-            loop_count=self.loop_count,
-            work_type=status.work_type.value if hasattr(status.work_type, "value") else str(status.work_type),
-            current_task=status.next_task or status.completed_task,
-            elapsed_seconds=time.time() - self.start_time if self.start_time else 0.0,
-            circuit_breaker_state=status.circuit_breaker_state,
-            session_id=self.session_id,
-            files_modified_this_loop=files_modified,
-        )
-
-    # -------------------------------------------------------------------------
-    # SDK-OUTPUT-4: Metrics recording
-    # -------------------------------------------------------------------------
-
-    def _record_iteration_metrics(
-        self,
-        status: RalphStatus,
-        files_changed: list[str],
-        duration_seconds: float,
-    ) -> None:
-        """Record a MetricEvent for the completed iteration.
-
-        SDK-OUTPUT-4: Delegates to the configured MetricsCollector.
-        """
-        event = MetricEvent(
-            event_type="iteration_complete",
-            loop_count=self.loop_count,
-            duration_seconds=round(duration_seconds, 3),
-            work_type=status.work_type.value if hasattr(status.work_type, "value") else str(status.work_type),
-            files_changed=files_changed,
-            tokens_in=self._last_tokens_in,
-            tokens_out=self._last_tokens_out,
-            model=self.config.model,
-        )
-        try:
-            self.metrics_collector.record(event)
-        except Exception:
-            # Broad: metrics is observability — a backend bug must never
-            # crash the agent loop. Surface stack at debug for triage.
-            logger.exception("Failed to record metrics")
-
-    # -------------------------------------------------------------------------
-    # SDK-CONTEXT-3: Session Lifecycle Management
-    # -------------------------------------------------------------------------
-
-    async def _initialize_session_metadata(self) -> None:
-        """Initialize or load session metadata for lifecycle tracking."""
-        metadata = await self.state_backend.read_session_metadata()
-        if metadata and self.session_id:
-            # Check session expiry
-            created_at = metadata.get("created_at", 0)
-            expiry_seconds = self.config.session_expiry_hours * 3600
-            if created_at and (time.time() - created_at) > expiry_seconds:
-                logger.info(
-                    "Session expired (age=%.1fh, TTL=%dh) — rotating",
-                    (time.time() - created_at) / 3600,
-                    self.config.session_expiry_hours,
-                )
-                await self._expire_session()
-                return
-
-            # Resume existing session
-            self._session_iteration_count = metadata.get("iteration_count", 0)
-            self._session_start_time = metadata.get("created_at", time.time())
-        else:
-            # New session
-            await self.state_backend.write_session_metadata({
-                "session_id": self.session_id,
-                "created_at": time.time(),
-                "iteration_count": 0,
-                "correlation_id": self.correlation_id,
-            })
-
-    async def _should_rotate_session(self) -> bool:
-        """Check if the current session should be rotated (continue-as-new).
-
-        SDK-CONTEXT-3: Returns True if max iterations or max age exceeded.
-        """
-        if not self.config.continue_as_new_enabled:
-            return False
-
-        # Check iteration count
-        if self._session_iteration_count >= self.config.max_session_iterations:
-            logger.debug(
-                "Session rotation: iteration limit reached (%d >= %d)",
-                self._session_iteration_count,
-                self.config.max_session_iterations,
-            )
-            return True
-
-        # Check session age
-        session_age_minutes = (time.time() - self._session_start_time) / 60
-        if session_age_minutes >= self.config.max_session_age_minutes:
-            logger.debug(
-                "Session rotation: age limit reached (%.1f >= %d minutes)",
-                session_age_minutes,
-                self.config.max_session_age_minutes,
-            )
-            return True
-
-        return False
-
-    async def _rotate_session(self, last_status: RalphStatus) -> None:
-        """Perform session rotation: save essential state, clear session, start fresh.
-
-        SDK-CONTEXT-3: Continue-As-New pattern — preserves progress while
-        starting a fresh context window.
-
-        TAP-671: When the circuit breaker is non-CLOSED at rotation time,
-        the session is being reset because Claude's side is unhealthy.
-        Carrying the old session_id through continue-as-new would mislead
-        any downstream consumer into thinking --continue is still viable.
-        Blank it out so the next iteration uses a truly fresh session.
-        """
-        old_session_id = self.session_id
-
-        # Check CB state so we can decide whether to carry session_id forward
-        cb_data = await self.state_backend.read_circuit_breaker()
-        cb_state = (cb_data or {}).get("state", "CLOSED")
-        carry_session_id = cb_state == "CLOSED"
-
-        # Build continue-as-new state
-        continue_state = ContinueAsNewState(
-            current_task=last_status.next_task or last_status.completed_task,
-            progress=last_status.progress_summary,
-            key_findings=[],
-            continued_from_loop=self.loop_count,
-            previous_session_id=old_session_id if carry_session_id else "",
-        )
-        await self.state_backend.write_continue_as_new_state(continue_state.to_dict())
-
-        # Record old session in history — tag the reason when rotation was
-        # triggered with a tripped CB so post-mortem queries can find these.
-        history_reason = (
-            "continue_as_new_cb_open" if not carry_session_id else "continue_as_new"
-        )
-        await self.state_backend.append_session_history({
-            "session_id": old_session_id,
-            "started_at": self._session_start_time,
-            "ended_at": time.time(),
-            "iteration_count": self._session_iteration_count,
-            "loop_count_at_end": self.loop_count,
-            "reason": history_reason,
-            "cb_state_at_rotation": cb_state,
-            "correlation_id": self.correlation_id,
-        })
-
-        # Clear session to force a new one on next iteration
-        self.session_id = ""
-        await self.state_backend.write_session_id("")
-
-        # Reset session-level counters
-        self._session_iteration_count = 0
-        self._session_start_time = time.time()
-
-        # Write fresh metadata
-        await self.state_backend.write_session_metadata({
-            "session_id": "",
-            "created_at": time.time(),
-            "iteration_count": 0,
-            "correlation_id": self.correlation_id,
-            "continued_from": old_session_id,
-        })
-
-        # Reset prompt cache (new session = new prefix)
-        self._prompt_cache_stats = PromptCacheStats()
-
-        logger.info(
-            "Session rotated: %s -> (new) after %d session iterations",
-            old_session_id[:12] + "..." if old_session_id else "(none)",
-            continue_state.continued_from_loop,
-        )
-
-    async def _expire_session(self) -> None:
-        """Handle session expiry: archive and clear.
-
-        SDK-CONTEXT-3: Called when session exceeds session_expiry_hours TTL.
-        """
-        old_session_id = self.session_id
-
-        # Record in history
-        if old_session_id:
-            await self.state_backend.append_session_history({
-                "session_id": old_session_id,
-                "started_at": self._session_start_time,
-                "ended_at": time.time(),
-                "iteration_count": self._session_iteration_count,
-                "reason": "expired",
-                "correlation_id": self.correlation_id,
-            })
-
-        # Clear session
-        self.session_id = ""
-        await self.state_backend.write_session_id("")
-        self._session_iteration_count = 0
-        self._session_start_time = time.time()
-
-        # Write fresh metadata
-        await self.state_backend.write_session_metadata({
-            "session_id": "",
-            "created_at": time.time(),
-            "iteration_count": 0,
-            "correlation_id": self.correlation_id,
-            "expired_from": old_session_id,
-        })
-
-        logger.info("Session expired and cleared: %s", old_session_id[:12] + "..." if old_session_id else "(none)")
-
-    async def _update_session_metadata(self) -> None:
-        """Update session metadata after each iteration."""
-        await self.state_backend.write_session_metadata({
-            "session_id": self.session_id,
-            "created_at": self._session_start_time,
-            "iteration_count": self._session_iteration_count,
-            "correlation_id": self.correlation_id,
-            "last_updated": time.time(),
-        })
-
-    def get_prompt_cache_stats(self) -> PromptCacheStats:
-        """Return current prompt cache statistics.
-
-        SDK-CONTEXT-2: Useful for observability and debugging cache behavior.
-        """
-        return self._prompt_cache_stats.model_copy()
-
-        # -------------------------------------------------------------------------
-    # TheStudio Adapter (SDK-3)
-    # -------------------------------------------------------------------------
-
-    async def process_task_packet(self, packet: dict[str, Any]) -> dict[str, Any]:
-        """Process a TheStudio TaskPacket and return a Signal.
-
-        Converts TaskPacket -> TaskInput, runs iteration, returns TaskResult as Signal.
-        """
-        task_input = TaskInput.from_task_packet(packet)
-        status = await self.run_iteration(task_input)
-        result = TaskResult(
-            status=status,
-            loop_count=self.loop_count,
-            duration_seconds=time.time() - self.start_time if self.start_time else 0,
-        )
-        return result.to_signal()
-
-    # -------------------------------------------------------------------------
-    # Tool handlers (for Agent SDK tool registration)
-    # -------------------------------------------------------------------------
-
-    async def handle_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-        """Dispatch tool calls to appropriate async handlers."""
-        if tool_name == "ralph_status":
-            return await ralph_status_tool(
-                ralph_dir=str(self.ralph_dir), **tool_input
-            )
-        elif tool_name == "ralph_rate_check":
-            return await ralph_rate_check_tool(
-                ralph_dir=str(self.ralph_dir),
-                max_calls_per_hour=self.config.max_calls_per_hour,
-            )
-        elif tool_name == "ralph_circuit_state":
-            return await ralph_circuit_state_tool(
-                ralph_dir=str(self.ralph_dir),
-            )
-        elif tool_name == "ralph_task_update":
-            return await ralph_task_update_tool(
-                ralph_dir=str(self.ralph_dir), **tool_input
-            )
-        return {"ok": False, "error": f"Unknown tool: {tool_name}"}
-
-    def get_tool_definitions(self) -> list[dict[str, Any]]:
-        """Return tool definitions for Agent SDK registration."""
-        return [
-            {k: v for k, v in tool.items() if k != "handler"}
-            for tool in RALPH_TOOLS
-        ]

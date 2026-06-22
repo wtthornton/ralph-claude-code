@@ -11,108 +11,18 @@ Language support:
 
 from __future__ import annotations
 
-import ast
 import json
-import re
 import time
 from pathlib import Path
 
-_SKIP_DIRS = {"node_modules", ".venv", "__pycache__", ".git", ".ralph", ".cache"}
+from ralph_sdk.graph_builders import build_js_graph, build_python_graph
 
-
-_PY_MODULE_EXTS = (".py", "/__init__.py")
-
-
-def _resolve_python_module(module: str, root: Path) -> str | None:
-    """Map a dotted module path to its on-disk source relative to `root`."""
-    mod_path = module.replace(".", "/")
-    for ext in _PY_MODULE_EXTS:
-        candidate = root / (mod_path + ext)
-        if candidate.exists():
-            return str(candidate.relative_to(root))
-    return None
-
-
-def _python_imports_for_node(node: ast.AST, root: Path) -> list[str]:
-    if isinstance(node, ast.ImportFrom) and node.module:
-        rel = _resolve_python_module(node.module, root)
-        return [rel] if rel else []
-    if isinstance(node, ast.Import):
-        return [
-            rel for alias in node.names
-            if (rel := _resolve_python_module(alias.name, root)) is not None
-        ]
-    return []
-
-
-def _python_file_deps(file_path: Path, root: Path) -> list[str]:
-    tree = ast.parse(file_path.read_text(encoding="utf-8", errors="ignore"))
-    deps: list[str] = []
-    for node in ast.walk(tree):
-        deps.extend(_python_imports_for_node(node, root))
-    return sorted({d.replace("\\", "/") for d in deps})
-
-
-def build_python_graph(project_root: Path) -> dict[str, list[str]]:
-    """Build import graph for Python project via ast.parse().
-
-    Returns a dict mapping relative file path to its sorted dependency paths.
-    """
-    root = project_root.resolve()
-    graph: dict[str, list[str]] = {}
-    for f in root.rglob("*.py"):
-        if any(part in _SKIP_DIRS for part in f.parts):
-            continue
-        try:
-            deps = _python_file_deps(f, root)
-        except (SyntaxError, UnicodeDecodeError, OSError):
-            continue
-        rel = str(f.relative_to(root)).replace("\\", "/")
-        graph[rel] = deps
-    return graph
-
-
-def build_js_graph(project_root: Path) -> dict[str, list[str]]:
-    """Build import graph for JS/TS project via regex extraction.
-
-    Returns:
-        Dict mapping relative file path to list of relative dependency paths.
-    """
-    root = project_root.resolve()
-    graph: dict[str, list[str]] = {}
-    import_re = re.compile(
-        r"""(?:import\s+.*?from\s+['"](.+?)['"]|require\(['"](.+?)['"]\))"""
-    )
-    js_extensions = ["*.js", "*.jsx", "*.ts", "*.tsx"]
-    resolve_exts = ["", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.js"]
-
-    for ext_pattern in js_extensions:
-        for f in root.rglob(ext_pattern):
-            if any(part in _SKIP_DIRS for part in f.parts):
-                continue
-            try:
-                content = f.read_text(encoding="utf-8", errors="ignore")
-                resolved: list[str] = []
-                for m in import_re.finditer(content):
-                    dep = m.group(1) or m.group(2)
-                    if not dep.startswith("."):
-                        continue  # skip bare package imports
-                    candidate = (f.parent / dep).resolve()
-                    for try_ext in resolve_exts:
-                        full = Path(str(candidate) + try_ext)
-                        if full.exists():
-                            try:
-                                resolved.append(str(full.relative_to(root)))
-                            except ValueError:
-                                pass
-                            break
-                graph[str(f.relative_to(root)).replace("\\", "/")] = sorted(
-                    set(r.replace("\\", "/") for r in resolved)
-                )
-            except (UnicodeDecodeError, OSError):
-                pass
-
-    return graph
+__all__ = [
+    "CachedImportGraph",
+    "build_import_graph",
+    "build_js_graph",
+    "build_python_graph",
+]
 
 
 def build_import_graph(
