@@ -1,14 +1,46 @@
 {
   "mcpServers": {
-    "tapps-mcp": {
-      "type": "stdio",
-      "command": "tapps-mcp",
-      "args": [
-        "serve"
-      ],
-      "env": {
-        "TAPPS_MCP_PROJECT_ROOT": "${workspaceFolder}"
+    "nlt-build": {
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:8760/mcp",
+        "headers": {
+          "X-Tapps-Project-Root": "/home/wtthornton/code/ralph-claude-code"
+        }
+      },
+      "nlt-memory": {
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:8761/mcp",
+        "headers": {
+          "X-Tapps-Project-Root": "/home/wtthornton/code/ralph-claude-code"
+        }
+      },
+      "nlt-setup": {
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:8762/mcp",
+        "headers": {
+          "X-Tapps-Project-Root": "/home/wtthornton/code/ralph-claude-code"
+        }
+      },
+      "nlt-linear-issues": {
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:8763/mcp",
+        "headers": {
+          "X-Tapps-Project-Root": "/home/wtthornton/code/ralph-claude-code"
+        }
+      },
+      "nlt-project-docs": {
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:8764/mcp",
+        "headers": {
+          "X-Tapps-Project-Root": "/home/wtthornton/code/ralph-claude-code"
+        }
+      },
+      "nlt-release-ship": {
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:8765/mcp",
+        "headers": {
+          "X-Tapps-Project-Root": "/home/wtthornton/code/ralph-claude-code"
+        }
       }
-    }
   }
 }
