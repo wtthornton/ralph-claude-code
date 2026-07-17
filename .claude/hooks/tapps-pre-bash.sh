@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
-# tapps-mcp-hook-version: 3.8.0
+# tapps-mcp-hook-version: 3.12.52
+# tapps-mcp-hook-content-sha: 0d76c000
 # TappsMCP PreToolUse hook (Bash) - destructive command guard (opt-in)
 # Blocks commands containing rm -rf, format c:, etc. Exit 2 = block, 0 = allow.
 INPUT=$(cat)
 PYBIN=$(command -v python3 2>/dev/null || command -v python 2>/dev/null)
+if [ -z "$PYBIN" ]; then
+  # TAP-1785: enforcement gate fails closed when python is unavailable.
+  ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+  mkdir -p "$ROOT/.tapps-mcp" 2>/dev/null
+  echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"hook\":\"tapps-pre-bash\",\"reason\":\"no_python\"}" \
+    >> "$ROOT/.tapps-mcp/.bypass-log.jsonl" 2>/dev/null
+  echo "TappsMCP: Blocked — no python interpreter available to evaluate destructive-command guard." >&2
+  exit 2
+fi
 CMD=$(echo "$INPUT" | "$PYBIN" -c "
 import sys, json
 try:

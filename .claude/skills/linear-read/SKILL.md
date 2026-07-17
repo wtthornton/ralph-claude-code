@@ -2,8 +2,8 @@
 name: linear-read
 user-invocable: true
 model: claude-haiku-4-5-20251001
-description: Read multi-issue Linear data via cache-first dance. MANDATORY for any list-style Linear read (triage, backlog review, "what's open", "find issues assigned to X"). Single-issue lookups go straight to get_issue. Routes through tapps_linear_snapshot_get/put before list_issues.
-allowed-tools: mcp__tapps-mcp__tapps_linear_snapshot_get mcp__tapps-mcp__tapps_linear_snapshot_put mcp__plugin_linear_linear__list_issues mcp__plugin_linear_linear__get_issue
+description: Read multi-issue Linear data via cache-first dance. MANDATORY for any list-style Linear read. Routes through tapps_linear_snapshot_get/put before list_issues. Use when listing, filtering, or reviewing Linear issues (backlog review, "what's open", triage, "find issues assigned to X"). Single-issue lookups go straight to get_issue instead.
+allowed-tools: mcp__nlt-linear-issues__tapps_linear_snapshot_get mcp__nlt-linear-issues__tapps_linear_snapshot_put mcp__nlt-linear-issues__tapps_linear_list_issues mcp__plugin_linear_linear__list_issues mcp__plugin_linear_linear__get_issue
 argument-hint: "[free-form query, e.g. 'open issues in TAP', 'backlog assigned to me']"
 ---
 
@@ -15,7 +15,9 @@ Multi-issue Linear reads are cache-first by contract (TAP-967 audit found 5,368 
 
 1. **`tapps_linear_snapshot_get(team, project, state, label?)` first.** Pass the same `state`, `label`, and `limit` you would pass to `list_issues`. State buckets the cache TTL (5 min for `open`/`unstarted`/`started`, 1 h for `completed`/`canceled`).
 2. **On `cached=true`**, use `data.issues` and filter in-memory for the rest of the user's question — `list_issues` is NOT called. Project the fields you need with a list comprehension; do not re-query.
-3. **On `cached=false`**, call `mcp__plugin_linear_linear__list_issues` with NARROW filters: `team`, `project`, `state`, `includeArchived=false`, and `limit: 100` as a sensible default. Never call without filters; never call with only `team` + `limit:250`. The 100-issue default covers almost every session-start summary on real projects; bump higher only when the caller really needs a wider window.
+3. **On `cached=false`**, call `mcp__nlt-linear-issues__tapps_linear_list_issues(team, project, state, label?, limit?)` as a gate check (TAP-2010 server-side defence-in-depth).
+   - On `ok=true`: proceed to call `mcp__plugin_linear_linear__list_issues` with NARROW filters: `team`, `project`, `state`, `includeArchived=false`. Never call without filters; never call with only `team` + `limit:250`.
+   - On `ok=false` (gate miss): follow the `hint` — call `tapps_linear_snapshot_get` first, then re-check.
 4. **Immediately after the miss-fetch**, populate the cache via `tapps_linear_snapshot_put(team, project, issues_json=json.dumps(issues), state, label?, limit?)` using the **same** key dimensions as the get call so the keys align.
 
 **The 6-poll kickoff antipattern (the single biggest source of TAP-967's call volume):**
@@ -43,21 +45,13 @@ Three sequential `list_issues({state: "backlog"})`, `({state: "unstarted"})`, `(
 - **Filter by assignee:** snapshot the team/state slice, filter `i["assignee"]["name"] == "X"` in memory.
 - **Recent activity:** if you need `updatedAt=-P7D`, do the snapshot first; if the cache is < 5 min old, the `updatedAt` filter is a memory-side comprehension.
 
-**After any Linear write** (from `linear-issue` or `linear-release-update` skills), call `mcp__tapps-mcp__tapps_linear_snapshot_invalidate(team, project)` so the next read returns fresh data. This skill itself does not write.
-
-**Dumped tool-results (when `list_issues` exceeds the MCP output ceiling):**
-
-The Claude CLI dumps any MCP tool-result over `MAX_MCP_OUTPUT_TOKENS` (default 25,000 tokens) to `tool-results/mcp-plugin_linear_linear-list_issues-*.txt` and returns a pointer instead of the data. The dumped file is then subject to a *separate* hardcoded 25k-token ceiling on the `Read` tool (the limit is in tokens, not lines — `Read`'s own `limit:` parameter is in *lines* and defaults to 2000). Naive `Read(file_path)` on a dump fails with `File content (N tokens) exceeds maximum allowed tokens (25000)` — twice in field traces (TAP-2248) before the agent self-corrects. To handle dumps:
-
-- **Best fix is upstream: raise `MAX_MCP_OUTPUT_TOKENS` in `.mcp.json`** for the Linear plugin (e.g. `"env": {"MAX_MCP_OUTPUT_TOKENS": "50000"}`, or `100000` for very large projects). This keeps the response inline and skips the dump-then-Read dance entirely. The 25k MCP-side default is conservative; values up to 100k are routinely safe and recommended in the field. Anthropic's per-tool override (`anthropic/maxResultSizeChars`, up to 500k chars, shipped in 2026) is the structural fix on the server side but is not retroactively applied to existing MCP servers.
-- **If the dump already happened**, prefer `Grep` over `Read` for ID-only extraction (`Grep 'TAP-\d+' file.txt`) — it skips the 25k token ceiling entirely. When you genuinely need to Read the JSON, pass a small line `limit:` (e.g. `Read(file_path, limit: 500)`) and page with `offset`. Note that Read adds ~70% overhead via line numbering (GitHub Issue #20223), so the effective token budget per Read is smaller than the file size suggests.
-- **Do not reach for `Bash(python3 -c '...')` to parse the file.** In tapps-mcp projects, `.claude/hooks/validate-command.sh` blocks inline Python (a security gate, not a Ralph constraint). If a Python script is unavoidable, follow the [python-introspection](../../../templates/skills/global/python-introspection/SKILL.md) skill's pattern: write to `/tmp/snippet.py`, then `python3 /tmp/snippet.py`.
+**After any Linear write** (from `linear-issue` or `linear-release-update` skills), call `mcp__nlt-linear-issues__tapps_linear_snapshot_invalidate(team, project)` so the next read returns fresh data. This skill itself does not write.
 
 **Anti-patterns — do not do these:**
 
 - Calling `list_issues` without a prior `snapshot_get` for the same key.
 - Calling `list_issues({})` or `list_issues({team: "TAP", limit: 250})` (the unfiltered scroll — TAP-967's worst offender).
-- Re-fetching the same narrow query 5–12 times in one assistant turn with no intervening writes (use the cache).
+- Re-fetching the same narrow query 5-12 times in one assistant turn with no intervening writes (use the cache).
 - Single-issue lookup via `list_issues` filtering — use `get_issue(id)` instead.
 
 **Linear plugin parameter cheatsheet** (the flat parameters cover almost every real query — there is no need for raw GraphQL filter shapes):
@@ -72,4 +66,4 @@ The Claude CLI dumps any MCP tool-result over `MAX_MCP_OUTPUT_TOKENS` (default 2
 - `updatedAt` / `createdAt` — ISO-8601 date or duration (`-P7D`)
 - `query` — full-text search across title and description
 - `includeArchived` — default `true`; pass `false` to skip archived
-- `limit` — Linear allows up to 250. The Claude CLI dumps any MCP tool-result over `MAX_MCP_OUTPUT_TOKENS` (default 25,000 tokens, ~30 issues with bodies) to a file that the agent then has to re-Read. **Default `limit: 100`** for narrow filters — covers most session-start summaries on real projects. To raise the inline ceiling, set `MAX_MCP_OUTPUT_TOKENS=50000` (or `100000`) in the Linear plugin's `.mcp.json` env block; that lets you ask for `limit: 200`+ without triggering the dump-then-Read dance.
+- `limit` — max 250

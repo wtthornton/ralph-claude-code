@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
-# tapps-mcp-hook-version: 3.8.0
+# tapps-mcp-hook-version: 3.12.52
+# tapps-mcp-hook-content-sha: 95ece7e6
 # TappsMCP PreToolUse hook — Linear write gate (TAP-981)
 # Blocks mcp__plugin_linear_linear__save_issue if no recent
 # docs_validate_linear_issue sentinel (within 30 minutes). Bypass with
 # TAPPS_LINEAR_SKIP_VALIDATE=1 (logged to .tapps-mcp/.bypass-log.jsonl).
 INPUT=$(cat)
 PYBIN=$(command -v python3 2>/dev/null || command -v python 2>/dev/null)
+if [ -z "$PYBIN" ]; then
+  # TAP-1785: enforcement gate fails closed when python is unavailable.
+  ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+  mkdir -p "$ROOT/.tapps-mcp" 2>/dev/null
+  echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"hook\":\"tapps-pre-linear-write\",\"reason\":\"no_python\"}" \
+    >> "$ROOT/.tapps-mcp/.bypass-log.jsonl" 2>/dev/null
+  echo "TappsMCP: Blocked Linear save_issue — no python interpreter available to evaluate the validation gate." >&2
+  exit 2
+fi
 PARSED=$(echo "$INPUT" | "$PYBIN" -c   "import sys,json
 try:
     d=json.load(sys.stdin)
@@ -43,6 +53,7 @@ ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
 SENTINEL="$ROOT/.tapps-mcp/.linear-validate-sentinel"
 if [ ! -f "$SENTINEL" ]; then
   cat >&2 <<'MSG'
+[TappsMCP refusal layer=hook-only/defense-in-depth] Primary gate is the docs_save_linear_issue server tool (TAP-2008 Agent Gateway). This hook is the fallback layer — it fired because the raw Linear plugin was called directly instead of through the wrapper.
 TappsMCP: Blocked mcp__plugin_linear_linear__save_issue — no recent docs_validate_linear_issue call.
 Route Linear writes through the `linear-issue` skill:
   1. docs_generate_story (or docs_generate_epic)
@@ -65,6 +76,7 @@ if [ "$AGE" -le 1800 ]; then
   exit 0
 fi
 cat >&2 <<MSG
+[TappsMCP refusal layer=hook-only/defense-in-depth] Primary gate is the docs_save_linear_issue server tool (TAP-2008 Agent Gateway). This hook is the fallback layer — it fired because the raw Linear plugin was called directly instead of through the wrapper.
 TappsMCP: Blocked mcp__plugin_linear_linear__save_issue — last docs_validate_linear_issue was ${AGE}s ago (> 1800s freshness window).
 Re-validate before push: docs_validate_linear_issue(title=..., description=..., ...)
 Or set TAPPS_LINEAR_SKIP_VALIDATE=1 for emergency bypass (logged).

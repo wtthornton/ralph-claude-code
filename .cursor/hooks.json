@@ -9,6 +9,21 @@
       {
         "command": ".cursor/hooks/tapps-after-edit.sh"
       }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/tapps-stop.sh"
+      }
+    ],
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/tapps-memory-auto-recall.sh"
+      }
+    ],
+    "preCompact": [
+      {
+        "command": ".cursor/hooks/tapps-memory-auto-recall.sh"
+      }
     ]
   },
   "version": 1
