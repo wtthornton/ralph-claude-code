@@ -13,3 +13,4 @@ thresholds:
   overall: 70
   security_floor: 50
 mcp_transport: http
+mcp_bundle: full
