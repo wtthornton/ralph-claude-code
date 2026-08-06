@@ -53,3 +53,41 @@ _TEMPLATE_PROMPT_FILE="${BATS_TEST_DIRNAME}/../../templates/PROMPT.md"
     grep -q 'STATUS: BLOCKED' "$_TEMPLATE_PROMPT_FILE"
     grep -q 'RALPH_BUSY_DIRS' "$_TEMPLATE_PROMPT_FILE"
 }
+
+# =============================================================================
+# TEST 4: TAP-2716 — audit-campaign label selection rules.
+# audit-fix is a single fix story (selectable); not-implementable / audit-digest
+# are finding bundles that must NEVER be auto-selected. The behavior lives in
+# skill + PROMPT prose only (OAuth-via-MCP selection has no bash seam), so these
+# content assertions are the deterministic guard against a future edit dropping
+# the rule. Extends the audit-readonly precedent.
+# =============================================================================
+
+@test "TAP-2716: ralph-workflow SKILL.md marks not-implementable / audit-digest non-selectable" {
+    [[ -f "$_TEMPLATE_SKILL_FILE" ]]
+    grep -q 'not-implementable' "$_TEMPLATE_SKILL_FILE"
+    grep -q 'audit-digest' "$_TEMPLATE_SKILL_FILE"
+    # The "never auto-select" rule must be present, not just the label name.
+    grep -qi 'Never auto-select' "$_TEMPLATE_SKILL_FILE"
+    # audit-fix must remain selectable.
+    grep -q 'audit-fix' "$_TEMPLATE_SKILL_FILE"
+}
+
+@test "TAP-2716: templates/PROMPT.md carries the audit-label selection note" {
+    [[ -f "$_TEMPLATE_PROMPT_FILE" ]]
+    grep -q 'audit-fix' "$_TEMPLATE_PROMPT_FILE"
+    grep -qi 'NEVER auto-select' "$_TEMPLATE_PROMPT_FILE"
+    grep -q 'not-implementable' "$_TEMPLATE_PROMPT_FILE"
+    grep -q 'audit-digest' "$_TEMPLATE_PROMPT_FILE"
+}
+
+@test "TAP-2716: ralph-workflow skill stays byte-identical across all three install copies" {
+    # The harness keeps templates/skills-local (source), .claude/skills, and
+    # .cursor/skills byte-identical; an audit-label edit to one must hit all.
+    local src="${BATS_TEST_DIRNAME}/../.."
+    local a="$src/templates/skills-local/ralph-workflow/SKILL.md"
+    local b="$src/.claude/skills/ralph-workflow/SKILL.md"
+    local c="$src/.cursor/skills/ralph-workflow/SKILL.md"
+    diff -q "$a" "$b" || fail "templates/skills-local and .claude/skills diverged"
+    diff -q "$a" "$c" || fail "templates/skills-local and .cursor/skills diverged"
+}

@@ -108,6 +108,11 @@ project code. Deleting them halts the loop.
    this mode. The full per-loop workflow lives in the **ralph-workflow**
    skill (linear-mode contract).
 
+   **Audit labels:** `audit-fix` tickets are selectable like any story.
+   NEVER auto-select `not-implementable` or `audit-digest` tickets —
+   they bundle many findings and aren't a single task. (`audit-readonly`
+   sessions remain handled by the read-only audit flow.)
+
    **Operator note:** at high/medium engagement the harness only **warns**
    on a missed cache (logged to `.tapps-mcp/.cache-gate-violations.jsonl`);
    set `linear_enforce_cache_gate: "block"` in `.tapps-mcp.yaml` to hard-

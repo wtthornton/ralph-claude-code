@@ -50,6 +50,19 @@ Ralph reads tasks from one of two backends, set by `RALPH_TASK_SOURCE` in
   satisfied). The full state-machine spec lives in
   `docs/LINEAR-WORKFLOW.md`; the must-know rules are inline below.
 
+  **Audit-campaign labels (TAP-2716 family)** — when picking the next
+  ticket, honor these labels (each also detectable via a
+  `<!-- ralph: <label> -->` body marker in the first 500 chars, same
+  belt-and-suspenders as `audit-readonly`):
+
+  - `audit-fix` — a single coherent fix story emitted by
+    `tapps_finding_to_story`. **Selectable** like any normal story.
+  - `not-implementable` / `audit-digest` — a bundle of many findings,
+    not one task. **Never auto-select** these. Skip and move on; if one
+    is the only candidate, treat the queue as having no actionable work.
+  - `audit-readonly` — read-only audit session, R1-exempt. Already
+    handled below; still excluded from the fix loop.
+
   **Hard rules (linear mode) — these are not optional**:
 
   - **R0 — Branch first, never commit on `main`.** Before the first
