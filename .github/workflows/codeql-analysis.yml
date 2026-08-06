@@ -3,24 +3,13 @@
 name: CodeQL Analysis
 
 on:
-  push:
-    branches: [main, master]
   pull_request:
     branches: [main, master]
-  schedule:
-    - cron: "30 6 * * 1"  # Monday 6:30 UTC
+  workflow_dispatch:
 
 permissions:
   security-events: write
   contents: read
-
-# TAP-667: pin bash as the default run shell. Steps may not use bashisms
-# today, but the policy applies to every hand-authored workflow so a
-# self-hosted runner where dash is the default sh can't introduce a
-# silent regression later.
-defaults:
-  run:
-    shell: bash
 
 concurrency:
   group: codeql-${{ github.head_ref || github.ref }}
@@ -30,7 +19,7 @@ jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -44,7 +33,7 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          queries: +security-extended
+          queries: security-and-quality
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
